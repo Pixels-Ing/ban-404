@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="1.0.0"
+BAN404_VERSION="1.1.0"
 
 # Configuration (valeurs par defaut ; surchargees par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -25,12 +25,14 @@ SHOW_BLOCKED=false
 VERBOSE=false
 
 show_help() {
+    echo "ban_404.sh version $BAN404_VERSION"
     echo "Usage: $0 [OPTIONS]"
     echo ""
     echo "Options disponibles :"
     echo "  --dry-run        Simuler les actions (mode lecture seule)."
     echo "  --show-blocked   Afficher aussi les IPs deja dans l'ipset."
     echo "  --verbose        Afficher le detail de la recherche des logs."
+    echo "  --version        Afficher la version et quitter."
     echo "  --help, -h       Afficher ce message d'aide."
     exit 0
 }
@@ -40,6 +42,7 @@ while [[ $# -gt 0 ]]; do
         --dry-run) DRY_RUN=true; shift ;;
         --show-blocked) SHOW_BLOCKED=true; shift ;;
         --verbose) VERBOSE=true; shift ;;
+        --version) echo "ban_404.sh version $BAN404_VERSION"; exit 0 ;;
         --help|-h) show_help ;;
         *) echo "Option inconnue : $1. Utilisez --help."; exit 1 ;;
     esac

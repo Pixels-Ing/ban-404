@@ -5,8 +5,8 @@
 # Installation : copier en /etc/ban_404.conf (chmod 600) et adapter.
 
 # URL "raw" du depot (sans slash final), utilisee par le self-updater.
-# Exemple : https://raw.githubusercontent.com/PixelsIng/ban-404/main
-REPO_RAW="https://raw.githubusercontent.com/PixelsIng/ban-404/main"
+# Exemple : https://raw.githubusercontent.com/Pixels-Ing/ban-404/main
+REPO_RAW="https://raw.githubusercontent.com/Pixels-Ing/ban-404/main"
 
 # IPs a ne JAMAIS bannir (separees par | ), correspondance exacte.
 WHITELIST_IP="127.0.0.1"

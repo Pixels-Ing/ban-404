@@ -25,14 +25,14 @@ La **config par serveur** (whitelist, `REPO_RAW`, réglages) vit dans
 
 1. Pousser ces fichiers dans un dépôt GitHub `ban-404`.
 2. Dans `install_ban_404.sh`, éditer la variable `REPO_RAW` avec l'URL *raw* du
-   dépôt, par ex. `https://raw.githubusercontent.com/PixelsIng/ban-404/main`.
+   dépôt, par ex. `https://raw.githubusercontent.com/Pixels-Ing/ban-404/main`.
    Commit + push.
 
 ## Installation d'un serveur
 
 ```bash
 # Récupérer puis lancer (on ne fait pas « curl | bash » : on télécharge, on lit, on exécute)
-curl -fsSL https://raw.githubusercontent.com/PixelsIng/ban-404/main/install_ban_404.sh -o /tmp/install_ban_404.sh
+curl -fsSL https://raw.githubusercontent.com/Pixels-Ing/ban-404/main/install_ban_404.sh -o /tmp/install_ban_404.sh
 sudo bash /tmp/install_ban_404.sh
 
 # Adapter la whitelist de CE serveur

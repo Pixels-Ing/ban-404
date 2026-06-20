@@ -6,7 +6,7 @@
 # a la conf si elle est absente (langue heritee du shell/systeme, sinon en).
 set -u
 
-UPDATER_VERSION="1.0.0"
+UPDATER_VERSION="1.1.0"
 CONF_FILE="/etc/ban_404.conf"
 TARGET="/usr/local/sbin/ban_404.sh"
 SELF="/usr/local/sbin/update_ban_404.sh"
@@ -117,6 +117,12 @@ T_DE[upd.updated]="%s aktualisiert."
 T_ES[upd.updated]="%s actualizado."
 T_IT[upd.updated]="%s aggiornato."
 
+T_EN[upd.repo_migrated]="REPO_RAW migrated to %s (PixelsIng -> Pixels-Ing)."
+T_FR[upd.repo_migrated]="REPO_RAW migré vers %s (PixelsIng -> Pixels-Ing)."
+T_DE[upd.repo_migrated]="REPO_RAW migriert zu %s (PixelsIng -> Pixels-Ing)."
+T_ES[upd.repo_migrated]="REPO_RAW migrado a %s (PixelsIng -> Pixels-Ing)."
+T_IT[upd.repo_migrated]="REPO_RAW migrato a %s (PixelsIng -> Pixels-Ing)."
+
 # Detection de la langue : locale du shell (ou /etc/default/locale en repli pour cron).
 detect_lang() {
     local l="${LC_ALL:-${LC_MESSAGES:-${LANG:-}}}"
@@ -168,6 +174,22 @@ done
 
 : "${REPO_RAW:=}"
 [ -z "$REPO_RAW" ] && { log "$(t upd.repo_undef "$CONF_FILE")"; exit 0; }
+
+# --- Migration conf : transfert du depot PixelsIng -> Pixels-Ing (reecrit REPO_RAW) ---
+# One-shot : retirable une fois le parc migre (le case ne re-matche pas apres coup).
+case "$REPO_RAW" in
+    */PixelsIng/*)
+        _new=$(printf '%s' "$REPO_RAW" | sed 's#/PixelsIng/#/Pixels-Ing/#')
+        if [ -f "$CONF_FILE" ] && grep -q '^REPO_RAW=' "$CONF_FILE"; then
+            _tmp=$(mktemp) || _tmp=""
+            if [ -n "$_tmp" ] && sed "s#^REPO_RAW=.*#REPO_RAW=\"$_new\"#" "$CONF_FILE" > "$_tmp" && cat "$_tmp" > "$CONF_FILE"; then
+                log "$(t upd.repo_migrated "$_new")"
+            fi
+            [ -n "$_tmp" ] && rm -f "$_tmp"
+        fi
+        REPO_RAW="$_new"
+        ;;
+esac
 
 # --- Migration conf : ajoute BAN404_LANG s'il manque (idempotent) ---
 if [ -f "$CONF_FILE" ] && ! grep -q '^BAN404_LANG=' "$CONF_FILE"; then

@@ -31,11 +31,11 @@ echo "== synchro heredoc UPD_EOF <-> update_ban_404.sh =="
 extract_updeof() {
     awk '/^cat > "\$UPDATER_PATH" <<.UPD_EOF.$/{f=1;next} /^UPD_EOF$/{f=0} f' install_ban_404.sh
 }
-if diff <(extract_updeof) update_ban_404.sh >/dev/null; then
+if diff --strip-trailing-cr <(extract_updeof) update_ban_404.sh >/dev/null; then
     echo "  OK  identiques"
 else
     echo "  KO  le heredoc UPD_EOF diverge de update_ban_404.sh :"
-    diff <(extract_updeof) update_ban_404.sh
+    diff --strip-trailing-cr <(extract_updeof) update_ban_404.sh
     fail=1
 fi
 

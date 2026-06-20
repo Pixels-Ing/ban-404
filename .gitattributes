@@ -1,0 +1,4 @@
+# Fins de ligne : LF partout. Les scripts sont deployes sur Linux ; on evite que
+# core.autocrlf (Windows) ne mette du CRLF dans le working tree (ce qui casserait
+# le shebang sur la cible et faisait diverger le garde-fou check.sh).
+* text=auto eol=lf

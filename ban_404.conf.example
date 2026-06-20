@@ -23,6 +23,16 @@ BAN404_LANG="en"
 #BAN_THRESHOLD=10     # ban si le score depasse ce seuil dans la fenetre
 #HONEYPOT_SCORE=100   # score par hit honeypot (>= ce score => ban immediat)
 
+# --- Whitelist CIDR / sous-reseaux a ne JAMAIS bannir (separes par | ) ---
+#WHITELIST_CIDR="10.0.0.0/8|192.168.0.0/16"
+
+# --- Notifications (vides => desactivees ; messages dans la langue BAN404_LANG) ---
+#WEBHOOK_URL=""        # POST JSON des nouveaux bans (Slack/Discord/Teams/n8n...)
+#NOTIFY_EMAIL=""       # e-mail des nouveaux bans (necessite un MTA : mail/sendmail)
+#NOTIFY_FROM=""        # expediteur e-mail (optionnel)
+#NOTIFY_MIN_BANS=1     # ne notifier que si AU MOINS N nouveaux bans dans le run
+#DAILY_SUMMARY=false   # resume quotidien (opt-in) ; envoye par cron.daily si =true ET canal configure
+
 # --- Motifs de detection (regex awk) — AVANCE : ne surcharger qu'en connaissance de cause ---
 #HONEYPOT_PATTERN='\.env|wp-config\.php|phpmyadmin|config\.json|setup\.php|actuator|xmlrpc\.php'
 #NOISE_PATTERN='\.(jpg|jpeg|png|gif|webp|ico|css|js|svg|woff2?|map)$|apple-touch-icon|favicon|browserconfig\.xml|mstile|autodiscover\.xml|sitemap\.xml|robots\.txt|ads\.txt|\.well-known/(security\.txt|pki-validation)'

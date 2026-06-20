@@ -20,6 +20,7 @@ LOGROTATE_PATH="/etc/logrotate.d/ban_404"
 UPDATER_PATH="/usr/local/sbin/update_ban_404.sh"
 CONF_PATH="/etc/ban_404.conf"
 UPDATE_CRON="/etc/cron.daily/ban_404_update"
+SUMMARY_CRON="/etc/cron.daily/ban_404_summary"
 
 # >>> A EDITER UNE FOIS avant distribution : URL "raw" de ton depot (sans slash final) <<<
 REPO_RAW="https://raw.githubusercontent.com/PixelsIng/ban-404/main"
@@ -152,6 +153,12 @@ T_FR[inst.selfupdater]="==> Self-updater : %s (+ %s)"
 T_DE[inst.selfupdater]="==> Self-Updater: %s (+ %s)"
 T_ES[inst.selfupdater]="==> Auto-actualizador: %s (+ %s)"
 T_IT[inst.selfupdater]="==> Self-updater: %s (+ %s)"
+
+T_EN[inst.summary_cron]="==> Daily summary cron: %s (opt-in via DAILY_SUMMARY)"
+T_FR[inst.summary_cron]="==> Cron de résumé quotidien : %s (opt-in via DAILY_SUMMARY)"
+T_DE[inst.summary_cron]="==> Cron für tägliche Zusammenfassung: %s (opt-in über DAILY_SUMMARY)"
+T_ES[inst.summary_cron]="==> Cron de resumen diario: %s (opt-in vía DAILY_SUMMARY)"
+T_IT[inst.summary_cron]="==> Cron del riepilogo giornaliero: %s (opt-in tramite DAILY_SUMMARY)"
 
 T_EN[inst.fetch_engine]="==> Initial fetch of the engine via the updater: %s"
 T_FR[inst.fetch_engine]="==> Recuperation initiale du moteur via l'updater : %s"
@@ -356,6 +363,13 @@ BAN404_LANG="$BAN404_LANG"
 #TAIL_LINES=50000
 #BAN_THRESHOLD=10
 #HONEYPOT_SCORE=100
+#WHITELIST_CIDR="10.0.0.0/8|192.168.0.0/16"
+# Notifications (vides => desactivees ; messages dans la langue BAN404_LANG)
+#WEBHOOK_URL=""
+#NOTIFY_EMAIL=""
+#NOTIFY_FROM=""
+#NOTIFY_MIN_BANS=1
+#DAILY_SUMMARY=false
 EOF
     chmod 600 "$CONF_PATH"
     t inst.conf_created
@@ -613,6 +627,14 @@ cat > "$UPDATE_CRON" <<EOF
 exec $UPDATER_PATH
 EOF
 chmod 755 "$UPDATE_CRON"
+
+# Cron de resume quotidien (no-op tant que DAILY_SUMMARY != true et aucun canal configure).
+t inst.summary_cron "$SUMMARY_CRON"
+cat > "$SUMMARY_CRON" <<EOF
+#!/bin/sh
+exec $SCRIPT_PATH --summary
+EOF
+chmod 755 "$SUMMARY_CRON"
 
 # Recuperation initiale du moteur : on delegue a l'updater (source unique de verite).
 t inst.fetch_engine "$SCRIPT_PATH"

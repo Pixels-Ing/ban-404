@@ -6,7 +6,8 @@ Détection sur fenêtre glissante, honeypots (`.env`, `wp-config.php`…),
 exclusion du bruit (assets, favicon, robots.txt…), crawlers légitimes épargnés
 par **FCrDNS** (reverse DNS confirmé). Persistance au reboot via
 `ipset-persistent`. Mise à jour centralisée par auto-pull (`cron.daily`).
-Messages **multilingues** (en, fr, de, es, it).
+Messages **multilingues** (en, fr, de, es, it). Whitelist exacte **et CIDR**,
+**notifications** optionnelles (webhook / e-mail) sur ban.
 
 ## Contenu du dépôt
 
@@ -72,11 +73,25 @@ sudo /usr/local/sbin/update_ban_404.sh
 | `TAIL_LINES`      | `50000`     | Lignes analysées par log (borne le coût sur gros sites). |
 | `BAN_THRESHOLD`   | `10`        | Ban si le score dépasse ce seuil dans la fenêtre. |
 | `HONEYPOT_SCORE`  | `100`       | Score ajouté par hit honeypot (≥ ce score ⇒ ban immédiat). |
+| `WHITELIST_CIDR`  | (vide)      | Sous-réseaux jamais bannis (CIDR séparés par `\|`, ex. `10.0.0.0/8`). |
+| `WEBHOOK_URL`     | (vide)      | Si défini : POST JSON des nouveaux bans (Slack/Discord/Teams/n8n…). |
+| `NOTIFY_EMAIL`    | (vide)      | Si défini : e-mail des nouveaux bans (nécessite un MTA `mail`/`sendmail`). |
+| `NOTIFY_MIN_BANS` | `1`         | Ne notifier que si ≥ N nouveaux bans dans l'exécution. |
+| `DAILY_SUMMARY`   | `false`     | Résumé quotidien (opt-in) envoyé via le canal configuré (`cron.daily`). |
 | `REPO_RAW`        | —           | URL *raw* du dépôt (utilisée par le self-updater). |
 
-Réglages avancés (regex `awk`, à ne surcharger qu'en connaissance de cause) :
-`HONEYPOT_PATTERN` (motifs honeypot) et `NOISE_PATTERN` (bruit ignoré). Voir
-`ban_404.conf.example`.
+Les notifications sont émises **dans la langue** `BAN404_LANG`. Réglages avancés
+(regex `awk`, à ne surcharger qu'en connaissance de cause) : `HONEYPOT_PATTERN`
+(motifs honeypot) et `NOISE_PATTERN` (bruit ignoré). Voir `ban_404.conf.example`.
+
+## Commandes utiles
+
+```bash
+sudo /usr/local/sbin/ban_404.sh --list      # IP actuellement bannies (+ timeout)
+sudo /usr/local/sbin/ban_404.sh --stats     # statistiques (bannies, bans/débans 24h, top IP)
+sudo /usr/local/sbin/ban_404.sh --lang de   # changer la langue des messages
+sudo /usr/local/sbin/ban_404.sh --summary   # envoyer le résumé quotidien (si activé)
+```
 
 ## Prérequis
 

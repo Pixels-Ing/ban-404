@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="1.2.0"
+BAN404_VERSION="1.3.0"
 
 # Configuration (valeurs par defaut ; surchargees par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -11,6 +11,7 @@ WINDOW=7200          # Fenetre glissante en secondes (2h). Cron horaire => recou
 TAIL_LINES=50000     # On n'analyse que les N dernieres lignes de chaque log (borne le cout sur gros sites).
                      # A augmenter si un site depasse TAIL_LINES requetes dans la fenetre WINDOW.
 LOCK_FILE="/run/ban_404_list.lock"
+LOG_FILE="/var/log/ban_404.log"   # journal (ecrit par le wrapper cron) ; lu par --stats/--summary
 
 # Seuils & motifs de detection (surchargables par la conf)
 BAN_THRESHOLD=10     # Ban si le score depasse ce seuil dans la fenetre.
@@ -20,6 +21,16 @@ NOISE_PATTERN='\.(jpg|jpeg|png|gif|webp|ico|css|js|svg|woff2?|map)$|apple-touch-
 
 # Whitelist des IPs a ne JAMAIS bannir (separees par | ) -- correspondance EXACTE
 WHITELIST_IP="127.0.0.1"
+
+# Whitelist CIDR / sous-reseaux a ne JAMAIS bannir (separes par | ), ex: "10.0.0.0/8|192.168.0.0/16"
+WHITELIST_CIDR=""
+
+# Notifications (optionnel ; vides => desactivees). Messages dans la langue BAN404_LANG.
+WEBHOOK_URL=""        # POST JSON des nouveaux bans (Slack/Discord/Teams/n8n...)
+NOTIFY_EMAIL=""       # e-mail des nouveaux bans (necessite un MTA : mail/sendmail)
+NOTIFY_FROM=""        # expediteur e-mail (optionnel)
+NOTIFY_MIN_BANS=1     # ne notifier que si AU MOINS N nouveaux bans dans le run
+DAILY_SUMMARY=false   # resume quotidien (opt-in) : --summary n'envoie que si =true ET canal configure
 
 # ============================================================================
 #  i18n — messages multilingues (en, fr, de, es, it). Le code/les commentaires
@@ -251,6 +262,132 @@ T_DE[verbose.no_change]="=> Keine Änderung im ipset erforderlich."
 T_ES[verbose.no_change]="=> No se requiere ningún cambio en el ipset."
 T_IT[verbose.no_change]="=> Nessuna modifica richiesta nell'ipset."
 
+T_EN[help.list]="  --list           List currently banned IPs (with remaining timeout)."
+T_FR[help.list]="  --list           Lister les IP actuellement bannies (avec timeout restant)."
+T_DE[help.list]="  --list           Aktuell gesperrte IPs auflisten (mit verbleibendem Timeout)."
+T_ES[help.list]="  --list           Listar las IP actualmente bloqueadas (con timeout restante)."
+T_IT[help.list]="  --list           Elencare gli IP attualmente bloccati (con timeout residuo)."
+
+T_EN[help.stats]="  --stats          Show ban statistics."
+T_FR[help.stats]="  --stats          Afficher les statistiques de ban."
+T_DE[help.stats]="  --stats          Sperr-Statistiken anzeigen."
+T_ES[help.stats]="  --stats          Mostrar las estadísticas de bloqueo."
+T_IT[help.stats]="  --stats          Mostrare le statistiche di blocco."
+
+T_EN[help.summary]="  --summary        Send the daily summary via the configured channel (opt-in)."
+T_FR[help.summary]="  --summary        Envoyer le résumé quotidien via le canal configuré (opt-in)."
+T_DE[help.summary]="  --summary        Tägliche Zusammenfassung über den konfigurierten Kanal senden (opt-in)."
+T_ES[help.summary]="  --summary        Enviar el resumen diario por el canal configurado (opt-in)."
+T_IT[help.summary]="  --summary        Inviare il riepilogo giornaliero tramite il canale configurato (opt-in)."
+
+T_EN[list.header]="Currently banned IPs (ipset %s):"
+T_FR[list.header]="IP actuellement bannies (ipset %s) :"
+T_DE[list.header]="Aktuell gesperrte IPs (ipset %s):"
+T_ES[list.header]="IP actualmente bloqueadas (ipset %s):"
+T_IT[list.header]="IP attualmente bloccati (ipset %s):"
+
+T_EN[list.empty]="No IP currently banned."
+T_FR[list.empty]="Aucune IP actuellement bannie."
+T_DE[list.empty]="Derzeit keine IP gesperrt."
+T_ES[list.empty]="Ninguna IP bloqueada actualmente."
+T_IT[list.empty]="Nessun IP attualmente bloccato."
+
+T_EN[list.item]="  %s  (timeout: %s s)"
+T_FR[list.item]="  %s  (timeout : %s s)"
+T_DE[list.item]="  %s  (Timeout: %s s)"
+T_ES[list.item]="  %s  (timeout: %s s)"
+T_IT[list.item]="  %s  (timeout: %s s)"
+
+T_EN[stats.header]="=[ ban-404 statistics ]="
+T_FR[stats.header]="=[ Statistiques ban-404 ]="
+T_DE[stats.header]="=[ ban-404-Statistiken ]="
+T_ES[stats.header]="=[ Estadísticas ban-404 ]="
+T_IT[stats.header]="=[ Statistiche ban-404 ]="
+
+T_EN[stats.banned_now]="Currently banned: %s IP(s)"
+T_FR[stats.banned_now]="Actuellement bannies : %s IP"
+T_DE[stats.banned_now]="Aktuell gesperrt: %s IP(s)"
+T_ES[stats.banned_now]="Actualmente bloqueadas: %s IP"
+T_IT[stats.banned_now]="Attualmente bloccati: %s IP"
+
+T_EN[stats.last24_bans]="Bans in the last 24h: %s"
+T_FR[stats.last24_bans]="Bans sur les dernières 24h : %s"
+T_DE[stats.last24_bans]="Sperren in den letzten 24h: %s"
+T_ES[stats.last24_bans]="Bloqueos en las últimas 24h: %s"
+T_IT[stats.last24_bans]="Blocchi nelle ultime 24h: %s"
+
+T_EN[stats.last24_unbans]="Unbans in the last 24h: %s"
+T_FR[stats.last24_unbans]="Débans sur les dernières 24h : %s"
+T_DE[stats.last24_unbans]="Entsperrungen in den letzten 24h: %s"
+T_ES[stats.last24_unbans]="Desbloqueos en las últimas 24h: %s"
+T_IT[stats.last24_unbans]="Sblocchi nelle ultime 24h: %s"
+
+T_EN[stats.top_header]="Top offending IPs (last 24h):"
+T_FR[stats.top_header]="Top des IP fautives (24h) :"
+T_DE[stats.top_header]="Top der auffälligen IPs (24h):"
+T_ES[stats.top_header]="Top de IP infractoras (24h):"
+T_IT[stats.top_header]="Top degli IP colpevoli (24h):"
+
+T_EN[stats.top_item]="  %s  (%s event(s))"
+T_FR[stats.top_item]="  %s  (%s événement(s))"
+T_DE[stats.top_item]="  %s  (%s Ereignis(se))"
+T_ES[stats.top_item]="  %s  (%s evento(s))"
+T_IT[stats.top_item]="  %s  (%s evento/i)"
+
+T_EN[cidr.unban]="[-] Unbanning IP (whitelisted CIDR): %s (score %s)"
+T_FR[cidr.unban]="[-] Déblocage de l'IP (CIDR en liste blanche) : %s (score %s)"
+T_DE[cidr.unban]="[-] Entsperrung der IP (CIDR auf Whitelist): %s (Score %s)"
+T_ES[cidr.unban]="[-] Desbloqueo de la IP (CIDR en lista blanca): %s (puntuación %s)"
+T_IT[cidr.unban]="[-] Sblocco dell'IP (CIDR in whitelist): %s (punteggio %s)"
+
+T_EN[cidr.sim_unban]="[SIMULATION] [-] IP %s would be UNBANNED (whitelisted CIDR)."
+T_FR[cidr.sim_unban]="[SIMULATION] [-] L'IP %s aurait été DÉBANNIE (CIDR en liste blanche)."
+T_DE[cidr.sim_unban]="[SIMULATION] [-] IP %s würde ENTSPERRT (CIDR auf Whitelist)."
+T_ES[cidr.sim_unban]="[SIMULATION] [-] La IP %s sería DESBLOQUEADA (CIDR en lista blanca)."
+T_IT[cidr.sim_unban]="[SIMULATION] [-] L'IP %s verrebbe SBLOCCATO (CIDR in whitelist)."
+
+T_EN[cidr.skip]="[SKIP] Whitelisted CIDR, not blocked: %s"
+T_FR[cidr.skip]="[SKIP] CIDR en liste blanche, non bloqué : %s"
+T_DE[cidr.skip]="[SKIP] CIDR auf Whitelist, nicht gesperrt: %s"
+T_ES[cidr.skip]="[SKIP] CIDR en lista blanca, no bloqueado: %s"
+T_IT[cidr.skip]="[SKIP] CIDR in whitelist, non bloccato: %s"
+
+T_EN[notify.subject]="ban-404 [%s]: %s new IP(s) banned"
+T_FR[notify.subject]="ban-404 [%s] : %s nouvelle(s) IP bannie(s)"
+T_DE[notify.subject]="ban-404 [%s]: %s neue IP(s) gesperrt"
+T_ES[notify.subject]="ban-404 [%s]: %s nueva(s) IP bloqueada(s)"
+T_IT[notify.subject]="ban-404 [%s]: %s nuovo/i IP bloccato/i"
+
+T_EN[notify.body_header]="%s new IP(s) banned on %s:"
+T_FR[notify.body_header]="%s nouvelle(s) IP bannie(s) sur %s :"
+T_DE[notify.body_header]="%s neue IP(s) auf %s gesperrt:"
+T_ES[notify.body_header]="%s nueva(s) IP bloqueada(s) en %s:"
+T_IT[notify.body_header]="%s nuovo/i IP bloccato/i su %s:"
+
+T_EN[notify.item]="  %s — score %s (404 flood)"
+T_FR[notify.item]="  %s — score %s (flood 404)"
+T_DE[notify.item]="  %s — Score %s (404-Flut)"
+T_ES[notify.item]="  %s — puntuación %s (flood 404)"
+T_IT[notify.item]="  %s — punteggio %s (flood 404)"
+
+T_EN[notify.item_hp]="  %s — score %s (honeypot)"
+T_FR[notify.item_hp]="  %s — score %s (honeypot)"
+T_DE[notify.item_hp]="  %s — Score %s (Honeypot)"
+T_ES[notify.item_hp]="  %s — puntuación %s (honeypot)"
+T_IT[notify.item_hp]="  %s — punteggio %s (honeypot)"
+
+T_EN[notify.no_mta]="NOTIFY_EMAIL set but no MTA (mail/sendmail) found — email skipped."
+T_FR[notify.no_mta]="NOTIFY_EMAIL défini mais aucun MTA (mail/sendmail) trouvé — e-mail ignoré."
+T_DE[notify.no_mta]="NOTIFY_EMAIL gesetzt, aber kein MTA (mail/sendmail) gefunden — E-Mail übersprungen."
+T_ES[notify.no_mta]="NOTIFY_EMAIL definido pero no se encontró ningún MTA (mail/sendmail) — correo omitido."
+T_IT[notify.no_mta]="NOTIFY_EMAIL definito ma nessun MTA (mail/sendmail) trovato — e-mail ignorata."
+
+T_EN[summary.subject]="ban-404 [%s]: daily summary"
+T_FR[summary.subject]="ban-404 [%s] : résumé quotidien"
+T_DE[summary.subject]="ban-404 [%s]: tägliche Zusammenfassung"
+T_ES[summary.subject]="ban-404 [%s]: resumen diario"
+T_IT[summary.subject]="ban-404 [%s]: riepilogo giornaliero"
+
 # Detection de la langue : locale du shell (ou /etc/default/locale en repli pour
 # le contexte cron), code 2 lettres retenu s'il fait partie des langues gerees.
 detect_lang() {
@@ -298,6 +435,9 @@ show_help() {
     t help.dryrun
     t help.showblocked
     t help.verbose
+    t help.list
+    t help.stats
+    t help.summary
     t help.lang
     t help.version
     t help.help
@@ -336,6 +476,113 @@ change_lang() {
     exit 0
 }
 
+# ---------- Whitelist CIDR (IPv4) ----------
+ip2int() { local a b c d; IFS=. read -r a b c d <<< "$1"; printf '%s' "$(( (a<<24)+(b<<16)+(c<<8)+d ))"; }
+ip_in_cidr() {  # $1=ip  $2=cidr (a.b.c.d ou a.b.c.d/n)
+    local ip="$1" cidr="$2" net bits ipi neti mask
+    net="${cidr%/*}"; bits="${cidr#*/}"
+    [ "$cidr" = "$net" ] && bits=32
+    case "$ip$net" in *[!0-9.]*) return 1 ;; esac   # IPv4 uniquement
+    ipi=$(ip2int "$ip"); neti=$(ip2int "$net")
+    [ "$bits" -eq 0 ] && return 0
+    mask=$(( (0xFFFFFFFF << (32 - bits)) & 0xFFFFFFFF ))
+    [ $(( ipi & mask )) -eq $(( neti & mask )) ]
+}
+in_whitelist_cidr() {  # $1=ip
+    [ -z "$WHITELIST_CIDR" ] && return 1
+    local ip="$1" c IFS='|'
+    for c in $WHITELIST_CIDR; do
+        [ -n "$c" ] && ip_in_cidr "$ip" "$c" && return 0
+    done
+    return 1
+}
+
+# ---------- Notifications (langue = BAN404_LANG) ----------
+json_escape() {
+    local s="$1"
+    s="${s//\\/\\\\}"; s="${s//\"/\\\"}"; s="${s//$'\n'/\\n}"; s="${s//$'\t'/\\t}"
+    printf '%s' "$s"
+}
+send_webhook() {  # $1 = texte complet
+    [ -z "$WEBHOOK_URL" ] && return 0
+    command -v curl >/dev/null 2>&1 || return 0
+    local esc; esc=$(json_escape "$1")
+    curl -fsS -m 15 -H 'Content-Type: application/json' \
+         -X POST -d "{\"text\":\"$esc\",\"content\":\"$esc\"}" "$WEBHOOK_URL" >/dev/null 2>&1 || true
+}
+send_email() {  # $1 = sujet, $2 = corps
+    [ -z "$NOTIFY_EMAIL" ] && return 0
+    if command -v mail >/dev/null 2>&1; then
+        if [ -n "$NOTIFY_FROM" ]; then printf '%s\n' "$2" | mail -s "$1" -r "$NOTIFY_FROM" "$NOTIFY_EMAIL" 2>/dev/null || true
+        else printf '%s\n' "$2" | mail -s "$1" "$NOTIFY_EMAIL" 2>/dev/null || true; fi
+    elif command -v sendmail >/dev/null 2>&1; then
+        { printf 'To: %s\n' "$NOTIFY_EMAIL"; [ -n "$NOTIFY_FROM" ] && printf 'From: %s\n' "$NOTIFY_FROM"
+          printf 'Subject: %s\n\n%s\n' "$1" "$2"; } | sendmail -t 2>/dev/null || true
+    else
+        t notify.no_mta >&2
+    fi
+}
+notify() {  # $1 = sujet, $2 = corps
+    send_webhook "$1"$'\n'"$2"
+    send_email "$1" "$2"
+}
+maybe_notify_new_bans() {
+    [ -z "$WEBHOOK_URL" ] && [ -z "$NOTIFY_EMAIL" ] && return 0
+    local host n subj body line ip sc hp
+    host=$(hostname 2>/dev/null || echo '?')
+    n=${#new_bans[@]}
+    subj=$(t notify.subject "$host" "$n")
+    body=$(t notify.body_header "$n" "$host")
+    for line in "${new_bans[@]}"; do
+        IFS='|' read -r ip sc hp <<< "$line"
+        if [ "$hp" = "1" ]; then body="$body"$'\n'"$(t notify.item_hp "$ip" "$sc")"
+        else body="$body"$'\n'"$(t notify.item "$ip" "$sc")"; fi
+    done
+    notify "$subj" "$body"
+}
+
+# ---------- --list / --stats / --summary ----------
+build_stats_text() {
+    local banned bans unbans cutoff24 top cnt ip
+    banned=$(ipset list "$IPSET_NAME" 2>/dev/null | awk '/^Members:/{m=1;next} m&&NF{c++} END{print c+0}')
+    cutoff24=$(date -d '24 hours ago' '+%Y-%m-%d %H:%M:%S' 2>/dev/null)
+    bans=0; unbans=0
+    if [ -r "$LOG_FILE" ] && [ -n "$cutoff24" ]; then
+        bans=$(awk -v c="$cutoff24" '($1" "$2) >= c && /\[\+\]/' "$LOG_FILE" | wc -l)
+        unbans=$(awk -v c="$cutoff24" '($1" "$2) >= c && /\[-\]/' "$LOG_FILE" | wc -l)
+    fi
+    t stats.header
+    t stats.banned_now "$banned"
+    t stats.last24_bans "$bans"
+    t stats.last24_unbans "$unbans"
+    if [ -r "$LOG_FILE" ] && [ -n "$cutoff24" ]; then
+        top=$(awk -v c="$cutoff24" '($1" "$2) >= c && (/\[\+\]/||/\[-\]/){
+            for(i=1;i<=NF;i++) if($i ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/){print $i; break}
+        }' "$LOG_FILE" | sort | uniq -c | sort -rn | head -n 10)
+        if [ -n "$top" ]; then
+            t stats.top_header
+            while read -r cnt ip; do [ -n "$ip" ] && t stats.top_item "$ip" "$cnt"; done <<< "$top"
+        fi
+    fi
+}
+do_list() {
+    local members ip rest to
+    members=$(ipset list "$IPSET_NAME" 2>/dev/null | awk '/^Members:/{m=1;next} m&&NF{print}')
+    t list.header "$IPSET_NAME"
+    if [ -z "$members" ]; then t list.empty; return 0; fi
+    printf '%s\n' "$members" | while read -r ip rest; do
+        to=$(printf '%s' "$rest" | sed -n 's/.*timeout \([0-9]*\).*/\1/p')
+        t list.item "$ip" "${to:-?}"
+    done
+}
+do_summary() {
+    case "$DAILY_SUMMARY" in true|1|yes|on) ;; *) exit 0 ;; esac
+    [ -z "$WEBHOOK_URL" ] && [ -z "$NOTIFY_EMAIL" ] && exit 0
+    local host; host=$(hostname 2>/dev/null || echo '?')
+    notify "$(t summary.subject "$host")" "$(build_stats_text)"
+    exit 0
+}
+
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --dry-run) DRY_RUN=true; shift ;;
@@ -343,6 +590,9 @@ while [[ $# -gt 0 ]]; do
         --verbose) VERBOSE=true; shift ;;
         --lang) change_lang "${2:-}" ;;
         --lang=*) change_lang "${1#*=}" ;;
+        --list) do_list; exit 0 ;;
+        --stats) build_stats_text; exit 0 ;;
+        --summary) do_summary ;;
         --version) t version.line "$BAN404_VERSION"; exit 0 ;;
         --help|-h) show_help ;;
         *) t err.unknown_opt "$1"; exit 1 ;;
@@ -487,6 +737,7 @@ fi
 
 changes_made=false
 rules_simulated=0
+new_bans=()   # accumulés pour la notification (format : "ip|score|honeypot")
 [ "$VERBOSE" = true ] && t verbose.processing
 
 # 4. Boucle de traitement
@@ -508,6 +759,21 @@ while read -r count ip; do
         continue
     fi
 
+    # Whitelist CIDR : meme logique que les crawlers (deban si present, sinon skip)
+    if in_whitelist_cidr "$ip"; then
+        if [ "$DRY_RUN" = false ] && ipset test "$IPSET_NAME" "$ip" &>/dev/null; then
+            t cidr.unban "$ip" "$count"
+            ipset del "$IPSET_NAME" "$ip"
+            changes_made=true
+        elif [ "$DRY_RUN" = true ] && ipset test "$IPSET_NAME" "$ip" &>/dev/null; then
+            t cidr.sim_unban "$ip"
+            rules_simulated=$((rules_simulated + 1))
+        else
+            [ "$SHOW_BLOCKED" = true ] && t cidr.skip "$ip"
+        fi
+        continue
+    fi
+
     if ipset test "$IPSET_NAME" "$ip" &>/dev/null; then
         [ "$SHOW_BLOCKED" = true ] && t already.banned "$ip" "$count"
     else
@@ -520,12 +786,13 @@ while read -r count ip; do
             rules_simulated=$((rules_simulated + 1))
         else
             if [ "$count" -ge "$HONEYPOT_SCORE" ]; then
-                t ban.honeypot "$ip"
+                t ban.honeypot "$ip"; hp=1
             else
-                t ban.add "$ip" "$count"
+                t ban.add "$ip" "$count"; hp=0
             fi
             ipset -exist add "$IPSET_NAME" "$ip"
             changes_made=true
+            new_bans+=("$ip|$count|$hp")
         fi
     fi
 done <<< "$ips_data"
@@ -541,5 +808,9 @@ else
         ipset save > "$IPSET_SAVE_FILE"
     else
         [ "$VERBOSE" = true ] && t verbose.no_change
+    fi
+    # Notification des nouveaux bans (si seuil atteint et canal configure)
+    if [ "${#new_bans[@]}" -gt 0 ] && [ "${#new_bans[@]}" -ge "$NOTIFY_MIN_BANS" ]; then
+        maybe_notify_new_bans
     fi
 fi

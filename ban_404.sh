@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="1.4.0"
+BAN404_VERSION="1.4.1"
 
 # Configuration (valeurs par defaut ; surchargees par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -175,6 +175,12 @@ T_FR[verbose.vhost_excluded]="-> Ignoré (vhost exclu) : %s"
 T_DE[verbose.vhost_excluded]="-> Übersprungen (ausgeschlossener vhost): %s"
 T_ES[verbose.vhost_excluded]="-> Ignorado (vhost excluido): %s"
 T_IT[verbose.vhost_excluded]="-> Ignorato (vhost escluso): %s"
+
+T_EN[heal.updater]="[*] Legacy updater replaced by the current version: %s"
+T_FR[heal.updater]="[*] Updater legacy remplacé par la version courante : %s"
+T_DE[heal.updater]="[*] Veralteter Updater durch die aktuelle Version ersetzt: %s"
+T_ES[heal.updater]="[*] Updater legacy reemplazado por la versión actual: %s"
+T_IT[heal.updater]="[*] Updater legacy sostituito con la versione attuale: %s"
 
 T_EN[no_valid_files]="=> No valid log file found. Done."
 T_FR[no_valid_files]="=> Aucun fichier de log valide trouvé. Fin."
@@ -827,6 +833,34 @@ is_legit_crawler() {
     return 0
 }
 
+# --- Auto-guerison de l'updater "legacy" -------------------------------------
+# Certains serveurs portent un ancien updater qui ne met a jour QUE ban_404.sh
+# (jamais lui-meme) : il ne se modernisera donc jamais seul. Or le moteur, lui,
+# EST deploye partout (l'updater legacy le rafraichit). Le moteur peut donc
+# reinstaller un updater moderne depuis REPO_RAW. Detection = absence de la
+# variable UPDATER_VERSION (les updaters modernes la portent et s'auto-mettent
+# a jour) ; des qu'un updater versionne est en place, ce bloc ne fait plus rien.
+self_heal_updater() {
+    local upd="/usr/local/sbin/update_ban_404.sh" repo="${REPO_RAW:-}" dir tmp
+    [ "$DRY_RUN" = true ] && return 0
+    [ "$(id -u)" -eq 0 ] || return 0
+    [ -f "$upd" ] && grep -q '^UPDATER_VERSION=' "$upd" && return 0   # deja moderne
+    [ -z "$repo" ] && return 0
+    command -v curl >/dev/null 2>&1 || return 0
+    dir=$(dirname "$upd")
+    tmp=$(mktemp "$dir/.upd.XXXXXX" 2>/dev/null) || return 0
+    # Telecharge -> valide (shebang + versionne + bash -n) -> bascule atomique (.bak)
+    if curl -fsSL --max-time 30 "$repo/update_ban_404.sh" -o "$tmp" \
+       && [ -s "$tmp" ] && head -n1 "$tmp" | grep -q '^#!/bin/bash' \
+       && grep -q '^UPDATER_VERSION=' "$tmp" && bash -n "$tmp" 2>/dev/null; then
+        chmod 755 "$tmp"
+        [ -f "$upd" ] && cp -a "$upd" "${upd}.bak" 2>/dev/null || true
+        if mv -f "$tmp" "$upd"; then t heal.updater "$upd"; return 0; fi
+    fi
+    rm -f "$tmp"
+    return 0
+}
+
 if [ "$DRY_RUN" = false ]; then
     ipset list "$IPSET_NAME" &>/dev/null
     if [ $? -ne 0 ]; then
@@ -839,6 +873,9 @@ if [ "$DRY_RUN" = false ]; then
         /sbin/iptables-save > /etc/iptables/rules.v4
     fi
 fi
+
+# Auto-guerison eventuelle de l'updater legacy (one-shot ; sans effet si deja moderne).
+self_heal_updater
 
 # 1. Recherche des fichiers de logs
 FILES_FOUND=()

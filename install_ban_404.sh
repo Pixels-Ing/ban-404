@@ -1,14 +1,14 @@
 #!/bin/bash
 # ============================================================================
-#  install_ban_404.sh — Installation "cle en main" du ban automatique sur
-#  flood de 404 (ipset + iptables, persistance au reboot, execution horaire).
-#  Idempotent. Migre l'ancien chemin /etc/iptables/ipset et decommissionne
+#  install_ban_404.sh — Installation "clé en main" du ban automatique sur
+#  flood de 404 (ipset + iptables, persistance au reboot, exécution horaire).
+#  Idempotent. Migre l'ancien chemin /etc/iptables/ipset et décommissionne
 #  tout ancien script de ban 404 (quel que soit son nom).
 #
-#  Le moteur ban_404.sh n'est PAS embarque ici : il est recupere depuis le
-#  depot par le self-updater (source unique de verite). Seul l'updater est
-#  embarque (heredoc UPD_EOF) — amorce incontournable, puis il se met a jour
-#  lui-meme. L'installation requiert donc un acces reseau a REPO_RAW.
+#  Le moteur ban_404.sh n'est PAS embarqué ici : il est récupéré depuis le
+#  dépôt par le self-updater (source unique de vérité). Seul l'updater est
+#  embarqué (heredoc UPD_EOF) — amorce incontournable, puis il se met à jour
+#  lui-même. L'installation requiert donc un accès réseau à REPO_RAW.
 # ============================================================================
 set -u
 
@@ -22,10 +22,10 @@ CONF_PATH="/etc/ban_404.conf"
 UPDATE_CRON="/etc/cron.daily/ban_404_update"
 SUMMARY_CRON="/etc/cron.daily/ban_404_summary"
 
-# >>> A EDITER UNE FOIS avant distribution : URL "raw" de ton depot (sans slash final) <<<
+# >>> À ÉDITER UNE FOIS avant distribution : URL "raw" de ton dépôt (sans slash final) <<<
 REPO_RAW="https://raw.githubusercontent.com/Pixels-Ing/ban-404/main"
 
-# --- i18n : messages multilingues (en, fr, de, es, it). Voir ban_404.sh pour le mecanisme. ---
+# --- i18n : messages multilingues (en, fr, de, es, it). Voir ban_404.sh pour le mécanisme. ---
 declare -A T_EN T_FR T_DE T_ES T_IT
 
 T_EN[inst.error_prefix]="ERROR: "
@@ -53,19 +53,19 @@ T_ES[inst.apt_update_warn]="   (apt-get update con error — se continúa con la
 T_IT[inst.apt_update_warn]="   (apt-get update non riuscito — si prosegue con la cache locale)"
 
 T_EN[inst.universe_try]="   failed — trying to enable the 'universe' repo (required for ipset-persistent on 22.04)..."
-T_FR[inst.universe_try]="   echec — tentative d'activation du depot 'universe' (requis pour ipset-persistent sur 22.04)..."
+T_FR[inst.universe_try]="   échec — tentative d'activation du dépôt 'universe' (requis pour ipset-persistent sur 22.04)..."
 T_DE[inst.universe_try]="   fehlgeschlagen — Versuch, das Repo 'universe' zu aktivieren (erforderlich für ipset-persistent auf 22.04)..."
 T_ES[inst.universe_try]="   fallo — intentando activar el repositorio 'universe' (necesario para ipset-persistent en 22.04)..."
 T_IT[inst.universe_try]="   errore — tentativo di attivare il repository 'universe' (richiesto per ipset-persistent su 22.04)..."
 
 T_EN[inst.pkg_fail]="package installation failed (is the 'universe' repo enabled?)."
-T_FR[inst.pkg_fail]="echec installation paquets (le depot 'universe' est-il active ?)."
+T_FR[inst.pkg_fail]="échec installation paquets (le dépôt 'universe' est-il activé ?)."
 T_DE[inst.pkg_fail]="Paketinstallation fehlgeschlagen (ist das Repo 'universe' aktiviert?)."
 T_ES[inst.pkg_fail]="fallo en la instalación de paquetes (¿está activado el repositorio 'universe'?)."
 T_IT[inst.pkg_fail]="installazione dei pacchetti non riuscita (il repository 'universe' è attivo?)."
 
 T_EN[inst.migrate_ipset]="==> Possible migration of the old ipset persistence path..."
-T_FR[inst.migrate_ipset]="==> Migration eventuelle de l'ancien chemin de persistance ipset..."
+T_FR[inst.migrate_ipset]="==> Migration éventuelle de l'ancien chemin de persistance ipset..."
 T_DE[inst.migrate_ipset]="==> Mögliche Migration des alten ipset-Persistenzpfads..."
 T_ES[inst.migrate_ipset]="==> Posible migración de la antigua ruta de persistencia de ipset..."
 T_IT[inst.migrate_ipset]="==> Possibile migrazione del vecchio percorso di persistenza ipset..."
@@ -77,37 +77,37 @@ T_ES[inst.ipsets_link]="   /etc/iptables/ipsets es un enlace -> %s"
 T_IT[inst.ipsets_link]="   /etc/iptables/ipsets è un collegamento -> %s"
 
 T_EN[inst.ipsets_materialized]="   content materialized into a real file /etc/iptables/ipsets"
-T_FR[inst.ipsets_materialized]="   contenu materialise dans un vrai fichier /etc/iptables/ipsets"
+T_FR[inst.ipsets_materialized]="   contenu matérialisé dans un vrai fichier /etc/iptables/ipsets"
 T_DE[inst.ipsets_materialized]="   Inhalt in eine echte Datei /etc/iptables/ipsets überführt"
 T_ES[inst.ipsets_materialized]="   contenido materializado en un archivo real /etc/iptables/ipsets"
 T_IT[inst.ipsets_materialized]="   contenuto materializzato in un vero file /etc/iptables/ipsets"
 
 T_EN[inst.old_ipset_removed]="   old /etc/iptables/ipset removed"
-T_FR[inst.old_ipset_removed]="   ancien /etc/iptables/ipset supprime"
+T_FR[inst.old_ipset_removed]="   ancien /etc/iptables/ipset supprimé"
 T_DE[inst.old_ipset_removed]="   altes /etc/iptables/ipset entfernt"
 T_ES[inst.old_ipset_removed]="   antiguo /etc/iptables/ipset eliminado"
 T_IT[inst.old_ipset_removed]="   vecchio /etc/iptables/ipset rimosso"
 
 T_EN[inst.decom]="==> Decommissioning any old ban 404 script..."
-T_FR[inst.decom]="==> Decommissionnement de tout ancien script de ban 404..."
+T_FR[inst.decom]="==> Décommissionnement de tout ancien script de ban 404..."
 T_DE[inst.decom]="==> Außerbetriebnahme aller alten Ban-404-Skripte..."
 T_ES[inst.decom]="==> Retirada de cualquier antiguo script de ban 404..."
 T_IT[inst.decom]="==> Dismissione di ogni vecchio script di ban 404..."
 
 T_EN[inst.old_script_removed]="   old script removed: %s"
-T_FR[inst.old_script_removed]="   ancien script supprime : %s"
+T_FR[inst.old_script_removed]="   ancien script supprimé : %s"
 T_DE[inst.old_script_removed]="   altes Skript entfernt: %s"
 T_ES[inst.old_script_removed]="   antiguo script eliminado: %s"
 T_IT[inst.old_script_removed]="   vecchio script rimosso: %s"
 
 T_EN[inst.old_cron_link_removed]="   old cron (symlink) removed: %s"
-T_FR[inst.old_cron_link_removed]="   ancien cron (lien) supprime : %s"
+T_FR[inst.old_cron_link_removed]="   ancien cron (lien) supprimé : %s"
 T_DE[inst.old_cron_link_removed]="   alter Cron (Symlink) entfernt: %s"
 T_ES[inst.old_cron_link_removed]="   antiguo cron (enlace) eliminado: %s"
 T_IT[inst.old_cron_link_removed]="   vecchio cron (collegamento) rimosso: %s"
 
 T_EN[inst.old_cron_removed]="   old cron removed: %s"
-T_FR[inst.old_cron_removed]="   ancien cron supprime : %s"
+T_FR[inst.old_cron_removed]="   ancien cron supprimé : %s"
 T_DE[inst.old_cron_removed]="   alter Cron entfernt: %s"
 T_ES[inst.old_cron_removed]="   antiguo cron eliminado: %s"
 T_IT[inst.old_cron_removed]="   vecchio cron rimosso: %s"
@@ -119,13 +119,13 @@ T_ES[inst.refs_manual]="Referencias a verificar/eliminar manualmente: %s"
 T_IT[inst.refs_manual]="Riferimenti da verificare/rimuovere manualmente: %s"
 
 T_EN[inst.chain_removed]="   AUTOBAN404 chain dismantled"
-T_FR[inst.chain_removed]="   chaine AUTOBAN404 demontee"
+T_FR[inst.chain_removed]="   chaîne AUTOBAN404 démontée"
 T_DE[inst.chain_removed]="   Kette AUTOBAN404 abgebaut"
 T_ES[inst.chain_removed]="   cadena AUTOBAN404 desmontada"
 T_IT[inst.chain_removed]="   catena AUTOBAN404 smontata"
 
 T_EN[inst.varlib_removed]="   /var/lib/auto-ban-404 removed"
-T_FR[inst.varlib_removed]="   /var/lib/auto-ban-404 supprime"
+T_FR[inst.varlib_removed]="   /var/lib/auto-ban-404 supprimé"
 T_DE[inst.varlib_removed]="   /var/lib/auto-ban-404 entfernt"
 T_ES[inst.varlib_removed]="   /var/lib/auto-ban-404 eliminado"
 T_IT[inst.varlib_removed]="   /var/lib/auto-ban-404 rimosso"
@@ -137,13 +137,13 @@ T_ES[inst.conf_local]="==> Configuración local: %s"
 T_IT[inst.conf_local]="==> Configurazione locale: %s"
 
 T_EN[inst.conf_created]="   created (remember to adjust WHITELIST_IP on this server)"
-T_FR[inst.conf_created]="   cree (pense a adapter WHITELIST_IP sur ce serveur)"
+T_FR[inst.conf_created]="   créé (pense à adapter WHITELIST_IP sur ce serveur)"
 T_DE[inst.conf_created]="   erstellt (denken Sie daran, WHITELIST_IP auf diesem Server anzupassen)"
 T_ES[inst.conf_created]="   creado (recuerde adaptar WHITELIST_IP en este servidor)"
 T_IT[inst.conf_created]="   creato (ricordarsi di adattare WHITELIST_IP su questo server)"
 
 T_EN[inst.conf_kept]="   existing one kept (not overwritten)"
-T_FR[inst.conf_kept]="   existant conserve (non ecrase)"
+T_FR[inst.conf_kept]="   existant conservé (non écrasé)"
 T_DE[inst.conf_kept]="   vorhandene beibehalten (nicht überschrieben)"
 T_ES[inst.conf_kept]="   se conserva el existente (no sobrescrito)"
 T_IT[inst.conf_kept]="   esistente conservato (non sovrascritto)"
@@ -161,19 +161,19 @@ T_ES[inst.summary_cron]="==> Cron de resumen diario: %s (opt-in vía DAILY_SUMMA
 T_IT[inst.summary_cron]="==> Cron del riepilogo giornaliero: %s (opt-in tramite DAILY_SUMMARY)"
 
 T_EN[inst.fetch_engine]="==> Initial fetch of the engine via the updater: %s"
-T_FR[inst.fetch_engine]="==> Recuperation initiale du moteur via l'updater : %s"
+T_FR[inst.fetch_engine]="==> Récupération initiale du moteur via l'updater : %s"
 T_DE[inst.fetch_engine]="==> Erstes Abrufen der Engine über den Updater: %s"
 T_ES[inst.fetch_engine]="==> Recuperación inicial del motor mediante el actualizador: %s"
 T_IT[inst.fetch_engine]="==> Recupero iniziale del motore tramite l'updater: %s"
 
 T_EN[inst.fetch_fail]="cannot fetch %s from %s. Check network access and REPO_RAW in %s (see %s; nothing installed for the engine)."
-T_FR[inst.fetch_fail]="impossible de recuperer %s depuis %s. Verifie l'acces reseau et REPO_RAW dans %s (voir %s ; rien d'installe pour le moteur)."
+T_FR[inst.fetch_fail]="impossible de récupérer %s depuis %s. Vérifie l'accès réseau et REPO_RAW dans %s (voir %s ; rien d'installé pour le moteur)."
 T_DE[inst.fetch_fail]="%s kann nicht von %s abgerufen werden. Prüfen Sie den Netzwerkzugang und REPO_RAW in %s (siehe %s; nichts für die Engine installiert)."
 T_ES[inst.fetch_fail]="no se puede recuperar %s desde %s. Verifique el acceso de red y REPO_RAW en %s (consulte %s; no se instaló nada para el motor)."
 T_IT[inst.fetch_fail]="impossibile recuperare %s da %s. Verificare l'accesso di rete e REPO_RAW in %s (vedere %s; nulla installato per il motore)."
 
 T_EN[inst.cron_hourly]="==> Hourly task: %s"
-T_FR[inst.cron_hourly]="==> Tache horaire : %s"
+T_FR[inst.cron_hourly]="==> Tâche horaire : %s"
 T_DE[inst.cron_hourly]="==> Stündliche Aufgabe: %s"
 T_ES[inst.cron_hourly]="==> Tarea horaria: %s"
 T_IT[inst.cron_hourly]="==> Attività oraria: %s"
@@ -185,19 +185,19 @@ T_ES[inst.logrotate]="==> Rotación del registro: %s"
 T_IT[inst.logrotate]="==> Rotazione del log: %s"
 
 T_EN[inst.activate]="==> Immediate activation (creating the ipset + DROP rule, then persistence)..."
-T_FR[inst.activate]="==> Activation immediate (creation de l'ipset + regle DROP, puis persistance)..."
+T_FR[inst.activate]="==> Activation immédiate (création de l'ipset + règle DROP, puis persistance)..."
 T_DE[inst.activate]="==> Sofortige Aktivierung (Erstellung des ipset + DROP-Regel, dann Persistenz)..."
 T_ES[inst.activate]="==> Activación inmediata (creación del ipset + regla DROP, luego persistencia)..."
 T_IT[inst.activate]="==> Attivazione immediata (creazione dell'ipset + regola DROP, poi persistenza)..."
 
 T_EN[inst.done_header]=" Installation complete."
-T_FR[inst.done_header]=" Installation terminee."
+T_FR[inst.done_header]=" Installation terminée."
 T_DE[inst.done_header]=" Installation abgeschlossen."
 T_ES[inst.done_header]=" Instalación completada."
 T_IT[inst.done_header]=" Installazione completata."
 
 T_EN[inst.done_script]="   Script              : %s  (fetched from REPO_RAW)"
-T_FR[inst.done_script]="   Script              : %s  (recupere depuis REPO_RAW)"
+T_FR[inst.done_script]="   Script              : %s  (récupéré depuis REPO_RAW)"
 T_DE[inst.done_script]="   Skript              : %s  (von REPO_RAW abgerufen)"
 T_ES[inst.done_script]="   Script              : %s  (recuperado desde REPO_RAW)"
 T_IT[inst.done_script]="   Script              : %s  (recuperato da REPO_RAW)"
@@ -209,7 +209,7 @@ T_ES[inst.done_cron]="   Cron (cada hora)    : %s   -> registro en %s"
 T_IT[inst.done_cron]="   Cron (orario)       : %s   -> log in %s"
 
 T_EN[inst.done_updater]="   Self-updater        : %s (cron.daily) — updates the engine AND itself"
-T_FR[inst.done_updater]="   Self-updater        : %s (cron.daily) — met a jour le moteur ET lui-meme"
+T_FR[inst.done_updater]="   Self-updater        : %s (cron.daily) — met à jour le moteur ET lui-même"
 T_DE[inst.done_updater]="   Self-Updater        : %s (cron.daily) — aktualisiert die Engine UND sich selbst"
 T_ES[inst.done_updater]="   Auto-actualizador   : %s (cron.daily) — actualiza el motor Y a sí mismo"
 T_IT[inst.done_updater]="   Self-updater        : %s (cron.daily) — aggiorna il motore E sé stesso"
@@ -221,7 +221,7 @@ T_ES[inst.done_persist]="   Persistencia inicio : /etc/iptables/ipsets + /etc/ip
 T_IT[inst.done_persist]="   Persistenza riavvio : /etc/iptables/ipsets + /etc/iptables/rules.v4"
 
 T_EN[inst.done_nodep]="   No external runtime dependency (FCrDNS via getent / libc)"
-T_FR[inst.done_nodep]="   Aucune dependance externe au runtime (FCrDNS via getent / libc)"
+T_FR[inst.done_nodep]="   Aucune dépendance externe au runtime (FCrDNS via getent / libc)"
 T_DE[inst.done_nodep]="   Keine externe Laufzeitabhängigkeit (FCrDNS via getent / libc)"
 T_ES[inst.done_nodep]="   Sin dependencia externa en ejecución (FCrDNS vía getent / libc)"
 T_IT[inst.done_nodep]="   Nessuna dipendenza esterna a runtime (FCrDNS via getent / libc)"
@@ -238,7 +238,7 @@ T_DE[inst.done_testcmd]="   %s --dry-run --verbose"
 T_ES[inst.done_testcmd]="   %s --dry-run --verbose"
 T_IT[inst.done_testcmd]="   %s --dry-run --verbose"
 
-# Detection de la langue : locale du shell (ou /etc/default/locale en repli).
+# Détection de la langue : locale du shell (ou /etc/default/locale en repli).
 detect_lang() {
     local l="${LC_ALL:-${LC_MESSAGES:-${LANG:-}}}"
     if [ -z "$l" ] && [ -r /etc/default/locale ]; then
@@ -248,21 +248,21 @@ detect_lang() {
     case "$l" in en|fr|de|es|it) printf '%s' "$l" ;; *) printf '%s' en ;; esac
 }
 
-# Langue d'affichage : valeur de la conf existante si presente, sinon locale du shell.
+# Langue d'affichage : valeur de la conf existante si présente, sinon locale du shell.
 BAN404_LANG=""
 [ -f "$CONF_PATH" ] && BAN404_LANG=$(grep -m1 '^BAN404_LANG=' "$CONF_PATH" 2>/dev/null | cut -d'"' -f2)
 : "${BAN404_LANG:=$(detect_lang)}"
 BAN404_LANG="${BAN404_LANG,,}"
 case "$BAN404_LANG" in en|fr|de|es|it) ;; *) BAN404_LANG=en ;; esac
 
-# t <cle> [args...] : imprime la traduction (\n du format interpretes) + saut de ligne final.
+# t <clé> [args...] : imprime la traduction (\n du format interprétés) + saut de ligne final.
 t() {
     local key="$1"; shift
     local ref="T_${BAN404_LANG^^}[$key]"
     local fmt="${!ref-}"
     [ -z "$fmt" ] && fmt="${T_EN[$key]-}"
     [ -z "$fmt" ] && fmt="$key"
-    # '--' : empeche printf d'interpreter un format commencant par '-' comme une option.
+    # '--' : empêche printf d'interpréter un format commençant par '-' comme une option.
     # shellcheck disable=SC2059
     printf -- "$fmt\n" "$@"
 }
@@ -275,7 +275,7 @@ export DEBIAN_FRONTEND=noninteractive
 echo "iptables-persistent iptables-persistent/autosave_v4 boolean true" | debconf-set-selections
 echo "iptables-persistent iptables-persistent/autosave_v6 boolean true" | debconf-set-selections
 apt-get update || t inst.apt_update_warn
-# curl : requis pour la recuperation initiale du moteur via l'updater (l'install depend du reseau).
+# curl : requis pour la récupération initiale du moteur via l'updater (l'install dépend du réseau).
 install_pkgs(){ apt-get install -y ipset iptables-persistent ipset-persistent cron curl; }
 if ! install_pkgs; then
     t inst.universe_try
@@ -302,13 +302,13 @@ if [ -f /etc/iptables/ipset ]; then
 fi
 
 t inst.decom
-# Un nom evoque-t-il un ancien ban-404 ? (ban+404 dans un sens ou l'autre, insensible casse)
+# Un nom évoque-t-il un ancien ban-404 ? (ban+404 dans un sens ou l'autre, insensible casse)
 is_legacy_name(){ printf '%s' "$1" | grep -qiE '(ban[_-]?404|404[_-]?ban|autoban404|auto_ban_404)'; }
 
 shopt -s nullglob
 for f in /etc/cron.hourly/* /etc/cron.daily/*; do
     base=$(basename "$f")
-    [ "$base" = "$CRON_BASE" ] && continue                 # notre nouvelle tache : ne pas toucher
+    [ "$base" = "$CRON_BASE" ] && continue                 # notre nouvelle tâche : ne pas toucher
     if [ -L "$f" ]; then
         tgt=$(readlink -f "$f" 2>/dev/null || true)
         if is_legacy_name "$base" || { [ -n "${tgt:-}" ] && is_legacy_name "$(basename "$tgt")"; }; then
@@ -325,7 +325,7 @@ for f in /etc/cron.hourly/* /etc/cron.daily/*; do
 done
 shopt -u nullglob
 
-# Copies orphelines dans les emplacements habituels (sauf nos propres scripts, reecrits ensuite)
+# Copies orphelines dans les emplacements habituels (sauf nos propres scripts, réécrits ensuite)
 for d in /root /usr/local/bin /usr/local/sbin; do
     [ -d "$d" ] || continue
     find "$d" -maxdepth 1 -type f -regextype posix-extended \
@@ -336,11 +336,11 @@ for d in /root /usr/local/bin /usr/local/sbin; do
     done
 done
 
-# References dans crontab partage : signalees, pas auto-editees
+# Références dans crontab partagé : signalées, pas auto-éditées
 hits=$(grep -rliE '(ban[_-]?404|404[_-]?ban|auto_ban_404)' /etc/cron.d /etc/crontab /var/spool/cron 2>/dev/null | grep -v "$CRON_BASE" || true)
 [ -n "${hits:-}" ] && echo "   /!\\ $(t inst.refs_manual "$hits")"
 
-# Ancienne chaine iptables eventuelle
+# Ancienne chaîne iptables éventuelle
 if iptables -nL AUTOBAN404 >/dev/null 2>&1; then
     iptables -D INPUT -j AUTOBAN404 2>/dev/null || true
     iptables -F AUTOBAN404 2>/dev/null || true
@@ -353,20 +353,29 @@ fi
 t inst.conf_local "$CONF_PATH"
 if [ ! -f "$CONF_PATH" ]; then
     cat > "$CONF_PATH" <<EOF
-# /etc/ban_404.conf — configuration LOCALE par serveur (NON versionnee).
+# /etc/ban_404.conf — configuration LOCALE par serveur (NON versionnée).
 REPO_RAW="$REPO_RAW"
 WHITELIST_IP="127.0.0.1"
-# Langue des messages (decommenter pour figer) : en (defaut) | fr | de | es | it
+# Messages language: en (default) | fr | de | es | it
+# Langue des messages : en (défaut) | fr | de | es | it
+# Sprache der Meldungen: en (Standard) | fr | de | es | it
+# Idioma de los mensajes: en (por defecto) | fr | de | es | it
+# Lingua dei messaggi: en (predefinito) | fr | de | es | it
 #BAN404_LANG="$BAN404_LANG"
+# --- Optional settings (uncomment to override, see help for details) ---
+# --- Réglages optionnels (décommenter pour surcharger, voir l'aide pour les détails) ---
+# --- Optionale Einstellungen (zum Überschreiben auskommentieren, Details siehe Hilfe) ---
+# --- Ajustes opcionales (descomentar para sobrescribir, ver la ayuda para más detalles) ---
+# --- Impostazioni opzionali (decommentare per sovrascrivere, vedere l'aiuto per i dettagli) ---
 #WINDOW=7200
 #BAN_TIMEOUT=172800
 #TAIL_LINES=50000
 #BAN_THRESHOLD=10
 #HONEYPOT_SCORE=100
 #WHITELIST_CIDR="10.0.0.0/8|192.168.0.0/16"
-# Vhosts a exclure de l'analyse (noms de dossier sous /var/www, separes par | )
+# Vhosts à exclure de l'analyse (noms de dossier sous /var/www, séparés par | )
 #EXCLUDE_VHOSTS="staging.exemple.com|interne.exemple.com"
-# Notifications (vides => desactivees ; messages dans la langue BAN404_LANG)
+# Notifications (vides => désactivées ; messages dans la langue BAN404_LANG)
 #WEBHOOK_URL=""
 #NOTIFY_EMAIL=""
 #NOTIFY_FROM=""
@@ -380,26 +389,26 @@ else
     t inst.conf_kept
 fi
 
-# Seule copie embarquee restante : l'updater (amorce). A garder synchronise avec
-# update_ban_404.sh du depot — voir la doc interne. Le self-update fait converger toute
-# divergence des le premier passage cron.
+# Seule copie embarquée restante : l'updater (amorce). À garder synchronisé avec
+# update_ban_404.sh du dépôt — voir la doc interne. Le self-update fait converger toute
+# divergence dès le premier passage cron.
 t inst.selfupdater "$UPDATER_PATH" "$UPDATE_CRON"
 cat > "$UPDATER_PATH" <<'UPD_EOF'
 #!/bin/bash
-# update_ban_404.sh — met a jour ban_404.sh ET update_ban_404.sh depuis le depot Git.
-# Telecharge -> valide (shebang + syntaxe) -> bascule atomique. Jamais "curl | bash".
-# L'updater se met aussi a jour lui-meme (self-update) : plus besoin de repasser sur
-# les serveurs pour propager une evolution de l'updater. Il ajoute aussi BAN404_LANG
-# a la conf si elle est absente (langue heritee du shell/systeme, sinon en).
+# update_ban_404.sh — met à jour ban_404.sh ET update_ban_404.sh depuis le dépôt Git.
+# Télécharge -> valide (shebang + syntaxe) -> bascule atomique. Jamais "curl | bash".
+# L'updater se met aussi à jour lui-même (self-update) : plus besoin de repasser sur
+# les serveurs pour propager une évolution de l'updater. Il ajoute aussi BAN404_LANG
+# à la conf si elle est absente (langue héritée du shell/système, sinon en).
 set -u
 
-UPDATER_VERSION="1.2.2"
+UPDATER_VERSION="1.2.3"
 CONF_FILE="/etc/ban_404.conf"
 TARGET="/usr/local/sbin/ban_404.sh"
 SELF="/usr/local/sbin/update_ban_404.sh"
 LOG="/var/log/ban_404.log"
 
-# --- i18n : messages multilingues (en, fr, de, es, it). Voir ban_404.sh pour le mecanisme. ---
+# --- i18n : messages multilingues (en, fr, de, es, it). Voir ban_404.sh pour le mécanisme. ---
 declare -A T_EN T_FR T_DE T_ES T_IT
 
 T_EN[version.line]="update_ban_404.sh version %s"
@@ -528,7 +537,7 @@ T_DE[upd.repo_migrated]="REPO_RAW migriert zu %s (PixelsIng -> Pixels-Ing)."
 T_ES[upd.repo_migrated]="REPO_RAW migrado a %s (PixelsIng -> Pixels-Ing)."
 T_IT[upd.repo_migrated]="REPO_RAW migrato a %s (PixelsIng -> Pixels-Ing)."
 
-# Detection de la langue : locale du shell (ou /etc/default/locale en repli pour cron).
+# Détection de la langue : locale du shell (ou /etc/default/locale en repli pour cron).
 detect_lang() {
     local l="${LC_ALL:-${LC_MESSAGES:-${LANG:-}}}"
     if [ -z "$l" ] && [ -r /etc/default/locale ]; then
@@ -542,19 +551,19 @@ log(){ printf '%s [update] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$LOG" 2
 
 [ -f "$CONF_FILE" ] && . "$CONF_FILE"
 
-# Resolution de la langue : conf > locale du shell > en. Puis validation.
+# Résolution de la langue : conf > locale du shell > en. Puis validation.
 : "${BAN404_LANG:=$(detect_lang)}"
 BAN404_LANG="${BAN404_LANG,,}"
 case "$BAN404_LANG" in en|fr|de|es|it) ;; *) BAN404_LANG=en ;; esac
 
-# t <cle> [args...] : renvoie la traduction (\n du format interpretes) + saut de ligne final.
+# t <cle> [args...] : renvoie la traduction (\n du format interprétés) + saut de ligne final.
 t() {
     local key="$1"; shift
     local ref="T_${BAN404_LANG^^}[$key]"
     local fmt="${!ref-}"
     [ -z "$fmt" ] && fmt="${T_EN[$key]-}"
     [ -z "$fmt" ] && fmt="$key"
-    # '--' : empeche printf d'interpreter un format commencant par '-' comme une option.
+    # '--' : empêche printf d'interpréter un format commençant par '-' comme une option.
     # shellcheck disable=SC2059
     printf -- "$fmt\n" "$@"
 }
@@ -583,8 +592,8 @@ done
 : "${REPO_RAW:=}"
 [ -z "$REPO_RAW" ] && { log "$(t upd.repo_undef "$CONF_FILE")"; exit 0; }
 
-# --- Migration conf : transfert du depot PixelsIng -> Pixels-Ing (reecrit REPO_RAW) ---
-# One-shot : retirable une fois le parc migre (le case ne re-matche pas apres coup).
+# --- Migration conf : transfert du dépôt PixelsIng -> Pixels-Ing (réécrit REPO_RAW) ---
+# One-shot : retirable une fois le parc migré (le case ne re-matche pas après coup).
 case "$REPO_RAW" in
     */PixelsIng/*)
         _new=$(printf '%s' "$REPO_RAW" | sed 's#/PixelsIng/#/Pixels-Ing/#')
@@ -599,22 +608,27 @@ case "$REPO_RAW" in
         ;;
 esac
 
-# --- Migration conf : ajoute BAN404_LANG (commente, decouvrable) s'il manque ---
-# Idempotent : ne re-ajoute pas si une ligne active OU commentee existe deja.
+# --- Migration conf : ajoute BAN404_LANG (commenté, découvrable) s'il manque ---
+# Idempotent : ne re-ajoute pas si une ligne active OU commentée existe déjà.
 if [ -f "$CONF_FILE" ] && ! grep -qE '^[[:space:]]*#?[[:space:]]*BAN404_LANG=' "$CONF_FILE"; then
     _dl=$(detect_lang)
     {
-        printf '\n# Langue des messages : en (defaut) | fr | de | es | it\n'
+        printf '\n'
+        printf '%s\n' "# Messages language: en (default) | fr | de | es | it"
+        printf '%s\n' "# Langue des messages : en (défaut) | fr | de | es | it"
+        printf '%s\n' "# Sprache der Meldungen: en (Standard) | fr | de | es | it"
+        printf '%s\n' "# Idioma de los mensajes: en (por defecto) | fr | de | es | it"
+        printf '%s\n' "# Lingua dei messaggi: en (predefinito) | fr | de | es | it"
         printf '#BAN404_LANG="%s"\n' "$_dl"
     } >> "$CONF_FILE" && log "$(t upd.lang_added "$CONF_FILE" "$_dl")"
 fi
 
-# --- Migration conf : ajoute les reglages OPTIONNELS manquants (commentes, decouvrables) ---
+# --- Migration conf : ajoute les réglages OPTIONNELS manquants (commentés, découvrables) ---
 # NON destructif et idempotent : on n'ajoute QUE les variables totalement absentes
-# (ni active, ni commentee) ; un reglage deja present (meme commente) est laisse tel quel.
+# (ni active, ni commentée) ; un réglage déjà présent (même commenté) est laissé tel quel.
 if [ -f "$CONF_FILE" ]; then
     _opt_added=0
-    # "nom  ligne-commentee-complete" ; le nom de variable ne contient pas d'espace.
+    # "nom  ligne-commentée-complète" ; le nom de variable ne contient pas d'espace.
     _OPTVARS=(
         'WINDOW #WINDOW=7200'
         'BAN_TIMEOUT #BAN_TIMEOUT=172800'
@@ -634,8 +648,14 @@ if [ -f "$CONF_FILE" ]; then
         _name="${_e%% *}"; _line="${_e#* }"
         grep -qE "^[[:space:]]*#?[[:space:]]*${_name}=" "$CONF_FILE" && continue
         if [ "$_opt_added" -eq 0 ]; then
-            grep -qF '# --- Reglages optionnels' "$CONF_FILE" || \
-                printf '\n# --- Reglages optionnels (decommenter pour surcharger) ---\n' >> "$CONF_FILE"
+            grep -qE 'Optional settings|R[ée]glages optionnels' "$CONF_FILE" || {
+                printf '\n'
+                printf '%s\n' "# --- Optional settings (uncomment to override, see help for details) ---"
+                printf '%s\n' "# --- Réglages optionnels (décommenter pour surcharger, voir l'aide pour les détails) ---"
+                printf '%s\n' "# --- Optionale Einstellungen (zum Überschreiben auskommentieren, Details siehe Hilfe) ---"
+                printf '%s\n' "# --- Ajustes opcionales (descomentar para sobrescribir, ver la ayuda para más detalles) ---"
+                printf '%s\n' "# --- Impostazioni opzionali (decommentare per sovrascrivere, vedere l'aiuto per i dettagli) ---"
+            } >> "$CONF_FILE"
             _opt_added=1
         fi
         printf '%s\n' "$_line" >> "$CONF_FILE"
@@ -643,8 +663,8 @@ if [ -f "$CONF_FILE" ]; then
     [ "$_opt_added" -eq 1 ] && log "$(t upd.optvars_added "$CONF_FILE")"
 fi
 
-# Telecharge $1 dans un fichier temporaire dont le chemin est emis sur stdout.
-# Retourne != 0 (et n'emet rien) en cas d'echec.
+# Télécharge $1 dans un fichier temporaire dont le chemin est émis sur stdout.
+# Retourne != 0 (et n'émet rien) en cas d'échec.
 download(){
     local url="$1" tmp
     tmp=$(mktemp /tmp/ban_404.XXXXXX) || return 1
@@ -658,10 +678,10 @@ download(){
     printf '%s' "$tmp"
 }
 
-# update_file <nom-dans-depot> <chemin-cible> <label>
-#   Telecharge, valide (non vide + shebang + bash -n), et bascule atomiquement si
-#   le contenu differe. Code retour : 0 = bascule effectuee, 1 = deja a jour,
-#   2 = echec (rien remplace).
+# update_file <nom-dans-dépôt> <chemin-cible> <label>
+#   Télécharge, valide (non vide + shebang + bash -n), et bascule atomiquement si
+#   le contenu diffère. Code retour : 0 = bascule effectuée, 1 = déjà à jour,
+#   2 = échec (rien remplacé).
 update_file(){
     local name="$1" target="$2" label="$3" url tmp dir new ver
     url="$REPO_RAW/$name"
@@ -673,10 +693,10 @@ update_file(){
     head -n1 "$tmp" | grep -q '^#!/bin/bash' || { log "$(t upd.shebang "$label")"; rm -f "$tmp"; return 2; }
     bash -n "$tmp" 2>/dev/null || { log "$(t upd.syntax "$label")"; rm -f "$tmp"; return 2; }
 
-    # Deja a jour ? (--force court-circuite cette verification)
+    # Déjà à jour ? (--force court-circuite cette vérification)
     if [ "$FORCE" != true ] && [ -f "$target" ] && cmp -s "$tmp" "$target"; then rm -f "$tmp"; return 1; fi
 
-    # Bascule atomique (copie dans le meme repertoire que la cible puis mv), avec sauvegarde
+    # Bascule atomique (copie dans le même répertoire que la cible puis mv), avec sauvegarde
     dir=$(dirname "$target")
     new=$(mktemp "$dir/.ban_404.XXXXXX") || { log "$(t upd.mktemp_fail "$label")"; rm -f "$tmp"; return 2; }
     if cp "$tmp" "$new" && chmod 755 "$new"; then
@@ -692,13 +712,13 @@ update_file(){
     rm -f "$new" "$tmp"; log "$(t upd.prep_fail "$label")"; return 2
 }
 
-# Trace explicite quand on force (redeploiement meme si identique).
+# Trace explicite quand on force (redéploiement même si identique).
 [ "$FORCE" = true ] && log "$(t upd.forced)"
 
-# 1) Le moteur de detection/ban.
+# 1) Le moteur de détection/ban.
 update_file "ban_404.sh" "$TARGET" "ban_404.sh"
 
-# 2) L'updater lui-meme, EN DERNIER. La bascule par 'mv' cree un nouvel inode :
+# 2) L'updater lui-même, EN DERNIER. La bascule par 'mv' crée un nouvel inode :
 #    le process en cours garde l'ancien inode ouvert et termine sans surprise ;
 #    le prochain passage cron utilisera la nouvelle version.
 update_file "update_ban_404.sh" "$SELF" "update_ban_404.sh"
@@ -712,7 +732,7 @@ exec $UPDATER_PATH
 EOF
 chmod 755 "$UPDATE_CRON"
 
-# Cron de resume quotidien (no-op tant que DAILY_SUMMARY != true et aucun canal configure).
+# Cron de résumé quotidien (no-op tant que DAILY_SUMMARY != true et aucun canal configuré).
 t inst.summary_cron "$SUMMARY_CRON"
 cat > "$SUMMARY_CRON" <<EOF
 #!/bin/sh
@@ -720,7 +740,7 @@ exec $SCRIPT_PATH --summary
 EOF
 chmod 755 "$SUMMARY_CRON"
 
-# Recuperation initiale du moteur : on delegue a l'updater (source unique de verite).
+# Récupération initiale du moteur : on délègue à l'updater (source unique de vérité).
 t inst.fetch_engine "$SCRIPT_PATH"
 "$UPDATER_PATH" || true
 [ -s "$SCRIPT_PATH" ] || die "$(t inst.fetch_fail "$SCRIPT_PATH" "$REPO_RAW" "$CONF_PATH" "$LOG_PATH")"
@@ -728,7 +748,7 @@ t inst.fetch_engine "$SCRIPT_PATH"
 t inst.cron_hourly "$CRON_PATH"
 cat > "$CRON_PATH" <<EOF
 #!/bin/sh
-# Horodate chaque ligne de sortie du script avant de l'ecrire dans le log.
+# Horodate chaque ligne de sortie du script avant de l'écrire dans le log.
 $SCRIPT_PATH 2>&1 | while IFS= read -r line; do
     printf '%s %s\n' "\$(date '+%Y-%m-%d %H:%M:%S')" "\$line"
 done >> $LOG_PATH
@@ -748,7 +768,7 @@ EOF
 
 t inst.activate
 modprobe ip_set 2>/dev/null || true
-# Recharger d'eventuels bans deja persistes (migration / reinstall) AVANT de re-sauvegarder
+# Recharger d'éventuels bans déjà persistés (migration / réinstall) AVANT de re-sauvegarder
 [ -s /etc/iptables/ipsets ] && ipset restore -exist < /etc/iptables/ipsets 2>/dev/null || true
 "$SCRIPT_PATH" || true
 netfilter-persistent save >/dev/null 2>&1 || true

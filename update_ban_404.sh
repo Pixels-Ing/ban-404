@@ -1,18 +1,18 @@
 #!/bin/bash
-# update_ban_404.sh — met a jour ban_404.sh ET update_ban_404.sh depuis le depot Git.
-# Telecharge -> valide (shebang + syntaxe) -> bascule atomique. Jamais "curl | bash".
-# L'updater se met aussi a jour lui-meme (self-update) : plus besoin de repasser sur
-# les serveurs pour propager une evolution de l'updater. Il ajoute aussi BAN404_LANG
-# a la conf si elle est absente (langue heritee du shell/systeme, sinon en).
+# update_ban_404.sh — met à jour ban_404.sh ET update_ban_404.sh depuis le dépôt Git.
+# Télécharge -> valide (shebang + syntaxe) -> bascule atomique. Jamais "curl | bash".
+# L'updater se met aussi à jour lui-même (self-update) : plus besoin de repasser sur
+# les serveurs pour propager une évolution de l'updater. Il ajoute aussi BAN404_LANG
+# à la conf si elle est absente (langue héritée du shell/système, sinon en).
 set -u
 
-UPDATER_VERSION="1.2.2"
+UPDATER_VERSION="1.2.3"
 CONF_FILE="/etc/ban_404.conf"
 TARGET="/usr/local/sbin/ban_404.sh"
 SELF="/usr/local/sbin/update_ban_404.sh"
 LOG="/var/log/ban_404.log"
 
-# --- i18n : messages multilingues (en, fr, de, es, it). Voir ban_404.sh pour le mecanisme. ---
+# --- i18n : messages multilingues (en, fr, de, es, it). Voir ban_404.sh pour le mécanisme. ---
 declare -A T_EN T_FR T_DE T_ES T_IT
 
 T_EN[version.line]="update_ban_404.sh version %s"
@@ -141,7 +141,7 @@ T_DE[upd.repo_migrated]="REPO_RAW migriert zu %s (PixelsIng -> Pixels-Ing)."
 T_ES[upd.repo_migrated]="REPO_RAW migrado a %s (PixelsIng -> Pixels-Ing)."
 T_IT[upd.repo_migrated]="REPO_RAW migrato a %s (PixelsIng -> Pixels-Ing)."
 
-# Detection de la langue : locale du shell (ou /etc/default/locale en repli pour cron).
+# Détection de la langue : locale du shell (ou /etc/default/locale en repli pour cron).
 detect_lang() {
     local l="${LC_ALL:-${LC_MESSAGES:-${LANG:-}}}"
     if [ -z "$l" ] && [ -r /etc/default/locale ]; then
@@ -155,19 +155,19 @@ log(){ printf '%s [update] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$LOG" 2
 
 [ -f "$CONF_FILE" ] && . "$CONF_FILE"
 
-# Resolution de la langue : conf > locale du shell > en. Puis validation.
+# Résolution de la langue : conf > locale du shell > en. Puis validation.
 : "${BAN404_LANG:=$(detect_lang)}"
 BAN404_LANG="${BAN404_LANG,,}"
 case "$BAN404_LANG" in en|fr|de|es|it) ;; *) BAN404_LANG=en ;; esac
 
-# t <cle> [args...] : renvoie la traduction (\n du format interpretes) + saut de ligne final.
+# t <cle> [args...] : renvoie la traduction (\n du format interprétés) + saut de ligne final.
 t() {
     local key="$1"; shift
     local ref="T_${BAN404_LANG^^}[$key]"
     local fmt="${!ref-}"
     [ -z "$fmt" ] && fmt="${T_EN[$key]-}"
     [ -z "$fmt" ] && fmt="$key"
-    # '--' : empeche printf d'interpreter un format commencant par '-' comme une option.
+    # '--' : empêche printf d'interpréter un format commençant par '-' comme une option.
     # shellcheck disable=SC2059
     printf -- "$fmt\n" "$@"
 }
@@ -196,8 +196,8 @@ done
 : "${REPO_RAW:=}"
 [ -z "$REPO_RAW" ] && { log "$(t upd.repo_undef "$CONF_FILE")"; exit 0; }
 
-# --- Migration conf : transfert du depot PixelsIng -> Pixels-Ing (reecrit REPO_RAW) ---
-# One-shot : retirable une fois le parc migre (le case ne re-matche pas apres coup).
+# --- Migration conf : transfert du dépôt PixelsIng -> Pixels-Ing (réécrit REPO_RAW) ---
+# One-shot : retirable une fois le parc migré (le case ne re-matche pas après coup).
 case "$REPO_RAW" in
     */PixelsIng/*)
         _new=$(printf '%s' "$REPO_RAW" | sed 's#/PixelsIng/#/Pixels-Ing/#')
@@ -212,22 +212,27 @@ case "$REPO_RAW" in
         ;;
 esac
 
-# --- Migration conf : ajoute BAN404_LANG (commente, decouvrable) s'il manque ---
-# Idempotent : ne re-ajoute pas si une ligne active OU commentee existe deja.
+# --- Migration conf : ajoute BAN404_LANG (commenté, découvrable) s'il manque ---
+# Idempotent : ne re-ajoute pas si une ligne active OU commentée existe déjà.
 if [ -f "$CONF_FILE" ] && ! grep -qE '^[[:space:]]*#?[[:space:]]*BAN404_LANG=' "$CONF_FILE"; then
     _dl=$(detect_lang)
     {
-        printf '\n# Langue des messages : en (defaut) | fr | de | es | it\n'
+        printf '\n'
+        printf '%s\n' "# Messages language: en (default) | fr | de | es | it"
+        printf '%s\n' "# Langue des messages : en (défaut) | fr | de | es | it"
+        printf '%s\n' "# Sprache der Meldungen: en (Standard) | fr | de | es | it"
+        printf '%s\n' "# Idioma de los mensajes: en (por defecto) | fr | de | es | it"
+        printf '%s\n' "# Lingua dei messaggi: en (predefinito) | fr | de | es | it"
         printf '#BAN404_LANG="%s"\n' "$_dl"
     } >> "$CONF_FILE" && log "$(t upd.lang_added "$CONF_FILE" "$_dl")"
 fi
 
-# --- Migration conf : ajoute les reglages OPTIONNELS manquants (commentes, decouvrables) ---
+# --- Migration conf : ajoute les réglages OPTIONNELS manquants (commentés, découvrables) ---
 # NON destructif et idempotent : on n'ajoute QUE les variables totalement absentes
-# (ni active, ni commentee) ; un reglage deja present (meme commente) est laisse tel quel.
+# (ni active, ni commentée) ; un réglage déjà présent (même commenté) est laissé tel quel.
 if [ -f "$CONF_FILE" ]; then
     _opt_added=0
-    # "nom  ligne-commentee-complete" ; le nom de variable ne contient pas d'espace.
+    # "nom  ligne-commentée-complète" ; le nom de variable ne contient pas d'espace.
     _OPTVARS=(
         'WINDOW #WINDOW=7200'
         'BAN_TIMEOUT #BAN_TIMEOUT=172800'
@@ -247,8 +252,14 @@ if [ -f "$CONF_FILE" ]; then
         _name="${_e%% *}"; _line="${_e#* }"
         grep -qE "^[[:space:]]*#?[[:space:]]*${_name}=" "$CONF_FILE" && continue
         if [ "$_opt_added" -eq 0 ]; then
-            grep -qF '# --- Reglages optionnels' "$CONF_FILE" || \
-                printf '\n# --- Reglages optionnels (decommenter pour surcharger) ---\n' >> "$CONF_FILE"
+            grep -qE 'Optional settings|R[ée]glages optionnels' "$CONF_FILE" || {
+                printf '\n'
+                printf '%s\n' "# --- Optional settings (uncomment to override, see help for details) ---"
+                printf '%s\n' "# --- Réglages optionnels (décommenter pour surcharger, voir l'aide pour les détails) ---"
+                printf '%s\n' "# --- Optionale Einstellungen (zum Überschreiben auskommentieren, Details siehe Hilfe) ---"
+                printf '%s\n' "# --- Ajustes opcionales (descomentar para sobrescribir, ver la ayuda para más detalles) ---"
+                printf '%s\n' "# --- Impostazioni opzionali (decommentare per sovrascrivere, vedere l'aiuto per i dettagli) ---"
+            } >> "$CONF_FILE"
             _opt_added=1
         fi
         printf '%s\n' "$_line" >> "$CONF_FILE"
@@ -256,8 +267,8 @@ if [ -f "$CONF_FILE" ]; then
     [ "$_opt_added" -eq 1 ] && log "$(t upd.optvars_added "$CONF_FILE")"
 fi
 
-# Telecharge $1 dans un fichier temporaire dont le chemin est emis sur stdout.
-# Retourne != 0 (et n'emet rien) en cas d'echec.
+# Télécharge $1 dans un fichier temporaire dont le chemin est émis sur stdout.
+# Retourne != 0 (et n'émet rien) en cas d'échec.
 download(){
     local url="$1" tmp
     tmp=$(mktemp /tmp/ban_404.XXXXXX) || return 1
@@ -271,10 +282,10 @@ download(){
     printf '%s' "$tmp"
 }
 
-# update_file <nom-dans-depot> <chemin-cible> <label>
-#   Telecharge, valide (non vide + shebang + bash -n), et bascule atomiquement si
-#   le contenu differe. Code retour : 0 = bascule effectuee, 1 = deja a jour,
-#   2 = echec (rien remplace).
+# update_file <nom-dans-dépôt> <chemin-cible> <label>
+#   Télécharge, valide (non vide + shebang + bash -n), et bascule atomiquement si
+#   le contenu diffère. Code retour : 0 = bascule effectuée, 1 = déjà à jour,
+#   2 = échec (rien remplacé).
 update_file(){
     local name="$1" target="$2" label="$3" url tmp dir new ver
     url="$REPO_RAW/$name"
@@ -286,10 +297,10 @@ update_file(){
     head -n1 "$tmp" | grep -q '^#!/bin/bash' || { log "$(t upd.shebang "$label")"; rm -f "$tmp"; return 2; }
     bash -n "$tmp" 2>/dev/null || { log "$(t upd.syntax "$label")"; rm -f "$tmp"; return 2; }
 
-    # Deja a jour ? (--force court-circuite cette verification)
+    # Déjà à jour ? (--force court-circuite cette vérification)
     if [ "$FORCE" != true ] && [ -f "$target" ] && cmp -s "$tmp" "$target"; then rm -f "$tmp"; return 1; fi
 
-    # Bascule atomique (copie dans le meme repertoire que la cible puis mv), avec sauvegarde
+    # Bascule atomique (copie dans le même répertoire que la cible puis mv), avec sauvegarde
     dir=$(dirname "$target")
     new=$(mktemp "$dir/.ban_404.XXXXXX") || { log "$(t upd.mktemp_fail "$label")"; rm -f "$tmp"; return 2; }
     if cp "$tmp" "$new" && chmod 755 "$new"; then
@@ -305,13 +316,13 @@ update_file(){
     rm -f "$new" "$tmp"; log "$(t upd.prep_fail "$label")"; return 2
 }
 
-# Trace explicite quand on force (redeploiement meme si identique).
+# Trace explicite quand on force (redéploiement même si identique).
 [ "$FORCE" = true ] && log "$(t upd.forced)"
 
-# 1) Le moteur de detection/ban.
+# 1) Le moteur de détection/ban.
 update_file "ban_404.sh" "$TARGET" "ban_404.sh"
 
-# 2) L'updater lui-meme, EN DERNIER. La bascule par 'mv' cree un nouvel inode :
+# 2) L'updater lui-même, EN DERNIER. La bascule par 'mv' crée un nouvel inode :
 #    le process en cours garde l'ancien inode ouvert et termine sans surprise ;
 #    le prochain passage cron utilisera la nouvelle version.
 update_file "update_ban_404.sh" "$SELF" "update_ban_404.sh"

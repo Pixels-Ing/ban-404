@@ -1,47 +1,47 @@
 #!/bin/bash
 
-BAN404_VERSION="1.4.4"
+BAN404_VERSION="1.4.5"
 
-# Configuration (valeurs par defaut ; surchargees par /etc/ban_404.conf)
+# Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
 IPSET_NAME="ban_404_list"
 IPSET_SAVE_FILE="/etc/iptables/ipsets"   # chemin canonique du plugin ipset-persistent
 BAN_TIMEOUT=172800   # 48 heures
-WINDOW=7200          # Fenetre glissante en secondes (2h). Cron horaire => recouvrement, pas de trou aux bornes.
-TAIL_LINES=50000     # On n'analyse que les N dernieres lignes de chaque log (borne le cout sur gros sites).
-                     # A augmenter si un site depasse TAIL_LINES requetes dans la fenetre WINDOW.
+WINDOW=7200          # Fenêtre glissante en secondes (2h). Cron horaire => recouvrement, pas de trou aux bornes.
+TAIL_LINES=50000     # On n'analyse que les N dernières lignes de chaque log (borne le coût sur gros sites).
+                     # À augmenter si un site dépasse TAIL_LINES requêtes dans la fenêtre WINDOW.
 LOCK_FILE="/run/ban_404_list.lock"
-LOG_FILE="/var/log/ban_404.log"   # journal (ecrit par le wrapper cron) ; lu par --stats/--summary
+LOG_FILE="/var/log/ban_404.log"   # journal (écrit par le wrapper cron) ; lu par --stats/--summary
 
-# Seuils & motifs de detection (surchargables par la conf)
-BAN_THRESHOLD=10     # Ban si le score depasse ce seuil dans la fenetre.
-HONEYPOT_SCORE=100   # Score ajoute par hit honeypot (>= ce score => ban immediat).
+# Seuils & motifs de détection (surchargeables par la conf)
+BAN_THRESHOLD=10     # Ban si le score dépasse ce seuil dans la fenêtre.
+HONEYPOT_SCORE=100   # Score ajouté par hit honeypot (>= ce score => ban immédiat).
 HONEYPOT_PATTERN='\.env|wp-config\.php|phpmyadmin|config\.json|setup\.php|actuator|xmlrpc\.php'
 NOISE_PATTERN='\.(jpg|jpeg|png|gif|webp|ico|css|js|svg|woff2?|map)$|apple-touch-icon|favicon|browserconfig\.xml|mstile|autodiscover\.xml|sitemap\.xml|robots\.txt|ads\.txt|\.well-known/(security\.txt|pki-validation)'
 
-# Whitelist des IPs a ne JAMAIS bannir (separees par | ) -- correspondance EXACTE
+# Whitelist des IPs à ne JAMAIS bannir (séparées par | ) -- correspondance EXACTE
 WHITELIST_IP="127.0.0.1"
 
-# Whitelist CIDR / sous-reseaux a ne JAMAIS bannir (separes par | ), ex: "10.0.0.0/8|192.168.0.0/16"
+# Whitelist CIDR / sous-réseaux à ne JAMAIS bannir (séparés par | ), ex: "10.0.0.0/8|192.168.0.0/16"
 WHITELIST_CIDR=""
 
-# Vhosts a EXCLURE de l'analyse (noms de dossier sous BASE_DIR, separes par | ),
-# ex: "staging.exemple.com|interne.exemple.com". Vide => tous les vhosts sont analyses.
+# Vhosts à EXCLURE de l'analyse (noms de dossier sous BASE_DIR, séparés par | ),
+# ex: "staging.exemple.com|interne.exemple.com". Vide => tous les vhosts sont analysés.
 EXCLUDE_VHOSTS=""
 
-# Notifications (optionnel ; vides => desactivees). Messages dans la langue BAN404_LANG.
+# Notifications (optionnel ; vides => désactivées). Messages dans la langue BAN404_LANG.
 WEBHOOK_URL=""        # POST JSON des nouveaux bans (Slack/Discord/Teams/n8n...)
-NOTIFY_EMAIL=""       # e-mail des nouveaux bans (necessite un MTA : mail/sendmail)
-NOTIFY_FROM=""        # expediteur e-mail (optionnel)
+NOTIFY_EMAIL=""       # e-mail des nouveaux bans (nécessite un MTA : mail/sendmail)
+NOTIFY_FROM=""        # expéditeur e-mail (optionnel)
 NOTIFY_MIN_BANS=1     # ne notifier que si AU MOINS N nouveaux bans dans le run
 NOTIFY_BANS=false     # alerte à chaque run quand des IP sont bannies (true pour activer)
-DAILY_SUMMARY=false   # resume quotidien (opt-in) : --summary n'envoie que si =true ET canal configure
+DAILY_SUMMARY=false   # résumé quotidien (opt-in) : --summary n'envoie que si =true ET canal configuré
 
 # ============================================================================
 #  i18n — messages multilingues (en, fr, de, es, it). Le code/les commentaires
-#  restent en francais ; SEULS les messages affiches sont traduisibles.
-#  Les tableaux sont independants de la langue : on peut les definir avant le
-#  sourcing de la conf. La langue effective est resolue apres (detect_lang).
+#  restent en français ; SEULS les messages affichés sont traduisibles.
+#  Les tableaux sont indépendants de la langue : on peut les définir avant le
+#  sourcing de la conf. La langue effective est résolue après (detect_lang).
 # ============================================================================
 declare -A T_EN T_FR T_DE T_ES T_IT
 
@@ -622,8 +622,8 @@ T_DE[summary.subject]="ban-404 [%s]: tägliche Zusammenfassung"
 T_ES[summary.subject]="ban-404 [%s]: resumen diario"
 T_IT[summary.subject]="ban-404 [%s]: riepilogo giornaliero"
 
-# Detection de la langue : locale du shell (ou /etc/default/locale en repli pour
-# le contexte cron), code 2 lettres retenu s'il fait partie des langues gerees.
+# Détection de la langue : locale du shell (ou /etc/default/locale en repli pour
+# le contexte cron), code 2 lettres retenu s'il fait partie des langues gérées.
 detect_lang() {
     local l="${LC_ALL:-${LC_MESSAGES:-${LANG:-}}}"
     if [ -z "$l" ] && [ -r /etc/default/locale ]; then
@@ -633,25 +633,25 @@ detect_lang() {
     case "$l" in en|fr|de|es|it) printf '%s' "$l" ;; *) printf '%s' en ;; esac
 }
 
-# --- Surcharge par la config locale, NON versionnee (whitelist par serveur, REPO_RAW, langue, etc.) ---
+# --- Surcharge par la config locale, NON versionnée (whitelist par serveur, REPO_RAW, langue, etc.) ---
 CONF_FILE="/etc/ban_404.conf"
 [ -f "$CONF_FILE" ] && . "$CONF_FILE"
 
-# Resolution de la langue : conf > locale du shell > en. Puis validation.
+# Résolution de la langue : conf > locale du shell > en. Puis validation.
 : "${BAN404_LANG:=$(detect_lang)}"
 BAN404_LANG="${BAN404_LANG,,}"
 case "$BAN404_LANG" in en|fr|de|es|it) ;; *) BAN404_LANG=en ;; esac
 
-# t <cle> [args...] : imprime la traduction (\n du format interpretes) + saut de ligne final.
-# Le format est TOUJOURS notre chaine ; les donnees ($ip, $count...) passent en arguments
-# positionnels consommes par les %s -> aucune injection de format possible.
+# t <clé> [args...] : imprime la traduction (\n du format interprétés) + saut de ligne final.
+# Le format est TOUJOURS notre chaîne ; les données ($ip, $count...) passent en arguments
+# positionnels consommés par les %s -> aucune injection de format possible.
 t() {
     local key="$1"; shift
     local ref="T_${BAN404_LANG^^}[$key]"
     local fmt="${!ref-}"
-    [ -z "$fmt" ] && fmt="${T_EN[$key]-}"   # fallback EN si la cle manque pour la langue
+    [ -z "$fmt" ] && fmt="${T_EN[$key]-}"   # fallback EN si la clé manque pour la langue
     [ -z "$fmt" ] && fmt="$key"             # ultime garde-fou : jamais muet
-    # '--' : empeche printf d'interpreter un format commencant par '-' comme une option.
+    # '--' : empêche printf d'interpréter un format commençant par '-' comme une option.
     # shellcheck disable=SC2059
     printf -- "$fmt\n" "$@"
 }
@@ -703,7 +703,7 @@ show_help() {
     exit 0
 }
 
-# --lang <code> : ecrit BAN404_LANG dans la conf (remplace ou ajoute), puis quitte.
+# --lang <code> : écrit BAN404_LANG dans la conf (remplace ou ajoute), puis quitte.
 change_lang() {
     local new_lang="${1:-}"
     new_lang="${new_lang,,}"
@@ -718,8 +718,8 @@ change_lang() {
     if grep -qE '^[[:space:]]*#?[[:space:]]*BAN404_LANG=' "$CONF_FILE"; then
         local tmp
         tmp=$(mktemp) || { t lang.write_fail "$CONF_FILE"; exit 1; }
-        # cat > conserve les permissions/proprietaire de la conf (chmod 600 root)
-        # decommente et/ou remplace la ligne BAN404_LANG (active ou commentee).
+        # cat > conserve les permissions/propriétaire de la conf (chmod 600 root)
+        # décommente et/ou remplace la ligne BAN404_LANG (active ou commentée).
         if sed -E "s/^[[:space:]]*#?[[:space:]]*BAN404_LANG=.*/BAN404_LANG=\"$new_lang\"/" "$CONF_FILE" > "$tmp" && cat "$tmp" > "$CONF_FILE"; then
             rm -f "$tmp"
         else
@@ -727,7 +727,12 @@ change_lang() {
         fi
     else
         {
-            printf '\n# Langue des messages : en (defaut) | fr | de | es | it\n'
+            printf '\n'
+            printf '%s\n' "# Messages language: en (default) | fr | de | es | it"
+            printf '%s\n' "# Langue des messages : en (défaut) | fr | de | es | it"
+            printf '%s\n' "# Sprache der Meldungen: en (Standard) | fr | de | es | it"
+            printf '%s\n' "# Idioma de los mensajes: en (por defecto) | fr | de | es | it"
+            printf '%s\n' "# Lingua dei messaggi: en (predefinito) | fr | de | es | it"
             printf 'BAN404_LANG="%s"\n' "$new_lang"
         } >> "$CONF_FILE" || { t lang.write_fail "$CONF_FILE"; exit 1; }
     fi
@@ -757,7 +762,7 @@ in_whitelist_cidr() {  # $1=ip
     return 1
 }
 
-# ---------- Exclusion de vhosts (decouverte des logs) ----------
+# ---------- Exclusion de vhosts (découverte des logs) ----------
 is_excluded_vhost() {  # $1 = nom du vhost (dossier sous BASE_DIR)
     [ -z "$EXCLUDE_VHOSTS" ] && return 1
     local v="$1" e IFS='|'
@@ -773,7 +778,7 @@ json_escape() {
     s="${s//\\/\\\\}"; s="${s//\"/\\\"}"; s="${s//$'\n'/\\n}"; s="${s//$'\t'/\\t}"
     printf '%s' "$s"
 }
-# Construit le corps JSON du webhook selon le service (logique centralisee).
+# Construit le corps JSON du webhook selon le service (logique centralisée).
 build_webhook_payload() {  # $1 = texte brut -> imprime le JSON
     local esc; esc=$(json_escape "$1")
     # Google Chat n'accepte QUE "text" (rejet 400 des champs inconnus) ; les autres
@@ -850,9 +855,9 @@ do_list() {
     t list.header "$IPSET_NAME"
     if [ -z "$members" ]; then t list.empty; return 0; fi
     # Construit des lignes triables "<clef>\t<ip>\t<timeout>", trie en LC_ALL=C
-    # (ordre deterministe), puis affiche. Tri par defaut : IPv4 d'abord (octets
-    # zero-paddes pour un ordre numerique croissant), puis IPv6. Avec --by-timeout :
-    # tri croissant par timeout residuel.
+    # (ordre déterministe), puis affiche. Tri par défaut : IPv4 d'abord (octets
+    # zéro-paddés pour un ordre numérique croissant), puis IPv6. Avec --by-timeout :
+    # tri croissant par timeout résiduel.
     printf '%s\n' "$members" | while read -r ip rest; do
         to_raw=$(printf '%s' "$rest" | sed -n 's/.*timeout \([0-9]*\).*/\1/p')
         to="${to_raw:-?}"
@@ -878,7 +883,7 @@ do_summary() {
 }
 
 # ---------- --check-notification : test des canaux, avec retour + diagnostic ----------
-# Codes retour des check_* : 0 = OK, 1 = configure mais en echec, 2 = non configure.
+# Codes retour des check_* : 0 = OK, 1 = configuré mais en échec, 2 = non configuré.
 check_webhook() {
     [ -z "$WEBHOOK_URL" ] && { t check.webhook_off; return 2; }
     command -v curl >/dev/null 2>&1 || { t check.webhook_nocurl; return 1; }
@@ -914,14 +919,14 @@ check_email() {
     if [ "$rc" -eq 0 ]; then t check.email_sent "$NOTIFY_EMAIL"; return 0; fi
     t check.email_fail; [ -n "$err" ] && t check.diag "$err"; return 1
 }
-check_notification() {  # $1 = email|webhook|all (defaut all)
+check_notification() {  # $1 = email|webhook|all (défaut all)
     local target="${1:-all}"; target="${target,,}"
     case "$target" in email|webhook|all) ;; *) t check.invalid "$target"; exit 1 ;; esac
     t check.header
     local rc_w=3 rc_e=3
     case "$target" in webhook|all) check_webhook; rc_w=$? ;; esac
     case "$target" in email|all)   check_email;   rc_e=$? ;; esac
-    { [ "$rc_w" -eq 1 ] || [ "$rc_e" -eq 1 ]; } && exit 1   # un canal teste a echoue
+    { [ "$rc_w" -eq 1 ] || [ "$rc_e" -eq 1 ]; } && exit 1   # un canal testé a échoué
     if [ "$rc_w" -ne 0 ] && [ "$rc_e" -ne 0 ]; then t check.none_configured; exit 1; fi
     exit 0
 }
@@ -976,9 +981,9 @@ if [ "$VERBOSE" = true ]; then
     t verbose.searching_logs
 fi
 
-# FCrDNS sans dependance externe (getent, via la libc/nsswitch) :
+# FCrDNS sans dépendance externe (getent, via la libc/nsswitch) :
 #   1) PTR de l'IP  2) hostname = sous-domaine d'un crawler connu
-#   3) ce hostname doit RE-RESOUDRE vers l'IP d'origine (anti-spoofing du PTR)
+#   3) ce hostname doit RE-RÉSOUDRE vers l'IP d'origine (anti-spoofing du PTR)
 is_legit_crawler() {
     local ip="$1" rdns
     rdns=$(getent hosts "$ip" 2>/dev/null | awk '{print $2}' | head -n1 | tr 'A-Z' 'a-z')
@@ -998,23 +1003,23 @@ is_legit_crawler() {
     return 0
 }
 
-# --- Auto-guerison de l'updater "legacy" -------------------------------------
-# Certains serveurs portent un ancien updater qui ne met a jour QUE ban_404.sh
-# (jamais lui-meme) : il ne se modernisera donc jamais seul. Or le moteur, lui,
-# EST deploye partout (l'updater legacy le rafraichit). Le moteur peut donc
-# reinstaller un updater moderne depuis REPO_RAW. Detection = absence de la
+# --- Auto-guérison de l'updater "legacy" -------------------------------------
+# Certains serveurs portent un ancien updater qui ne met à jour QUE ban_404.sh
+# (jamais lui-même) : il ne se modernisera donc jamais seul. Or le moteur, lui,
+# EST déployé partout (l'updater legacy le rafraîchit). Le moteur peut donc
+# réinstaller un updater moderne depuis REPO_RAW. Détection = absence de la
 # variable UPDATER_VERSION (les updaters modernes la portent et s'auto-mettent
-# a jour) ; des qu'un updater versionne est en place, ce bloc ne fait plus rien.
+# à jour) ; dès qu'un updater versionné est en place, ce bloc ne fait plus rien.
 self_heal_updater() {
     local upd="/usr/local/sbin/update_ban_404.sh" repo="${REPO_RAW:-}" dir tmp
     [ "$DRY_RUN" = true ] && return 0
     [ "$(id -u)" -eq 0 ] || return 0
-    [ -f "$upd" ] && grep -q '^UPDATER_VERSION=' "$upd" && return 0   # deja moderne
+    [ -f "$upd" ] && grep -q '^UPDATER_VERSION=' "$upd" && return 0   # déjà moderne
     [ -z "$repo" ] && return 0
     command -v curl >/dev/null 2>&1 || return 0
     dir=$(dirname "$upd")
     tmp=$(mktemp "$dir/.upd.XXXXXX" 2>/dev/null) || return 0
-    # Telecharge -> valide (shebang + versionne + bash -n) -> bascule atomique (.bak)
+    # Télécharge -> valide (shebang + versionné + bash -n) -> bascule atomique (.bak)
     if curl -fsSL --max-time 30 "$repo/update_ban_404.sh" -o "$tmp" \
        && [ -s "$tmp" ] && head -n1 "$tmp" | grep -q '^#!/bin/bash' \
        && grep -q '^UPDATER_VERSION=' "$tmp" && bash -n "$tmp" 2>/dev/null; then
@@ -1039,7 +1044,7 @@ if [ "$DRY_RUN" = false ]; then
     fi
 fi
 
-# Auto-guerison eventuelle de l'updater legacy (one-shot ; sans effet si deja moderne).
+# Auto-guérison éventuelle de l'updater legacy (one-shot ; sans effet si déjà moderne).
 self_heal_updater
 
 # 1. Recherche des fichiers de logs
@@ -1075,18 +1080,18 @@ if [ ${#VALID_FILES[@]} -eq 0 ]; then
     exit 0
 fi
 
-# Borne basse de la fenetre, au format AAAAMMJJHHMMSS (comparable directement, sans mktime)
+# Borne basse de la fenêtre, au format AAAAMMJJHHMMSS (comparable directement, sans mktime)
 CUTOFF=$(date -d "@$(( $(date +%s) - WINDOW ))" '+%Y%m%d%H%M%S')
 [ "$VERBOSE" = true ] && t verbose.analyzing "${TAIL_LINES}" "$CUTOFF"
 
 # 3. Extraction et tri via awk
-#    - tail -q : seulement les dernieres lignes de CHAQUE log (borne le cout)
+#    - tail -q : seulement les dernières lignes de CHAQUE log (borne le coût)
 #    - whitelist en correspondance EXACTE (split sur |)
-#    - fenetre temporelle (on ignore les 404 trop vieux)
-#    - insensibilite a la casse via tolower() (le flag /i n'existe pas en awk)
-#    - filtre anti-bruit + honeypots, seuils/motifs surchargables via la conf.
-#    Les motifs passent par ENVIRON (pas -v) : pas de re-traitement des echappements
-#    (\.  reste \.) ; les seuils numeriques passent par -v.
+#    - fenêtre temporelle (on ignore les 404 trop vieux)
+#    - insensibilité à la casse via tolower() (le flag /i n'existe pas en awk)
+#    - filtre anti-bruit + honeypots, seuils/motifs surchargeables via la conf.
+#    Les motifs passent par ENVIRON (pas -v) : pas de re-traitement des échappements
+#    (\.  reste \.) ; les seuils numériques passent par -v.
 ips_data=$(tail -n "$TAIL_LINES" -q "${VALID_FILES[@]}" | \
     HONEYPOT_RE="$HONEYPOT_PATTERN" NOISE_RE="$NOISE_PATTERN" \
     awk -v wl="$WHITELIST_IP" -v cutoff="$CUTOFF" -v thr="$BAN_THRESHOLD" -v hp="$HONEYPOT_SCORE" '
@@ -1099,7 +1104,7 @@ BEGIN {
 }
 $9 == 404 && !($1 in white) {
 
-    # --- Fenetre temporelle : $4 = [jj/Mon/aaaa:hh:mm:ss ---
+    # --- Fenêtre temporelle : $4 = [jj/Mon/aaaa:hh:mm:ss ---
     split(substr($4,2), d, /[\/:]/)
     ts = sprintf("%04d%02d%02d%02d%02d%02d", d[3], mon[d[2]], d[1], d[4], d[5], d[6])
     if (ts < cutoff) next
@@ -1109,7 +1114,7 @@ $9 == 404 && !($1 in white) {
     # --- A. Bruit de fond (faux positifs) ---
     if (p ~ noise_re) next
 
-    # --- B. Honeypots : +HONEYPOT_SCORE (ban quasi immediat) ---
+    # --- B. Honeypots : +HONEYPOT_SCORE (ban quasi immédiat) ---
     if (p ~ honeypot_re) {
         count[$1] += hp
     } else {
@@ -1149,7 +1154,7 @@ while read -r count ip; do
         continue
     fi
 
-    # Whitelist CIDR : meme logique que les crawlers (deban si present, sinon skip)
+    # Whitelist CIDR : même logique que les crawlers (deban si présent, sinon skip)
     if in_whitelist_cidr "$ip"; then
         if [ "$DRY_RUN" = false ] && ipset test "$IPSET_NAME" "$ip" &>/dev/null; then
             t cidr.unban "$ip" "$count"
@@ -1199,7 +1204,7 @@ else
     else
         [ "$VERBOSE" = true ] && t verbose.no_change
     fi
-    # Notification des nouveaux bans (si NOTIFY_BANS active, seuil atteint et canal configure)
+    # Notification des nouveaux bans (si NOTIFY_BANS activé, seuil atteint et canal configuré)
     case "$NOTIFY_BANS" in
         true|1|yes|on)
             if [ "${#new_bans[@]}" -gt 0 ] && [ "${#new_bans[@]}" -ge "$NOTIFY_MIN_BANS" ]; then

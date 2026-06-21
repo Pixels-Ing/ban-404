@@ -1,43 +1,51 @@
-# /etc/ban_404.conf — configuration LOCALE par serveur (NON versionnee).
-# Surcharge les valeurs par defaut de ban_404.sh. Les mises a jour du script
+# /etc/ban_404.conf — configuration LOCALE par serveur (NON versionnée).
+# Surcharge les valeurs par défaut de ban_404.sh. Les mises à jour du script
 # ne toucheront jamais ce fichier.
 #
 # Installation : copier en /etc/ban_404.conf (chmod 600) et adapter.
 
-# URL "raw" du depot (sans slash final), utilisee par le self-updater.
+# URL "raw" du dépôt (sans slash final), utilisée par le self-updater.
 # Exemple : https://raw.githubusercontent.com/Pixels-Ing/ban-404/main
 REPO_RAW="https://raw.githubusercontent.com/Pixels-Ing/ban-404/main"
 
-# IPs a ne JAMAIS bannir (separees par | ), correspondance exacte.
+# IP à ne JAMAIS bannir (séparées par | ), correspondance exacte.
 WHITELIST_IP="127.0.0.1"
 
-# Langue des messages (sorties, logs, --help) : en (defaut) | fr | de | es | it.
-# Laissee commentee => auto-detectee (locale du shell/systeme, sinon en).
-# Decommenter pour figer, ou changer a la volee :  ban_404.sh --lang de
+# Messages language: en (default) | fr | de | es | it
+# Langue des messages : en (défaut) | fr | de | es | it
+# Sprache der Meldungen: en (Standard) | fr | de | es | it
+# Idioma de los mensajes: en (por defecto) | fr | de | es | it
+# Lingua dei messaggi: en (predefinito) | fr | de | es | it
+# Laissée commentée => auto-détectée (locale du shell/système, sinon en).
+# Décommenter pour figer, ou changer à la volée :  ban_404.sh --lang de
 #BAN404_LANG="en"
 
-# --- Reglages optionnels (decommenter pour surcharger) ---
-#WINDOW=7200          # fenetre glissante en secondes (defaut 2h)
-#BAN_TIMEOUT=172800   # duree de ban en secondes (defaut 48h)
-#TAIL_LINES=50000     # lignes analysees par log (defaut 50000)
-#BAN_THRESHOLD=10     # ban si le score depasse ce seuil dans la fenetre
-#HONEYPOT_SCORE=100   # score par hit honeypot (>= ce score => ban immediat)
+# --- Optional settings (uncomment to override, see help for details) ---
+# --- Réglages optionnels (décommenter pour surcharger, voir l'aide pour les détails) ---
+# --- Optionale Einstellungen (zum Überschreiben auskommentieren, Details siehe Hilfe) ---
+# --- Ajustes opcionales (descomentar para sobrescribir, ver la ayuda para más detalles) ---
+# --- Impostazioni opzionali (decommentare per sovrascrivere, vedere l'aiuto per i dettagli) ---
+#WINDOW=7200          # fenêtre glissante en secondes (défaut 2h)
+#BAN_TIMEOUT=172800   # durée de ban en secondes (défaut 48h)
+#TAIL_LINES=50000     # lignes analysées par log (défaut 50000)
+#BAN_THRESHOLD=10     # ban si le score dépasse ce seuil dans la fenêtre
+#HONEYPOT_SCORE=100   # score par hit honeypot (>= ce score => ban immédiat)
 
-# --- Whitelist CIDR / sous-reseaux a ne JAMAIS bannir (separes par | ) ---
+# --- Whitelist CIDR / sous-réseaux à ne JAMAIS bannir (séparés par | ) ---
 #WHITELIST_CIDR="10.0.0.0/8|192.168.0.0/16"
 
-# --- Vhosts a EXCLURE de l'analyse (noms de dossier sous /var/www, separes par | ) ---
-# Les logs de ces vhosts ne sont pas analyses (aucun ban genere depuis leurs 404).
+# --- Vhosts à EXCLURE de l'analyse (noms de dossier sous /var/www, séparés par | ) ---
+# Les logs de ces vhosts ne sont pas analysés (aucun ban généré depuis leurs 404).
 #EXCLUDE_VHOSTS="staging.exemple.com|interne.exemple.com"
 
-# --- Notifications (vides => desactivees ; messages dans la langue BAN404_LANG) ---
+# --- Notifications (vides => désactivées ; messages dans la langue BAN404_LANG) ---
 #WEBHOOK_URL=""        # POST JSON des nouveaux bans (Slack/Discord/Teams/n8n/Google Chat...)
-#NOTIFY_EMAIL=""       # e-mail des nouveaux bans (necessite un MTA : mail/sendmail)
-#NOTIFY_FROM=""        # expediteur e-mail (optionnel)
+#NOTIFY_EMAIL=""       # e-mail des nouveaux bans (nécessite un MTA : mail/sendmail)
+#NOTIFY_FROM=""        # expéditeur e-mail (optionnel)
 #NOTIFY_MIN_BANS=1     # ne notifier que si AU MOINS N nouveaux bans dans le run
 #NOTIFY_BANS=false     # alerte à chaque run quand des IP sont bannies (true pour activer)
-#DAILY_SUMMARY=false   # resume quotidien (opt-in) ; envoye par cron.daily si =true ET canal configure
+#DAILY_SUMMARY=false   # résumé quotidien (opt-in) ; envoyé par cron.daily si =true ET canal configuré
 
-# --- Motifs de detection (regex awk) — AVANCE : ne surcharger qu'en connaissance de cause ---
+# --- Motifs de détection (regex awk) — AVANCÉ : ne surcharger qu'en connaissance de cause ---
 #HONEYPOT_PATTERN='\.env|wp-config\.php|phpmyadmin|config\.json|setup\.php|actuator|xmlrpc\.php'
 #NOISE_PATTERN='\.(jpg|jpeg|png|gif|webp|ico|css|js|svg|woff2?|map)$|apple-touch-icon|favicon|browserconfig\.xml|mstile|autodiscover\.xml|sitemap\.xml|robots\.txt|ads\.txt|\.well-known/(security\.txt|pki-validation)'

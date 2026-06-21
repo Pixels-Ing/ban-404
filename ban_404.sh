@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="1.4.1"
+BAN404_VERSION="1.4.2"
 
 # Configuration (valeurs par defaut ; surchargees par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -671,9 +671,16 @@ json_escape() {
 send_webhook() {  # $1 = texte complet
     [ -z "$WEBHOOK_URL" ] && return 0
     command -v curl >/dev/null 2>&1 || return 0
-    local esc; esc=$(json_escape "$1")
+    local esc payload; esc=$(json_escape "$1")
+    # Format du payload selon le service : Google Chat n'accepte QUE "text" et rejette
+    # les champs inconnus (400) ; les autres acceptent "text" (Slack/Mattermost/n8n)
+    # et "content" (Discord/Teams).
+    case "$WEBHOOK_URL" in
+        *chat.googleapis.com*) payload="{\"text\":\"$esc\"}" ;;
+        *)                     payload="{\"text\":\"$esc\",\"content\":\"$esc\"}" ;;
+    esac
     curl -fsS -m 15 -H 'Content-Type: application/json' \
-         -X POST -d "{\"text\":\"$esc\",\"content\":\"$esc\"}" "$WEBHOOK_URL" >/dev/null 2>&1 || true
+         -X POST -d "$payload" "$WEBHOOK_URL" >/dev/null 2>&1 || true
 }
 send_email() {  # $1 = sujet, $2 = corps
     [ -z "$NOTIFY_EMAIL" ] && return 0

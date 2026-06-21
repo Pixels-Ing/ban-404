@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="1.4.6"
+BAN404_VERSION="1.4.7"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -857,24 +857,29 @@ build_stats_text() {
     fi
 }
 do_list() {
-    local members ip rest to_raw to fam key
+    local members ip rest to_raw to fam key ipkey
     members=$(ipset list "$IPSET_NAME" 2>/dev/null | awk '/^Members:/{m=1;next} m&&NF{print}')
     t list.header "$IPSET_NAME"
     if [ -z "$members" ]; then t list.empty; return 0; fi
     # Construit des lignes triables "<clef>\t<ip>\t<timeout>", trie en LC_ALL=C
     # (ordre déterministe), puis affiche. Tri par défaut : IPv4 d'abord (octets
     # zéro-paddés pour un ordre numérique croissant), puis IPv6. Avec --by-timeout :
-    # tri croissant par timeout résiduel.
+    # tri croissant par timeout résiduel, puis par IP (départage des ex æquo).
     printf '%s\n' "$members" | while read -r ip rest; do
         to_raw=$(printf '%s' "$rest" | sed -n 's/.*timeout \([0-9]*\).*/\1/p')
         to="${to_raw:-?}"
         case "$ip" in *:*) fam=1 ;; *) fam=0 ;; esac
-        if [ "$LIST_BY_TIMEOUT" = true ]; then
-            key=$(printf '%012d' "${to_raw:-0}" 2>/dev/null || printf '%s' "${to_raw:-0}")
-        elif [ "$fam" -eq 0 ]; then
-            key="0_$(printf '%s' "$ip" | awk -F. '{printf "%03d.%03d.%03d.%03d",$1,$2,$3,$4}')"
+        # Clef IP : IPv4 d'abord (octets zéro-paddés => ordre numérique croissant), puis IPv6.
+        if [ "$fam" -eq 0 ]; then
+            ipkey="0_$(printf '%s' "$ip" | awk -F. '{printf "%03d.%03d.%03d.%03d",$1,$2,$3,$4}')"
         else
-            key="1_$ip"
+            ipkey="1_$ip"
+        fi
+        if [ "$LIST_BY_TIMEOUT" = true ]; then
+            # Tri primaire = timeout croissant ; tri secondaire = IP (en cas d'égalité).
+            key="$(printf '%012d' "${to_raw:-0}" 2>/dev/null || printf '%s' "${to_raw:-0}")_$ipkey"
+        else
+            key="$ipkey"
         fi
         printf '%s\t%s\t%s\n' "$key" "$ip" "$to"
     done | LC_ALL=C sort | while IFS=$'\t' read -r key ip to; do

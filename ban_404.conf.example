@@ -1,14 +1,21 @@
+# /etc/ban_404.conf — LOCAL per-server configuration (NOT versioned).
 # /etc/ban_404.conf — configuration LOCALE par serveur (NON versionnée).
-# Surcharge les valeurs par défaut de ban_404.sh. Les mises à jour du script
-# ne toucheront jamais ce fichier.
-#
-# Installation : copier en /etc/ban_404.conf (chmod 600) et adapter.
+# /etc/ban_404.conf — LOKALE Konfiguration pro Server (NICHT versioniert).
+# /etc/ban_404.conf — configuración LOCAL por servidor (NO versionada).
+# /etc/ban_404.conf — configurazione LOCALE per server (NON versionata).
 
-# URL "raw" du dépôt (sans slash final), utilisée par le self-updater.
-# Exemple : https://raw.githubusercontent.com/Pixels-Ing/ban-404/main
+# Repo raw URL (no trailing slash), used by the self-updater.
+# URL raw du dépôt (sans slash final), utilisée par le self-updater.
+# Raw-URL des Repos (ohne abschließenden Schrägstrich), vom Self-Updater verwendet.
+# URL raw del repositorio (sin barra final), usada por el self-updater.
+# URL raw del repository (senza slash finale), usata dal self-updater.
 REPO_RAW="https://raw.githubusercontent.com/Pixels-Ing/ban-404/main"
 
-# IP à ne JAMAIS bannir (séparées par | ), correspondance exacte.
+# IPs to NEVER ban (exact match, separated by | ).
+# IP à ne JAMAIS bannir (correspondance exacte, séparées par | ).
+# Niemals zu sperrende IPs (exakte Übereinstimmung, durch | getrennt).
+# IP que NUNCA bloquear (coincidencia exacta, separadas por | ).
+# IP da non bloccare MAI (corrispondenza esatta, separati da | ).
 WHITELIST_IP="127.0.0.1"
 
 # Messages language: en (default) | fr | de | es | it
@@ -16,8 +23,6 @@ WHITELIST_IP="127.0.0.1"
 # Sprache der Meldungen: en (Standard) | fr | de | es | it
 # Idioma de los mensajes: en (por defecto) | fr | de | es | it
 # Lingua dei messaggi: en (predefinito) | fr | de | es | it
-# Laissée commentée => auto-détectée (locale du shell/système, sinon en).
-# Décommenter pour figer, ou changer à la volée :  ban_404.sh --lang de
 #BAN404_LANG="en"
 
 # --- Optional settings (uncomment to override, see help for details) ---
@@ -25,27 +30,42 @@ WHITELIST_IP="127.0.0.1"
 # --- Optionale Einstellungen (zum Überschreiben auskommentieren, Details siehe Hilfe) ---
 # --- Ajustes opcionales (descomentar para sobrescribir, ver la ayuda para más detalles) ---
 # --- Impostazioni opzionali (decommentare per sovrascrivere, vedere l'aiuto per i dettagli) ---
-#WINDOW=7200          # fenêtre glissante en secondes (défaut 2h)
-#BAN_TIMEOUT=172800   # durée de ban en secondes (défaut 48h)
-#TAIL_LINES=50000     # lignes analysées par log (défaut 50000)
-#BAN_THRESHOLD=10     # ban si le score dépasse ce seuil dans la fenêtre
-#HONEYPOT_SCORE=100   # score par hit honeypot (>= ce score => ban immédiat)
+#WINDOW=7200
+#BAN_TIMEOUT=172800
+#TAIL_LINES=50000
+#BAN_THRESHOLD=10
+#HONEYPOT_SCORE=100
 
+# --- CIDR whitelist / subnets to NEVER ban (separated by | ) ---
 # --- Whitelist CIDR / sous-réseaux à ne JAMAIS bannir (séparés par | ) ---
+# --- CIDR-Whitelist / niemals zu sperrende Subnetze (durch | getrennt) ---
+# --- Lista blanca CIDR / subredes que NUNCA bloquear (separadas por | ) ---
+# --- Whitelist CIDR / sottoreti da non bloccare MAI (separate da | ) ---
 #WHITELIST_CIDR="10.0.0.0/8|192.168.0.0/16"
 
+# --- Vhosts to EXCLUDE from analysis (folder names under /var/www, separated by | ) ---
 # --- Vhosts à EXCLURE de l'analyse (noms de dossier sous /var/www, séparés par | ) ---
-# Les logs de ces vhosts ne sont pas analysés (aucun ban généré depuis leurs 404).
+# --- Von der Analyse auszuschließende Vhosts (Ordnernamen unter /var/www, durch | getrennt) ---
+# --- Vhosts a EXCLUIR del análisis (nombres de carpeta en /var/www, separados por | ) ---
+# --- Vhost da ESCLUDERE dall'analisi (nomi di cartella sotto /var/www, separati da | ) ---
 #EXCLUDE_VHOSTS="staging.exemple.com|interne.exemple.com"
 
+# --- Notifications (empty => disabled; messages in the BAN404_LANG language) ---
 # --- Notifications (vides => désactivées ; messages dans la langue BAN404_LANG) ---
-#WEBHOOK_URL=""        # POST JSON des nouveaux bans (Slack/Discord/Teams/n8n/Google Chat...)
-#NOTIFY_EMAIL=""       # e-mail des nouveaux bans (nécessite un MTA : mail/sendmail)
-#NOTIFY_FROM=""        # expéditeur e-mail (optionnel)
-#NOTIFY_MIN_BANS=1     # ne notifier que si AU MOINS N nouveaux bans dans le run
-#NOTIFY_BANS=false     # alerte à chaque run quand des IP sont bannies (true pour activer)
-#DAILY_SUMMARY=false   # résumé quotidien (opt-in) ; envoyé par cron.daily si =true ET canal configuré
+# --- Benachrichtigungen (leer => deaktiviert; Meldungen in der Sprache BAN404_LANG) ---
+# --- Notificaciones (vacías => desactivadas; mensajes en el idioma BAN404_LANG) ---
+# --- Notifiche (vuote => disattivate; messaggi nella lingua BAN404_LANG) ---
+#WEBHOOK_URL=""
+#NOTIFY_EMAIL=""
+#NOTIFY_FROM=""
+#NOTIFY_MIN_BANS=1
+#NOTIFY_BANS=false
+#DAILY_SUMMARY=false
 
+# --- Detection patterns (awk regex) — ADVANCED: override only if you know what you are doing ---
 # --- Motifs de détection (regex awk) — AVANCÉ : ne surcharger qu'en connaissance de cause ---
+# --- Erkennungsmuster (awk-Regex) — FORTGESCHRITTEN: nur mit Sachkenntnis überschreiben ---
+# --- Patrones de detección (regex awk) — AVANZADO: sobrescribir solo con conocimiento ---
+# --- Pattern di rilevamento (regex awk) — AVANZATO: sovrascrivere solo con cognizione di causa ---
 #HONEYPOT_PATTERN='\.env|wp-config\.php|phpmyadmin|config\.json|setup\.php|actuator|xmlrpc\.php'
 #NOISE_PATTERN='\.(jpg|jpeg|png|gif|webp|ico|css|js|svg|woff2?|map)$|apple-touch-icon|favicon|browserconfig\.xml|mstile|autodiscover\.xml|sitemap\.xml|robots\.txt|ads\.txt|\.well-known/(security\.txt|pki-validation)'

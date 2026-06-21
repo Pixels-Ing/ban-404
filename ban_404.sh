@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="1.4.5"
+BAN404_VERSION="1.4.6"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -50,6 +50,12 @@ T_FR[version.line]="ban_404.sh version %s"
 T_DE[version.line]="ban_404.sh version %s"
 T_ES[version.line]="ban_404.sh version %s"
 T_IT[version.line]="ban_404.sh version %s"
+
+T_EN[version.author]="Author: Francis Spiesser - Pixels Ingénierie"
+T_FR[version.author]="Auteur : Francis Spiesser - Pixels Ingénierie"
+T_DE[version.author]="Autor: Francis Spiesser - Pixels Ingénierie"
+T_ES[version.author]="Autor: Francis Spiesser - Pixels Ingénierie"
+T_IT[version.author]="Autore: Francis Spiesser - Pixels Ingénierie"
 
 T_EN[help.usage]="Usage: %s [OPTIONS]"
 T_FR[help.usage]="Usage : %s [OPTIONS]"
@@ -666,6 +672,7 @@ LIST_BY_TIMEOUT=false
 
 show_help() {
     t version.line "$BAN404_VERSION"
+    t version.author
     t help.usage "$0"
     echo ""
     t help.options_header
@@ -944,7 +951,7 @@ while [[ $# -gt 0 ]]; do
         --summary) do_summary ;;
         --check-notification) check_notification "${2:-all}" ;;
         --check-notification=*) check_notification "${1#*=}" ;;
-        --version) t version.line "$BAN404_VERSION"; exit 0 ;;
+        --version) t version.line "$BAN404_VERSION"; t version.author; exit 0 ;;
         --help|-h) show_help ;;
         *) t err.unknown_opt "$1"; exit 1 ;;
     esac

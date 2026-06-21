@@ -354,34 +354,10 @@ t inst.conf_local "$CONF_PATH"
 if [ ! -f "$CONF_PATH" ]; then
     cat > "$CONF_PATH" <<EOF
 # /etc/ban_404.conf — configuration LOCALE par serveur (NON versionnée).
+# Structure complète (commentaires en 5 langues + réglages) posée par l'updater au 1er passage.
 REPO_RAW="$REPO_RAW"
 WHITELIST_IP="127.0.0.1"
-# Messages language: en (default) | fr | de | es | it
-# Langue des messages : en (défaut) | fr | de | es | it
-# Sprache der Meldungen: en (Standard) | fr | de | es | it
-# Idioma de los mensajes: en (por defecto) | fr | de | es | it
-# Lingua dei messaggi: en (predefinito) | fr | de | es | it
 #BAN404_LANG="$BAN404_LANG"
-# --- Optional settings (uncomment to override, see help for details) ---
-# --- Réglages optionnels (décommenter pour surcharger, voir l'aide pour les détails) ---
-# --- Optionale Einstellungen (zum Überschreiben auskommentieren, Details siehe Hilfe) ---
-# --- Ajustes opcionales (descomentar para sobrescribir, ver la ayuda para más detalles) ---
-# --- Impostazioni opzionali (decommentare per sovrascrivere, vedere l'aiuto per i dettagli) ---
-#WINDOW=7200
-#BAN_TIMEOUT=172800
-#TAIL_LINES=50000
-#BAN_THRESHOLD=10
-#HONEYPOT_SCORE=100
-#WHITELIST_CIDR="10.0.0.0/8|192.168.0.0/16"
-# Vhosts à exclure de l'analyse (noms de dossier sous /var/www, séparés par | )
-#EXCLUDE_VHOSTS="staging.exemple.com|interne.exemple.com"
-# Notifications (vides => désactivées ; messages dans la langue BAN404_LANG)
-#WEBHOOK_URL=""
-#NOTIFY_EMAIL=""
-#NOTIFY_FROM=""
-#NOTIFY_MIN_BANS=1
-#NOTIFY_BANS=false
-#DAILY_SUMMARY=false
 EOF
     chmod 600 "$CONF_PATH"
     t inst.conf_created
@@ -402,7 +378,7 @@ cat > "$UPDATER_PATH" <<'UPD_EOF'
 # à la conf si elle est absente (langue héritée du shell/système, sinon en).
 set -u
 
-UPDATER_VERSION="1.2.3"
+UPDATER_VERSION="1.2.4"
 CONF_FILE="/etc/ban_404.conf"
 TARGET="/usr/local/sbin/ban_404.sh"
 SELF="/usr/local/sbin/update_ban_404.sh"
@@ -416,6 +392,12 @@ T_FR[version.line]="update_ban_404.sh version %s"
 T_DE[version.line]="update_ban_404.sh version %s"
 T_ES[version.line]="update_ban_404.sh version %s"
 T_IT[version.line]="update_ban_404.sh version %s"
+
+T_EN[version.author]="Author: Francis Spiesser - Pixels Ingénierie"
+T_FR[version.author]="Auteur : Francis Spiesser - Pixels Ingénierie"
+T_DE[version.author]="Autor: Francis Spiesser - Pixels Ingénierie"
+T_ES[version.author]="Autor: Francis Spiesser - Pixels Ingénierie"
+T_IT[version.author]="Autore: Francis Spiesser - Pixels Ingénierie"
 
 T_EN[help.usage]="Usage: %s [OPTIONS]"
 T_FR[help.usage]="Usage : %s [OPTIONS]"
@@ -476,6 +458,12 @@ T_FR[upd.optvars_added]="Réglages optionnels (commentés) ajoutés à %s."
 T_DE[upd.optvars_added]="Optionale Einstellungen (auskommentiert) zu %s hinzugefügt."
 T_ES[upd.optvars_added]="Ajustes opcionales (comentados) añadidos a %s."
 T_IT[upd.optvars_added]="Impostazioni opzionali (commentate) aggiunte a %s."
+
+T_EN[upd.conf_synced]="Config %s reconciled (multilingual comments / settings)."
+T_FR[upd.conf_synced]="Config %s réconciliée (commentaires multilingues / réglages)."
+T_DE[upd.conf_synced]="Konfiguration %s abgeglichen (mehrsprachige Kommentare / Einstellungen)."
+T_ES[upd.conf_synced]="Config %s reconciliada (comentarios multilingües / ajustes)."
+T_IT[upd.conf_synced]="Config %s riconciliata (commenti multilingue / impostazioni)."
 
 T_EN[upd.dl_fail]="%s: download failed (%s)"
 T_FR[upd.dl_fail]="%s : téléchargement KO (%s)"
@@ -570,6 +558,7 @@ t() {
 
 show_help() {
     t version.line "$UPDATER_VERSION"
+    t version.author
     t help.usage "$0"
     echo ""
     t help.options_header
@@ -583,7 +572,7 @@ FORCE=false
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --force|-f) FORCE=true; shift ;;
-        --version) t version.line "$UPDATER_VERSION"; exit 0 ;;
+        --version) t version.line "$UPDATER_VERSION"; t version.author; exit 0 ;;
         --help|-h) show_help ;;
         *) t err.unknown_opt "$1"; exit 1 ;;
     esac
@@ -608,60 +597,128 @@ case "$REPO_RAW" in
         ;;
 esac
 
-# --- Migration conf : ajoute BAN404_LANG (commenté, découvrable) s'il manque ---
-# Idempotent : ne re-ajoute pas si une ligne active OU commentée existe déjà.
-if [ -f "$CONF_FILE" ] && ! grep -qE '^[[:space:]]*#?[[:space:]]*BAN404_LANG=' "$CONF_FILE"; then
-    _dl=$(detect_lang)
-    {
-        printf '\n'
-        printf '%s\n' "# Messages language: en (default) | fr | de | es | it"
-        printf '%s\n' "# Langue des messages : en (défaut) | fr | de | es | it"
-        printf '%s\n' "# Sprache der Meldungen: en (Standard) | fr | de | es | it"
-        printf '%s\n' "# Idioma de los mensajes: en (por defecto) | fr | de | es | it"
-        printf '%s\n' "# Lingua dei messaggi: en (predefinito) | fr | de | es | it"
-        printf '#BAN404_LANG="%s"\n' "$_dl"
-    } >> "$CONF_FILE" && log "$(t upd.lang_added "$CONF_FILE" "$_dl")"
-fi
+# >>> RECONCILE_BLOCK_BEGIN (testable par extraction entre les marqueurs) ---------------------
+# Migration conf : RÉCONCILIATION canonique multilingue (5 langues).
+# Principe (validé) : on relève les variables ACTIVES (lignes non commentées, valeurs
+# PRÉSERVÉES), puis on régénère TOUTE la structure commentée (en-tête de fichier, blocs
+# explicatifs, en-têtes de section, valeurs commentées par défaut) en en (défaut), fr, de, es, it.
+# NON destructif pour le comportement : seules les lignes de COMMENTAIRE changent ; les valeurs
+# actives sont reportées telles quelles ; les variables actives inconnues sont conservées.
+# Idempotent (sortie déterministe).
+C_FHDR=(
+"# /etc/ban_404.conf — LOCAL per-server configuration (NOT versioned)."
+"# /etc/ban_404.conf — configuration LOCALE par serveur (NON versionnée)."
+"# /etc/ban_404.conf — LOKALE Konfiguration pro Server (NICHT versioniert)."
+"# /etc/ban_404.conf — configuración LOCAL por servidor (NO versionada)."
+"# /etc/ban_404.conf — configurazione LOCALE per server (NON versionata).")
+C_REPO=(
+"# Repo raw URL (no trailing slash), used by the self-updater."
+"# URL raw du dépôt (sans slash final), utilisée par le self-updater."
+"# Raw-URL des Repos (ohne abschließenden Schrägstrich), vom Self-Updater verwendet."
+"# URL raw del repositorio (sin barra final), usada por el self-updater."
+"# URL raw del repository (senza slash finale), usata dal self-updater.")
+C_WLIP=(
+"# IPs to NEVER ban (exact match, separated by | )."
+"# IP à ne JAMAIS bannir (correspondance exacte, séparées par | )."
+"# Niemals zu sperrende IPs (exakte Übereinstimmung, durch | getrennt)."
+"# IP que NUNCA bloquear (coincidencia exacta, separadas por | )."
+"# IP da non bloccare MAI (corrispondenza esatta, separati da | ).")
+C_LANG=(
+"# Messages language: en (default) | fr | de | es | it"
+"# Langue des messages : en (défaut) | fr | de | es | it"
+"# Sprache der Meldungen: en (Standard) | fr | de | es | it"
+"# Idioma de los mensajes: en (por defecto) | fr | de | es | it"
+"# Lingua dei messaggi: en (predefinito) | fr | de | es | it")
+C_H_opt=(
+"# --- Optional settings (uncomment to override, see help for details) ---"
+"# --- Réglages optionnels (décommenter pour surcharger, voir l'aide pour les détails) ---"
+"# --- Optionale Einstellungen (zum Überschreiben auskommentieren, Details siehe Hilfe) ---"
+"# --- Ajustes opcionales (descomentar para sobrescribir, ver la ayuda para más detalles) ---"
+"# --- Impostazioni opzionali (decommentare per sovrascrivere, vedere l'aiuto per i dettagli) ---")
+C_H_cidr=(
+"# --- CIDR whitelist / subnets to NEVER ban (separated by | ) ---"
+"# --- Whitelist CIDR / sous-réseaux à ne JAMAIS bannir (séparés par | ) ---"
+"# --- CIDR-Whitelist / niemals zu sperrende Subnetze (durch | getrennt) ---"
+"# --- Lista blanca CIDR / subredes que NUNCA bloquear (separadas por | ) ---"
+"# --- Whitelist CIDR / sottoreti da non bloccare MAI (separate da | ) ---")
+C_H_vhosts=(
+"# --- Vhosts to EXCLUDE from analysis (folder names under /var/www, separated by | ) ---"
+"# --- Vhosts à EXCLURE de l'analyse (noms de dossier sous /var/www, séparés par | ) ---"
+"# --- Von der Analyse auszuschließende Vhosts (Ordnernamen unter /var/www, durch | getrennt) ---"
+"# --- Vhosts a EXCLUIR del análisis (nombres de carpeta en /var/www, separados por | ) ---"
+"# --- Vhost da ESCLUDERE dall'analisi (nomi di cartella sotto /var/www, separati da | ) ---")
+C_H_notif=(
+"# --- Notifications (empty => disabled; messages in the BAN404_LANG language) ---"
+"# --- Notifications (vides => désactivées ; messages dans la langue BAN404_LANG) ---"
+"# --- Benachrichtigungen (leer => deaktiviert; Meldungen in der Sprache BAN404_LANG) ---"
+"# --- Notificaciones (vacías => desactivadas; mensajes en el idioma BAN404_LANG) ---"
+"# --- Notifiche (vuote => disattivate; messaggi nella lingua BAN404_LANG) ---")
+C_H_motifs=(
+"# --- Detection patterns (awk regex) — ADVANCED: override only if you know what you are doing ---"
+"# --- Motifs de détection (regex awk) — AVANCÉ : ne surcharger qu'en connaissance de cause ---"
+"# --- Erkennungsmuster (awk-Regex) — FORTGESCHRITTEN: nur mit Sachkenntnis überschreiben ---"
+"# --- Patrones de detección (regex awk) — AVANZADO: sobrescribir solo con conocimiento ---"
+"# --- Pattern di rilevamento (regex awk) — AVANZATO: sovrascrivere solo con cognizione di causa ---")
+C_OTHER=(
+"# --- Other active settings preserved as-is ---"
+"# --- Autres réglages actifs conservés tels quels ---"
+"# --- Sonstige aktive Einstellungen unverändert beibehalten ---"
+"# --- Otros ajustes activos conservados tal cual ---"
+"# --- Altre impostazioni attive conservate così come sono ---")
+C_SEC=(opt cidr vhosts notif motifs)
+C_opt_v=( $'WINDOW\t#WINDOW=7200' $'BAN_TIMEOUT\t#BAN_TIMEOUT=172800' $'TAIL_LINES\t#TAIL_LINES=50000' $'BAN_THRESHOLD\t#BAN_THRESHOLD=10' $'HONEYPOT_SCORE\t#HONEYPOT_SCORE=100' )
+C_cidr_v=( $'WHITELIST_CIDR\t#WHITELIST_CIDR="10.0.0.0/8|192.168.0.0/16"' )
+C_vhosts_v=( $'EXCLUDE_VHOSTS\t#EXCLUDE_VHOSTS="staging.exemple.com|interne.exemple.com"' )
+C_notif_v=( $'WEBHOOK_URL\t#WEBHOOK_URL=""' $'NOTIFY_EMAIL\t#NOTIFY_EMAIL=""' $'NOTIFY_FROM\t#NOTIFY_FROM=""' $'NOTIFY_MIN_BANS\t#NOTIFY_MIN_BANS=1' $'NOTIFY_BANS\t#NOTIFY_BANS=false' $'DAILY_SUMMARY\t#DAILY_SUMMARY=false' )
+C_motifs_v=( $'HONEYPOT_PATTERN\t#HONEYPOT_PATTERN='\''\.env|wp-config\.php|phpmyadmin|config\.json|setup\.php|actuator|xmlrpc\.php'\''' $'NOISE_PATTERN\t#NOISE_PATTERN='\''\.(jpg|jpeg|png|gif|webp|ico|css|js|svg|woff2?|map)$|apple-touch-icon|favicon|browserconfig\.xml|mstile|autodiscover\.xml|sitemap\.xml|robots\.txt|ads\.txt|\.well-known/(security\.txt|pki-validation)'\''' )
+C_KNOWN=" REPO_RAW WHITELIST_IP BAN404_LANG WINDOW BAN_TIMEOUT TAIL_LINES BAN_THRESHOLD HONEYPOT_SCORE WHITELIST_CIDR EXCLUDE_VHOSTS WEBHOOK_URL NOTIFY_EMAIL NOTIFY_FROM NOTIFY_MIN_BANS NOTIFY_BANS DAILY_SUMMARY HONEYPOT_PATTERN NOISE_PATTERN "
 
-# --- Migration conf : ajoute les réglages OPTIONNELS manquants (commentés, découvrables) ---
-# NON destructif et idempotent : on n'ajoute QUE les variables totalement absentes
-# (ni active, ni commentée) ; un réglage déjà présent (même commenté) est laissé tel quel.
+reconcile_conf() {  # $1 = chemin de la conf
+    local f="$1" line t var sec entry def tmp pairs
+    declare -A ACTIVE
+    # 1) Relève des variables ACTIVES (lignes non commentées, non vides ; valeur préservée).
+    while IFS= read -r line || [ -n "$line" ]; do
+        t="${line#"${line%%[![:space:]]*}"}"
+        case "$t" in ''|'#'*) continue ;; esac
+        if [[ "$t" =~ ^([A-Za-z_][A-Za-z0-9_]*)= ]]; then ACTIVE["${BASH_REMATCH[1]}"]="$t"; fi
+    done < "$f"
+    # 2) Réécriture canonique.
+    tmp=$(mktemp) || return 1
+    {
+        printf '%s\n' "${C_FHDR[@]}"
+        printf '\n'; printf '%s\n' "${C_REPO[@]}"
+        if [ -n "${ACTIVE[REPO_RAW]+x}" ]; then printf '%s\n' "${ACTIVE[REPO_RAW]}"; else printf '%s\n' '#REPO_RAW=""'; fi
+        printf '\n'; printf '%s\n' "${C_WLIP[@]}"
+        if [ -n "${ACTIVE[WHITELIST_IP]+x}" ]; then printf '%s\n' "${ACTIVE[WHITELIST_IP]}"; else printf '%s\n' '#WHITELIST_IP="127.0.0.1"'; fi
+        printf '\n'; printf '%s\n' "${C_LANG[@]}"
+        if [ -n "${ACTIVE[BAN404_LANG]+x}" ]; then printf '%s\n' "${ACTIVE[BAN404_LANG]}"; else printf '#BAN404_LANG="%s"\n' "$(detect_lang)"; fi
+        for sec in "${C_SEC[@]}"; do
+            printf '\n'; eval "printf '%s\n' \"\${C_H_${sec}[@]}\""
+            eval "pairs=(\"\${C_${sec}_v[@]}\")"
+            for entry in "${pairs[@]}"; do
+                var="${entry%%$'\t'*}"; def="${entry#*$'\t'}"
+                if [ -n "${ACTIVE[$var]+x}" ]; then printf '%s\n' "${ACTIVE[$var]}"; else printf '%s\n' "$def"; fi
+            done
+        done
+        # Variables actives NON reconnues : conservées (ordre trié = déterministe).
+        local other=0 k
+        for k in $(printf '%s\n' "${!ACTIVE[@]}" | LC_ALL=C sort); do
+            case "$C_KNOWN" in *" $k "*) continue ;; esac
+            [ "$other" = 0 ] && { printf '\n'; printf '%s\n' "${C_OTHER[@]}"; other=1; }
+            printf '%s\n' "${ACTIVE[$k]}"
+        done
+    } > "$tmp"
+    cat "$tmp" > "$f"
+    rm -f "$tmp"
+}
+
 if [ -f "$CONF_FILE" ]; then
-    _opt_added=0
-    # "nom  ligne-commentée-complète" ; le nom de variable ne contient pas d'espace.
-    _OPTVARS=(
-        'WINDOW #WINDOW=7200'
-        'BAN_TIMEOUT #BAN_TIMEOUT=172800'
-        'TAIL_LINES #TAIL_LINES=50000'
-        'BAN_THRESHOLD #BAN_THRESHOLD=10'
-        'HONEYPOT_SCORE #HONEYPOT_SCORE=100'
-        'WHITELIST_CIDR #WHITELIST_CIDR="10.0.0.0/8|192.168.0.0/16"'
-        'EXCLUDE_VHOSTS #EXCLUDE_VHOSTS="staging.exemple.com|interne.exemple.com"'
-        'WEBHOOK_URL #WEBHOOK_URL=""'
-        'NOTIFY_EMAIL #NOTIFY_EMAIL=""'
-        'NOTIFY_FROM #NOTIFY_FROM=""'
-        'NOTIFY_MIN_BANS #NOTIFY_MIN_BANS=1'
-        'NOTIFY_BANS #NOTIFY_BANS=false'
-        'DAILY_SUMMARY #DAILY_SUMMARY=false'
-    )
-    for _e in "${_OPTVARS[@]}"; do
-        _name="${_e%% *}"; _line="${_e#* }"
-        grep -qE "^[[:space:]]*#?[[:space:]]*${_name}=" "$CONF_FILE" && continue
-        if [ "$_opt_added" -eq 0 ]; then
-            grep -qE 'Optional settings|R[ée]glages optionnels' "$CONF_FILE" || {
-                printf '\n'
-                printf '%s\n' "# --- Optional settings (uncomment to override, see help for details) ---"
-                printf '%s\n' "# --- Réglages optionnels (décommenter pour surcharger, voir l'aide pour les détails) ---"
-                printf '%s\n' "# --- Optionale Einstellungen (zum Überschreiben auskommentieren, Details siehe Hilfe) ---"
-                printf '%s\n' "# --- Ajustes opcionales (descomentar para sobrescribir, ver la ayuda para más detalles) ---"
-                printf '%s\n' "# --- Impostazioni opzionali (decommentare per sovrascrivere, vedere l'aiuto per i dettagli) ---"
-            } >> "$CONF_FILE"
-            _opt_added=1
-        fi
-        printf '%s\n' "$_line" >> "$CONF_FILE"
-    done
-    [ "$_opt_added" -eq 1 ] && log "$(t upd.optvars_added "$CONF_FILE")"
+    _cb=$(cksum < "$CONF_FILE" 2>/dev/null)
+    reconcile_conf "$CONF_FILE"
+    _ca=$(cksum < "$CONF_FILE" 2>/dev/null)
+    [ "$_cb" != "$_ca" ] && log "$(t upd.conf_synced "$CONF_FILE")"
 fi
+# >>> RECONCILE_BLOCK_END ---------------------------------------------------------------------
 
 # Télécharge $1 dans un fichier temporaire dont le chemin est émis sur stdout.
 # Retourne != 0 (et n'émet rien) en cas d'échec.

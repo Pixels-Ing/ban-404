@@ -20,7 +20,6 @@ LOGROTATE_PATH="/etc/logrotate.d/ban_404"
 UPDATER_PATH="/usr/local/sbin/update_ban_404.sh"
 CONF_PATH="/etc/ban_404.conf"
 UPDATE_CRON="/etc/cron.daily/ban_404_update"
-SUMMARY_CRON="/etc/cron.daily/ban_404_summary"
 
 # >>> À ÉDITER UNE FOIS avant distribution : URL "raw" de ton dépôt (sans slash final) <<<
 REPO_RAW="https://raw.githubusercontent.com/Pixels-Ing/ban-404/main"
@@ -154,11 +153,6 @@ T_DE[inst.selfupdater]="==> Self-Updater: %s (+ %s)"
 T_ES[inst.selfupdater]="==> Auto-actualizador: %s (+ %s)"
 T_IT[inst.selfupdater]="==> Self-updater: %s (+ %s)"
 
-T_EN[inst.summary_cron]="==> Daily summary cron: %s (opt-in via DAILY_SUMMARY)"
-T_FR[inst.summary_cron]="==> Cron de résumé quotidien : %s (opt-in via DAILY_SUMMARY)"
-T_DE[inst.summary_cron]="==> Cron für tägliche Zusammenfassung: %s (opt-in über DAILY_SUMMARY)"
-T_ES[inst.summary_cron]="==> Cron de resumen diario: %s (opt-in vía DAILY_SUMMARY)"
-T_IT[inst.summary_cron]="==> Cron del riepilogo giornaliero: %s (opt-in tramite DAILY_SUMMARY)"
 
 T_EN[inst.fetch_engine]="==> Initial fetch of the engine via the updater: %s"
 T_FR[inst.fetch_engine]="==> Récupération initiale du moteur via l'updater : %s"
@@ -789,13 +783,8 @@ exec $UPDATER_PATH
 EOF
 chmod 755 "$UPDATE_CRON"
 
-# Cron de résumé quotidien (no-op tant que DAILY_SUMMARY != true et aucun canal configuré).
-t inst.summary_cron "$SUMMARY_CRON"
-cat > "$SUMMARY_CRON" <<EOF
-#!/bin/sh
-exec $SCRIPT_PATH --summary
-EOF
-chmod 755 "$SUMMARY_CRON"
+# Le cron de résumé quotidien (cron.daily/ban_404_summary) n'est plus posé ici : le moteur en est
+# seul maître et l'aligne sur DAILY_SUMMARY à chaque passage horaire (self_heal_summary_cron).
 
 # Récupération initiale du moteur : on délègue à l'updater (source unique de vérité).
 t inst.fetch_engine "$SCRIPT_PATH"

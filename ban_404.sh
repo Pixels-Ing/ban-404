@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="1.4.8"
+BAN404_VERSION="1.4.10"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -190,6 +190,18 @@ T_DE[heal.updater]="[*] Veralteter Updater durch die aktuelle Version ersetzt: %
 T_ES[heal.updater]="[*] Updater legacy reemplazado por la versión actual: %s"
 T_IT[heal.updater]="[*] Updater legacy sostituito con la versione attuale: %s"
 
+T_EN[heal.summary_cron]="[*] Missing daily-summary cron reinstalled: %s"
+T_FR[heal.summary_cron]="[*] Cron de résumé quotidien manquant réinstallé : %s"
+T_DE[heal.summary_cron]="[*] Fehlender Tageszusammenfassungs-Cron neu installiert: %s"
+T_ES[heal.summary_cron]="[*] Cron de resumen diario faltante reinstalado: %s"
+T_IT[heal.summary_cron]="[*] Cron del riepilogo giornaliero mancante reinstallato: %s"
+
+T_EN[heal.summary_cron_removed]="[*] Daily-summary cron removed (DAILY_SUMMARY disabled): %s"
+T_FR[heal.summary_cron_removed]="[*] Cron de résumé quotidien retiré (DAILY_SUMMARY désactivé) : %s"
+T_DE[heal.summary_cron_removed]="[*] Tageszusammenfassungs-Cron entfernt (DAILY_SUMMARY deaktiviert): %s"
+T_ES[heal.summary_cron_removed]="[*] Cron de resumen diario eliminado (DAILY_SUMMARY desactivado): %s"
+T_IT[heal.summary_cron_removed]="[*] Cron del riepilogo giornaliero rimosso (DAILY_SUMMARY disattivato): %s"
+
 T_EN[no_valid_files]="=> No valid log file found. Done."
 T_FR[no_valid_files]="=> Aucun fichier de log valide trouvé. Fin."
 T_DE[no_valid_files]="=> Keine gültige Log-Datei gefunden. Ende."
@@ -322,6 +334,12 @@ T_DE[help.checknotif]="  --check-notification [email|webhook|all]  Eine Testbena
 T_ES[help.checknotif]="  --check-notification [email|webhook|all]  Enviar una notificación de prueba y mostrar el resultado (por defecto: all)."
 T_IT[help.checknotif]="  --check-notification [email|webhook|all]  Inviare una notifica di prova e mostrare il risultato (predefinito: all)."
 
+T_EN[help.diag]="  --diag           Run a read-only self-diagnostic and list any anomalies."
+T_FR[help.diag]="  --diag           Lancer un auto-diagnostic en lecture seule et lister les anomalies."
+T_DE[help.diag]="  --diag           Eine schreibgeschützte Selbstdiagnose ausführen und Anomalien auflisten."
+T_ES[help.diag]="  --diag           Ejecutar un autodiagnóstico de solo lectura y listar las anomalías."
+T_IT[help.diag]="  --diag           Eseguire un'autodiagnostica in sola lettura ed elencare le anomalie."
+
 T_EN[check.header]="=[ ban-404 notification test ]="
 T_FR[check.header]="=[ Test des notifications ban-404 ]="
 T_DE[check.header]="=[ ban-404 Benachrichtigungstest ]="
@@ -411,6 +429,193 @@ T_FR[check.diag]="  ↳ diagnostic : %s"
 T_DE[check.diag]="  ↳ Diagnose: %s"
 T_ES[check.diag]="  ↳ diagnóstico: %s"
 T_IT[check.diag]="  ↳ diagnostica: %s"
+
+# --- --diag : auto-diagnostic (lecture seule) ---
+T_EN[diag.header]="=[ ban-404 diagnostic ]="
+T_FR[diag.header]="=[ Diagnostic ban-404 ]="
+T_DE[diag.header]="=[ ban-404 Diagnose ]="
+T_ES[diag.header]="=[ Diagnóstico ban-404 ]="
+T_IT[diag.header]="=[ Diagnostica ban-404 ]="
+
+T_EN[diag.engine_ok]="Engine ban_404.sh present (v%s)."
+T_FR[diag.engine_ok]="Moteur ban_404.sh présent (v%s)."
+T_DE[diag.engine_ok]="Engine ban_404.sh vorhanden (v%s)."
+T_ES[diag.engine_ok]="Motor ban_404.sh presente (v%s)."
+T_IT[diag.engine_ok]="Motore ban_404.sh presente (v%s)."
+
+T_EN[diag.engine_missing]="Engine missing: %s"
+T_FR[diag.engine_missing]="Moteur absent : %s"
+T_DE[diag.engine_missing]="Engine fehlt: %s"
+T_ES[diag.engine_missing]="Motor ausente: %s"
+T_IT[diag.engine_missing]="Motore assente: %s"
+
+T_EN[diag.updater_ok]="Updater present and versioned (v%s)."
+T_FR[diag.updater_ok]="Updater présent et versionné (v%s)."
+T_DE[diag.updater_ok]="Updater vorhanden und versioniert (v%s)."
+T_ES[diag.updater_ok]="Updater presente y versionado (v%s)."
+T_IT[diag.updater_ok]="Updater presente e versionato (v%s)."
+
+T_EN[diag.updater_legacy]="Updater present but legacy (no version) — will self-heal on the next hourly run."
+T_FR[diag.updater_legacy]="Updater présent mais legacy (sans version) — auto-guérison au prochain passage horaire."
+T_DE[diag.updater_legacy]="Updater vorhanden, aber veraltet (ohne Version) — Selbstheilung beim nächsten stündlichen Lauf."
+T_ES[diag.updater_legacy]="Updater presente pero legacy (sin versión) — autocuración en la próxima ejecución horaria."
+T_IT[diag.updater_legacy]="Updater presente ma legacy (senza versione) — autoguarigione alla prossima esecuzione oraria."
+
+T_EN[diag.updater_missing]="Updater missing: %s"
+T_FR[diag.updater_missing]="Updater absent : %s"
+T_DE[diag.updater_missing]="Updater fehlt: %s"
+T_ES[diag.updater_missing]="Updater ausente: %s"
+T_IT[diag.updater_missing]="Updater assente: %s"
+
+T_EN[diag.repo_uptodate]="Repository: engine and updater are up to date."
+T_FR[diag.repo_uptodate]="Dépôt : moteur et updater à jour."
+T_DE[diag.repo_uptodate]="Repository: Engine und Updater sind aktuell."
+T_ES[diag.repo_uptodate]="Repositorio: motor y updater actualizados."
+T_IT[diag.repo_uptodate]="Repository: motore e updater aggiornati."
+
+T_EN[diag.engine_update]="Engine update available (local %s / repo %s)."
+T_FR[diag.engine_update]="MAJ du moteur disponible (local %s / dépôt %s)."
+T_DE[diag.engine_update]="Engine-Update verfügbar (lokal %s / Repo %s)."
+T_ES[diag.engine_update]="Actualización del motor disponible (local %s / repo %s)."
+T_IT[diag.engine_update]="Aggiornamento motore disponibile (locale %s / repo %s)."
+
+T_EN[diag.updater_update]="Updater update available (local %s / repo %s)."
+T_FR[diag.updater_update]="MAJ de l'updater disponible (local %s / dépôt %s)."
+T_DE[diag.updater_update]="Updater-Update verfügbar (lokal %s / Repo %s)."
+T_ES[diag.updater_update]="Actualización del updater disponible (local %s / repo %s)."
+T_IT[diag.updater_update]="Aggiornamento updater disponibile (locale %s / repo %s)."
+
+T_EN[diag.repo_unreachable]="Repository unreachable (no version comparison): %s"
+T_FR[diag.repo_unreachable]="Dépôt injoignable (pas de comparaison de version) : %s"
+T_DE[diag.repo_unreachable]="Repository nicht erreichbar (kein Versionsvergleich): %s"
+T_ES[diag.repo_unreachable]="Repositorio inaccesible (sin comparación de versión): %s"
+T_IT[diag.repo_unreachable]="Repository irraggiungibile (nessun confronto di versione): %s"
+
+T_EN[diag.repo_unset]="REPO_RAW not set — no updates or self-healing possible."
+T_FR[diag.repo_unset]="REPO_RAW non défini — ni MAJ ni auto-guérison possibles."
+T_DE[diag.repo_unset]="REPO_RAW nicht gesetzt — keine Updates oder Selbstheilung möglich."
+T_ES[diag.repo_unset]="REPO_RAW no definido — sin actualizaciones ni autocuración posibles."
+T_IT[diag.repo_unset]="REPO_RAW non impostato — nessun aggiornamento o autoguarigione possibile."
+
+T_EN[diag.present]="Present: %s"
+T_FR[diag.present]="Présent : %s"
+T_DE[diag.present]="Vorhanden: %s"
+T_ES[diag.present]="Presente: %s"
+T_IT[diag.present]="Presente: %s"
+
+T_EN[diag.absent]="Missing: %s"
+T_FR[diag.absent]="Absent : %s"
+T_DE[diag.absent]="Fehlt: %s"
+T_ES[diag.absent]="Ausente: %s"
+T_IT[diag.absent]="Assente: %s"
+
+T_EN[diag.summary_cron_ok]="Summary cron present (DAILY_SUMMARY enabled)."
+T_FR[diag.summary_cron_ok]="Cron de résumé présent (DAILY_SUMMARY activé)."
+T_DE[diag.summary_cron_ok]="Zusammenfassungs-Cron vorhanden (DAILY_SUMMARY aktiviert)."
+T_ES[diag.summary_cron_ok]="Cron de resumen presente (DAILY_SUMMARY activado)."
+T_IT[diag.summary_cron_ok]="Cron del riepilogo presente (DAILY_SUMMARY attivato)."
+
+T_EN[diag.summary_cron_missing_wanted]="Summary cron missing although DAILY_SUMMARY is enabled — will self-heal on the next hourly run."
+T_FR[diag.summary_cron_missing_wanted]="Cron de résumé absent alors que DAILY_SUMMARY est activé — auto-guérison au prochain passage horaire."
+T_DE[diag.summary_cron_missing_wanted]="Zusammenfassungs-Cron fehlt, obwohl DAILY_SUMMARY aktiviert ist — Selbstheilung beim nächsten stündlichen Lauf."
+T_ES[diag.summary_cron_missing_wanted]="Cron de resumen ausente aunque DAILY_SUMMARY está activado — autocuración en la próxima ejecución horaria."
+T_IT[diag.summary_cron_missing_wanted]="Cron del riepilogo assente benché DAILY_SUMMARY sia attivato — autoguarigione alla prossima esecuzione oraria."
+
+T_EN[diag.summary_cron_orphan]="Summary cron present although DAILY_SUMMARY is disabled — will be removed on the next hourly run."
+T_FR[diag.summary_cron_orphan]="Cron de résumé présent alors que DAILY_SUMMARY est désactivé — sera retiré au prochain passage horaire."
+T_DE[diag.summary_cron_orphan]="Zusammenfassungs-Cron vorhanden, obwohl DAILY_SUMMARY deaktiviert ist — wird beim nächsten stündlichen Lauf entfernt."
+T_ES[diag.summary_cron_orphan]="Cron de resumen presente aunque DAILY_SUMMARY está desactivado — se eliminará en la próxima ejecución horaria."
+T_IT[diag.summary_cron_orphan]="Cron del riepilogo presente benché DAILY_SUMMARY sia disattivato — sarà rimosso alla prossima esecuzione oraria."
+
+T_EN[diag.summary_cron_off]="Summary cron absent (DAILY_SUMMARY disabled)."
+T_FR[diag.summary_cron_off]="Cron de résumé absent (DAILY_SUMMARY désactivé)."
+T_DE[diag.summary_cron_off]="Zusammenfassungs-Cron nicht vorhanden (DAILY_SUMMARY deaktiviert)."
+T_ES[diag.summary_cron_off]="Cron de resumen ausente (DAILY_SUMMARY desactivado)."
+T_IT[diag.summary_cron_off]="Cron del riepilogo assente (DAILY_SUMMARY disattivato)."
+
+T_EN[diag.ipset_ok]="ipset %s present (%s members)."
+T_FR[diag.ipset_ok]="ipset %s présent (%s membres)."
+T_DE[diag.ipset_ok]="ipset %s vorhanden (%s Einträge)."
+T_ES[diag.ipset_ok]="ipset %s presente (%s miembros)."
+T_IT[diag.ipset_ok]="ipset %s presente (%s membri)."
+
+T_EN[diag.ipset_missing]="ipset %s missing — no bans are enforced."
+T_FR[diag.ipset_missing]="ipset %s absent — aucun ban n'est appliqué."
+T_DE[diag.ipset_missing]="ipset %s fehlt — keine Sperren aktiv."
+T_ES[diag.ipset_missing]="ipset %s ausente — no se aplica ningún bloqueo."
+T_IT[diag.ipset_missing]="ipset %s assente — nessun blocco applicato."
+
+T_EN[diag.iptables_ok]="iptables INPUT DROP rule present."
+T_FR[diag.iptables_ok]="Règle iptables INPUT DROP présente."
+T_DE[diag.iptables_ok]="iptables INPUT-DROP-Regel vorhanden."
+T_ES[diag.iptables_ok]="Regla iptables INPUT DROP presente."
+T_IT[diag.iptables_ok]="Regola iptables INPUT DROP presente."
+
+T_EN[diag.iptables_missing]="iptables INPUT DROP rule missing — bans are not enforced."
+T_FR[diag.iptables_missing]="Règle iptables INPUT DROP absente — les bans ne sont pas appliqués."
+T_DE[diag.iptables_missing]="iptables INPUT-DROP-Regel fehlt — Sperren werden nicht durchgesetzt."
+T_ES[diag.iptables_missing]="Regla iptables INPUT DROP ausente — los bloqueos no se aplican."
+T_IT[diag.iptables_missing]="Regola iptables INPUT DROP assente — i blocchi non vengono applicati."
+
+T_EN[diag.persist_ok]="Firewall persistence present (ipset + rules.v4)."
+T_FR[diag.persist_ok]="Persistance du pare-feu présente (ipset + rules.v4)."
+T_DE[diag.persist_ok]="Firewall-Persistenz vorhanden (ipset + rules.v4)."
+T_ES[diag.persist_ok]="Persistencia del firewall presente (ipset + rules.v4)."
+T_IT[diag.persist_ok]="Persistenza del firewall presente (ipset + rules.v4)."
+
+T_EN[diag.persist_missing]="Firewall persistence incomplete — bans may be lost on reboot."
+T_FR[diag.persist_missing]="Persistance du pare-feu incomplète — les bans risquent d'être perdus au reboot."
+T_DE[diag.persist_missing]="Firewall-Persistenz unvollständig — Sperren gehen beim Neustart evtl. verloren."
+T_ES[diag.persist_missing]="Persistencia del firewall incompleta — los bloqueos pueden perderse al reiniciar."
+T_IT[diag.persist_missing]="Persistenza del firewall incompleta — i blocchi potrebbero perdersi al riavvio."
+
+T_EN[diag.root_skip]="Firewall checks skipped (root required)."
+T_FR[diag.root_skip]="Contrôles pare-feu ignorés (root requis)."
+T_DE[diag.root_skip]="Firewall-Prüfungen übersprungen (root erforderlich)."
+T_ES[diag.root_skip]="Comprobaciones del firewall omitidas (se requiere root)."
+T_IT[diag.root_skip]="Controlli firewall ignorati (root richiesto)."
+
+T_EN[diag.logs]="Logs: %s readable, %s excluded, %s unreadable."
+T_FR[diag.logs]="Logs : %s lisibles, %s exclus, %s illisibles."
+T_DE[diag.logs]="Logs: %s lesbar, %s ausgeschlossen, %s unlesbar."
+T_ES[diag.logs]="Logs: %s legibles, %s excluidos, %s ilegibles."
+T_IT[diag.logs]="Log: %s leggibili, %s esclusi, %s illeggibili."
+
+T_EN[diag.notify_channels]="Notification channels configured: %s."
+T_FR[diag.notify_channels]="Canaux de notification configurés : %s."
+T_DE[diag.notify_channels]="Konfigurierte Benachrichtigungskanäle: %s."
+T_ES[diag.notify_channels]="Canales de notificación configurados: %s."
+T_IT[diag.notify_channels]="Canali di notifica configurati: %s."
+
+T_EN[diag.notify_none]="No notification channel configured (optional)."
+T_FR[diag.notify_none]="Aucun canal de notification configuré (optionnel)."
+T_DE[diag.notify_none]="Kein Benachrichtigungskanal konfiguriert (optional)."
+T_ES[diag.notify_none]="Ningún canal de notificación configurado (opcional)."
+T_IT[diag.notify_none]="Nessun canale di notifica configurato (opzionale)."
+
+T_EN[diag.notify_orphan_bans]="NOTIFY_BANS is enabled but no channel is configured."
+T_FR[diag.notify_orphan_bans]="NOTIFY_BANS est activé mais aucun canal n'est configuré."
+T_DE[diag.notify_orphan_bans]="NOTIFY_BANS ist aktiviert, aber kein Kanal konfiguriert."
+T_ES[diag.notify_orphan_bans]="NOTIFY_BANS está activado pero no hay ningún canal configurado."
+T_IT[diag.notify_orphan_bans]="NOTIFY_BANS è attivato ma nessun canale è configurato."
+
+T_EN[diag.notify_orphan_summary]="DAILY_SUMMARY is enabled but no channel is configured."
+T_FR[diag.notify_orphan_summary]="DAILY_SUMMARY est activé mais aucun canal n'est configuré."
+T_DE[diag.notify_orphan_summary]="DAILY_SUMMARY ist aktiviert, aber kein Kanal konfiguriert."
+T_ES[diag.notify_orphan_summary]="DAILY_SUMMARY está activado pero no hay ningún canal configurado."
+T_IT[diag.notify_orphan_summary]="DAILY_SUMMARY è attivato ma nessun canale è configurato."
+
+T_EN[diag.tally_clean]="All checks passed — no anomaly detected."
+T_FR[diag.tally_clean]="Tous les contrôles passent — aucune anomalie détectée."
+T_DE[diag.tally_clean]="Alle Prüfungen bestanden — keine Anomalie erkannt."
+T_ES[diag.tally_clean]="Todas las comprobaciones pasaron — ninguna anomalía detectada."
+T_IT[diag.tally_clean]="Tutti i controlli superati — nessuna anomalia rilevata."
+
+T_EN[diag.tally_problems]="%s anomaly(ies) detected — see the [WARN]/[FAIL] lines above."
+T_FR[diag.tally_problems]="%s anomalie(s) détectée(s) — voir les lignes [WARN]/[FAIL] ci-dessus."
+T_DE[diag.tally_problems]="%s Anomalie(n) erkannt — siehe die [WARN]/[FAIL]-Zeilen oben."
+T_ES[diag.tally_problems]="%s anomalía(s) detectada(s) — vea las líneas [WARN]/[FAIL] de arriba."
+T_IT[diag.tally_problems]="%s anomalia(e) rilevata(e) — vedere le righe [WARN]/[FAIL] qui sopra."
 
 # --- Aide : section configuration (/etc/ban_404.conf) ---
 T_EN[help.conf_header]="Configuration: %s (overrides defaults; never overwritten by updates)"
@@ -752,6 +957,7 @@ show_help() {
     t help.unban
     t help.summary
     t help.checknotif
+    t help.diag
     t help.lang
     t help.version
     t help.help
@@ -1040,6 +1246,132 @@ check_notification() {  # $1 = email|webhook|all (défaut all)
     exit 0
 }
 
+# ---------- --diag : auto-diagnostic lecture seule de l'état du serveur ----------
+# Liste les anomalies (composants & versions, crons, pare-feu, conf/réseau, logs, cohérence des
+# notifications) sans rien modifier ni envoyer (≠ --check-notification qui émet un test live).
+# Calque check_notification : en-tête, une ligne [ OK ]/[WARN]/[FAIL] par contrôle, bilan, exit
+# (0 = sain, 1 = au moins une anomalie). DIAG_PROBLEMS compte les WARN + FAIL.
+DIAG_PROBLEMS=0
+diag_line() {  # $1 = ok|warn|fail ; $2 = message déjà localisé
+    local tag
+    case "$1" in
+        ok)   tag="[ OK ]" ;;
+        warn) tag="[WARN]"; DIAG_PROBLEMS=$((DIAG_PROBLEMS + 1)) ;;
+        *)    tag="[FAIL]"; DIAG_PROBLEMS=$((DIAG_PROBLEMS + 1)) ;;
+    esac
+    printf '%s %s\n' "$tag" "$2"
+}
+diag_is_on() { case "${1:-}" in true|1|yes|on) return 0 ;; *) return 1 ;; esac; }
+
+do_diag() {
+    local engine="/usr/local/sbin/ban_404.sh" updater="/usr/local/sbin/update_ban_404.sh"
+    local upd_ver="" repo_engine repo_upd up n chans
+    local found excluded unreadable log_dir vhost f
+    t diag.header
+
+    # 1. Composants & versions (local)
+    if [ -f "$engine" ]; then diag_line ok "$(t diag.engine_ok "$BAN404_VERSION")"
+    else diag_line fail "$(t diag.engine_missing "$engine")"; fi
+    if [ -f "$updater" ]; then
+        upd_ver=$(grep -m1 '^UPDATER_VERSION=' "$updater" 2>/dev/null | cut -d'"' -f2)
+        if [ -n "$upd_ver" ]; then diag_line ok "$(t diag.updater_ok "$upd_ver")"
+        else diag_line warn "$(t diag.updater_legacy)"; fi
+    else
+        diag_line fail "$(t diag.updater_missing "$updater")"
+    fi
+
+    # 2. Comparaison réseau au dépôt (versions locales vs REPO_RAW)
+    if [ -z "${REPO_RAW:-}" ]; then
+        diag_line warn "$(t diag.repo_unset)"
+    elif ! command -v curl >/dev/null 2>&1; then
+        diag_line warn "$(t diag.repo_unreachable "$REPO_RAW")"
+    else
+        repo_engine=$(curl -fsSL --max-time 15 "$REPO_RAW/ban_404.sh"        2>/dev/null | grep -m1 '^BAN404_VERSION='   | cut -d'"' -f2)
+        repo_upd=$(   curl -fsSL --max-time 15 "$REPO_RAW/update_ban_404.sh" 2>/dev/null | grep -m1 '^UPDATER_VERSION=' | cut -d'"' -f2)
+        if [ -z "$repo_engine" ] && [ -z "$repo_upd" ]; then
+            diag_line warn "$(t diag.repo_unreachable "$REPO_RAW")"
+        else
+            up=1
+            if [ -n "$repo_engine" ] && [ "$repo_engine" != "$BAN404_VERSION" ]; then
+                diag_line warn "$(t diag.engine_update "$BAN404_VERSION" "$repo_engine")"; up=0
+            fi
+            if [ -n "$repo_upd" ] && [ -n "$upd_ver" ] && [ "$repo_upd" != "$upd_ver" ]; then
+                diag_line warn "$(t diag.updater_update "$upd_ver" "$repo_upd")"; up=0
+            fi
+            [ "$up" -eq 1 ] && diag_line ok "$(t diag.repo_uptodate)"
+        fi
+    fi
+
+    # 3. Crons (hourly = FAIL si absent ; update = WARN ; summary = cohérence avec DAILY_SUMMARY)
+    if [ -f /etc/cron.hourly/ban_404 ]; then diag_line ok "$(t diag.present /etc/cron.hourly/ban_404)"
+    else diag_line fail "$(t diag.absent /etc/cron.hourly/ban_404)"; fi
+    if [ -f /etc/cron.daily/ban_404_update ]; then diag_line ok "$(t diag.present /etc/cron.daily/ban_404_update)"
+    else diag_line warn "$(t diag.absent /etc/cron.daily/ban_404_update)"; fi
+    if diag_is_on "$DAILY_SUMMARY"; then
+        if [ -f /etc/cron.daily/ban_404_summary ]; then diag_line ok "$(t diag.summary_cron_ok)"
+        else diag_line warn "$(t diag.summary_cron_missing_wanted)"; fi
+    else
+        if [ -f /etc/cron.daily/ban_404_summary ]; then diag_line warn "$(t diag.summary_cron_orphan)"
+        else diag_line ok "$(t diag.summary_cron_off)"; fi
+    fi
+
+    # 4. Pare-feu (lecture ipset/iptables => root requis)
+    if [ "$(id -u)" -eq 0 ]; then
+        if ipset list "$IPSET_NAME" &>/dev/null; then
+            n=$(ipset list "$IPSET_NAME" 2>/dev/null | awk '/^Members:/{m=1;next} m&&NF{c++} END{print c+0}')
+            diag_line ok "$(t diag.ipset_ok "$IPSET_NAME" "$n")"
+        else
+            diag_line fail "$(t diag.ipset_missing "$IPSET_NAME")"
+        fi
+        if /sbin/iptables -C INPUT -m set --match-set "$IPSET_NAME" src -j DROP &>/dev/null; then
+            diag_line ok "$(t diag.iptables_ok)"
+        else
+            diag_line fail "$(t diag.iptables_missing)"
+        fi
+        if [ -f "$IPSET_SAVE_FILE" ] && [ -f /etc/iptables/rules.v4 ]; then
+            diag_line ok "$(t diag.persist_ok)"
+        else
+            diag_line warn "$(t diag.persist_missing)"
+        fi
+    else
+        diag_line warn "$(t diag.root_skip)"
+    fi
+
+    # 5. Conf & logrotate
+    if [ -f "$CONF_FILE" ]; then diag_line ok "$(t diag.present "$CONF_FILE")"
+    else diag_line fail "$(t diag.absent "$CONF_FILE")"; fi
+    if [ -f /etc/logrotate.d/ban_404 ]; then diag_line ok "$(t diag.present /etc/logrotate.d/ban_404)"
+    else diag_line warn "$(t diag.absent /etc/logrotate.d/ban_404)"; fi
+
+    # 6. Découverte des logs (même logique que l'analyse ; purement lecture)
+    found=0; excluded=0; unreadable=0
+    for log_dir in ${BASE_DIR}/*/log/; do
+        [ -d "$log_dir" ] || continue
+        vhost="${log_dir%/log/}"; vhost="${vhost##*/}"
+        if is_excluded_vhost "$vhost"; then excluded=$((excluded + 1)); continue; fi
+        if [ -f "${log_dir}access.log" ]; then f="${log_dir}access.log"
+        else f=$(ls -1t "${log_dir}"*access.log 2>/dev/null | head -n 1); fi
+        if [ -n "$f" ] && [ -r "$f" ] && [ -s "$f" ]; then found=$((found + 1))
+        else unreadable=$((unreadable + 1)); fi
+    done
+    if [ "$found" -gt 0 ]; then diag_line ok   "$(t diag.logs "$found" "$excluded" "$unreadable")"
+    else                        diag_line warn "$(t diag.logs "$found" "$excluded" "$unreadable")"; fi
+
+    # 7. Cohérence des notifications (config seule, aucun envoi)
+    chans=""
+    [ -n "$WEBHOOK_URL" ] && chans="webhook"
+    [ -n "$NOTIFY_EMAIL" ] && chans="${chans:+$chans, }e-mail"
+    if [ -n "$chans" ]; then diag_line ok "$(t diag.notify_channels "$chans")"
+    else diag_line ok "$(t diag.notify_none)"; fi
+    if diag_is_on "$NOTIFY_BANS"   && [ -z "$WEBHOOK_URL" ] && [ -z "$NOTIFY_EMAIL" ]; then diag_line warn "$(t diag.notify_orphan_bans)"; fi
+    if diag_is_on "$DAILY_SUMMARY" && [ -z "$WEBHOOK_URL" ] && [ -z "$NOTIFY_EMAIL" ]; then diag_line warn "$(t diag.notify_orphan_summary)"; fi
+
+    # 8. Bilan
+    echo ""
+    if [ "$DIAG_PROBLEMS" -eq 0 ]; then t diag.tally_clean; exit 0; fi
+    t diag.tally_problems "$DIAG_PROBLEMS"; exit 1
+}
+
 # ---------- --unban <IP|all> : retrait manuel de l'ipset (sans bricoler ipset à la main) ----------
 do_unban() {  # $1 = IP | all  (valeur requise, pas de défaut)
     local target="${1:-}" n
@@ -1074,6 +1406,7 @@ while [[ $# -gt 0 ]]; do
         --summary) do_summary ;;
         --check-notification) check_notification "${2:-all}" ;;
         --check-notification=*) check_notification "${1#*=}" ;;
+        --diag) do_diag ;;
         --unban) do_unban "${2:-}" ;;
         --unban=*) do_unban "${1#*=}" ;;
         --version) t version.line "$BAN404_VERSION"; t version.author; exit 0 ;;
@@ -1163,6 +1496,31 @@ self_heal_updater() {
     return 0
 }
 
+# Réconciliation du cron de résumé quotidien selon DAILY_SUMMARY. La feature --summary (et son
+# cron.daily) a été ajoutée après coup, et l'installeur — seul à le poser autrefois — n'est jamais
+# rejoué. Le moteur, lui, est rafraîchi partout par l'updater : à chaque passage horaire il aligne
+# l'existence du fichier sur DAILY_SUMMARY (le crée si activé, le retire si désactivé). DAILY_SUMMARY
+# devient ainsi l'interrupteur unique (exécution ET présence du cron) ; le moteur en est seul maître
+# (l'installeur ne le pose plus). Idempotent : sans effet si le fichier est déjà dans l'état voulu.
+self_heal_summary_cron() {
+    local f="/etc/cron.daily/ban_404_summary"
+    [ "$DRY_RUN" = true ] && return 0
+    [ "$(id -u)" -eq 0 ] || return 0
+    case "$DAILY_SUMMARY" in
+        true|1|yes|on)
+            [ -f "$f" ] && return 0                   # déjà présent => rien à faire
+            cat > "$f" <<'EOF'
+#!/bin/sh
+exec /usr/local/sbin/ban_404.sh --summary
+EOF
+            chmod 755 "$f" && t heal.summary_cron "$f" ;;
+        *)
+            [ -f "$f" ] || return 0                   # déjà absent => rien à faire
+            rm -f "$f" && t heal.summary_cron_removed "$f" ;;
+    esac
+    return 0
+}
+
 if [ "$DRY_RUN" = false ]; then
     ipset list "$IPSET_NAME" &>/dev/null
     if [ $? -ne 0 ]; then
@@ -1182,6 +1540,9 @@ enforce_whitelist_unban
 
 # Auto-guérison éventuelle de l'updater legacy (one-shot ; sans effet si déjà moderne).
 self_heal_updater
+
+# Réconciliation du cron de résumé quotidien sur DAILY_SUMMARY (le crée/retire selon le réglage).
+self_heal_summary_cron
 
 # 1. Recherche des fichiers de logs
 FILES_FOUND=()

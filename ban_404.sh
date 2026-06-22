@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="1.4.7"
+BAN404_VERSION="1.4.8"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -16,6 +16,7 @@ LOG_FILE="/var/log/ban_404.log"   # journal (écrit par le wrapper cron) ; lu pa
 # Seuils & motifs de détection (surchargeables par la conf)
 BAN_THRESHOLD=10     # Ban si le score dépasse ce seuil dans la fenêtre.
 HONEYPOT_SCORE=100   # Score ajouté par hit honeypot (>= ce score => ban immédiat).
+HONEYPOT_BAN_TIMEOUT=604800   # Timeout du ban honeypot (s) : 7 j, plus long que BAN_TIMEOUT (flood 404).
 HONEYPOT_PATTERN='\.env|wp-config\.php|phpmyadmin|config\.json|setup\.php|actuator|xmlrpc\.php'
 NOISE_PATTERN='\.(jpg|jpeg|png|gif|webp|ico|css|js|svg|woff2?|map)$|apple-touch-icon|favicon|browserconfig\.xml|mstile|autodiscover\.xml|sitemap\.xml|robots\.txt|ads\.txt|\.well-known/(security\.txt|pki-validation)'
 
@@ -303,6 +304,12 @@ T_DE[help.stats]="  --stats          Sperr-Statistiken anzeigen."
 T_ES[help.stats]="  --stats          Mostrar las estadísticas de bloqueo."
 T_IT[help.stats]="  --stats          Mostrare le statistiche di blocco."
 
+T_EN[help.unban]="  --unban <IP|all> Remove an IP (or all) from the ban list and exit."
+T_FR[help.unban]="  --unban <IP|all> Retirer une IP (ou toutes) de la liste de bannissement et quitter."
+T_DE[help.unban]="  --unban <IP|all> Eine IP (oder alle) aus der Sperrliste entfernen und beenden."
+T_ES[help.unban]="  --unban <IP|all> Eliminar una IP (o todas) de la lista de bloqueo y salir."
+T_IT[help.unban]="  --unban <IP|all> Rimuovere un IP (o tutti) dalla lista di blocco e uscire."
+
 T_EN[help.summary]="  --summary        Send the daily summary via the configured channel (opt-in)."
 T_FR[help.summary]="  --summary        Envoyer le résumé quotidien via le canal configuré (opt-in)."
 T_DE[help.summary]="  --summary        Tägliche Zusammenfassung über den konfigurierten Kanal senden (opt-in)."
@@ -472,6 +479,12 @@ T_DE[help.conf_honeypot_score]="  HONEYPOT_SCORE   Score pro Honeypot-Treffer; >
 T_ES[help.conf_honeypot_score]="  HONEYPOT_SCORE   Score por hit honeypot; >= significa bloqueo inmediato (por defecto 100)."
 T_IT[help.conf_honeypot_score]="  HONEYPOT_SCORE   Punteggio per hit honeypot; >= significa blocco immediato (predefinito 100)."
 
+T_EN[help.conf_honeypot_timeout]="  HONEYPOT_BAN_TIMEOUT  Ban duration (s) for honeypot hits (default 604800 = 7 days)."
+T_FR[help.conf_honeypot_timeout]="  HONEYPOT_BAN_TIMEOUT  Durée du ban (s) pour les hits honeypot (défaut 604800 = 7 jours)."
+T_DE[help.conf_honeypot_timeout]="  HONEYPOT_BAN_TIMEOUT  Sperrdauer (s) für Honeypot-Treffer (Standard 604800 = 7 Tage)."
+T_ES[help.conf_honeypot_timeout]="  HONEYPOT_BAN_TIMEOUT  Duración del bloqueo (s) para hits honeypot (por defecto 604800 = 7 días)."
+T_IT[help.conf_honeypot_timeout]="  HONEYPOT_BAN_TIMEOUT  Durata del blocco (s) per gli hit honeypot (predefinito 604800 = 7 giorni)."
+
 T_EN[help.conf_webhook]="  WEBHOOK_URL      JSON POST of new bans (Slack/Discord/Teams/Google Chat...); empty = off."
 T_FR[help.conf_webhook]="  WEBHOOK_URL      POST JSON des nouveaux bans (Slack/Discord/Teams/Google Chat...) ; vide = inactif."
 T_DE[help.conf_webhook]="  WEBHOOK_URL      JSON-POST neuer Sperren (Slack/Discord/Teams/Google Chat...); leer = aus."
@@ -592,6 +605,60 @@ T_DE[cidr.skip]="[SKIP] CIDR auf Whitelist, nicht gesperrt: %s"
 T_ES[cidr.skip]="[SKIP] CIDR en lista blanca, no bloqueado: %s"
 T_IT[cidr.skip]="[SKIP] CIDR in whitelist, non bloccato: %s"
 
+T_EN[wl.unban]="[-] Unbanning IP (whitelisted): %s"
+T_FR[wl.unban]="[-] Déblocage de l'IP (liste blanche) : %s"
+T_DE[wl.unban]="[-] Entsperrung der IP (Whitelist): %s"
+T_ES[wl.unban]="[-] Desbloqueo de la IP (lista blanca): %s"
+T_IT[wl.unban]="[-] Sblocco dell'IP (whitelist): %s"
+
+T_EN[wl.sim_unban]="[SIMULATION] [-] IP %s would be UNBANNED (whitelisted)."
+T_FR[wl.sim_unban]="[SIMULATION] [-] L'IP %s aurait été DÉBANNIE (liste blanche)."
+T_DE[wl.sim_unban]="[SIMULATION] [-] IP %s würde ENTSPERRT (Whitelist)."
+T_ES[wl.sim_unban]="[SIMULATION] [-] La IP %s sería DESBLOQUEADA (lista blanca)."
+T_IT[wl.sim_unban]="[SIMULATION] [-] L'IP %s verrebbe SBLOCCATO (whitelist)."
+
+T_EN[unban.missing]="--unban requires an IP or 'all'."
+T_FR[unban.missing]="--unban requiert une IP ou 'all'."
+T_DE[unban.missing]="--unban erfordert eine IP oder 'all'."
+T_ES[unban.missing]="--unban requiere una IP o 'all'."
+T_IT[unban.missing]="--unban richiede un IP o 'all'."
+
+T_EN[unban.needroot]="--unban requires root privileges (use sudo)."
+T_FR[unban.needroot]="--unban requiert les privilèges root (utilisez sudo)."
+T_DE[unban.needroot]="--unban erfordert Root-Rechte (sudo verwenden)."
+T_ES[unban.needroot]="--unban requiere privilegios de root (use sudo)."
+T_IT[unban.needroot]="--unban richiede i privilegi di root (usare sudo)."
+
+T_EN[unban.noset]="ipset %s does not exist — nothing to unban."
+T_FR[unban.noset]="l'ipset %s n'existe pas — rien à débannir."
+T_DE[unban.noset]="ipset %s existiert nicht — nichts zu entsperren."
+T_ES[unban.noset]="el ipset %s no existe — nada que desbloquear."
+T_IT[unban.noset]="l'ipset %s non esiste — niente da sbloccare."
+
+T_EN[unban.done]="[-] IP %s removed from the ban list."
+T_FR[unban.done]="[-] IP %s retirée de la liste de bannissement."
+T_DE[unban.done]="[-] IP %s von der Sperrliste entfernt."
+T_ES[unban.done]="[-] IP %s eliminada de la lista de bloqueo."
+T_IT[unban.done]="[-] IP %s rimossa dalla lista di blocco."
+
+T_EN[unban.all_done]="[-] All bans removed (%s IP(s) cleared)."
+T_FR[unban.all_done]="[-] Tous les bans retirés (%s IP effacée(s))."
+T_DE[unban.all_done]="[-] Alle Sperren entfernt (%s IP(s) gelöscht)."
+T_ES[unban.all_done]="[-] Todos los bloqueos eliminados (%s IP borrada(s))."
+T_IT[unban.all_done]="[-] Tutti i ban rimossi (%s IP cancellati)."
+
+T_EN[unban.notfound]="IP %s is not in the ban list."
+T_FR[unban.notfound]="L'IP %s n'est pas dans la liste de bannissement."
+T_DE[unban.notfound]="IP %s ist nicht in der Sperrliste."
+T_ES[unban.notfound]="La IP %s no está en la lista de bloqueo."
+T_IT[unban.notfound]="L'IP %s non è nella lista di blocco."
+
+T_EN[unban.fail]="Failed to unban %s (ipset error)."
+T_FR[unban.fail]="Échec du débannissement de %s (erreur ipset)."
+T_DE[unban.fail]="Entsperren von %s fehlgeschlagen (ipset-Fehler)."
+T_ES[unban.fail]="Error al desbloquear %s (error de ipset)."
+T_IT[unban.fail]="Sblocco di %s non riuscito (errore ipset)."
+
 T_EN[notify.subject]="ban-404 [%s]: %s new IP(s) banned"
 T_FR[notify.subject]="ban-404 [%s] : %s nouvelle(s) IP bannie(s)"
 T_DE[notify.subject]="ban-404 [%s]: %s neue IP(s) gesperrt"
@@ -682,6 +749,7 @@ show_help() {
     t help.list
     t help.bytimeout
     t help.stats
+    t help.unban
     t help.summary
     t help.checknotif
     t help.lang
@@ -699,6 +767,7 @@ show_help() {
     t help.conf_tail
     t help.conf_threshold
     t help.conf_honeypot_score
+    t help.conf_honeypot_timeout
     t help.conf_webhook
     t help.conf_email
     t help.conf_from
@@ -767,6 +836,34 @@ in_whitelist_cidr() {  # $1=ip
         [ -n "$c" ] && ip_in_cidr "$ip" "$c" && return 0
     done
     return 1
+}
+in_whitelist_ip() {  # $1=ip ; correspondance EXACTE dans WHITELIST_IP (séparé par | )
+    [ -z "$WHITELIST_IP" ] && return 1
+    local ip="$1" w IFS='|'
+    for w in $WHITELIST_IP; do
+        [ -n "$w" ] && [ "$ip" = "$w" ] && return 0
+    done
+    return 1
+}
+# Débannit activement les IP déjà dans l'ipset que la whitelist couvre (WHITELIST_IP exacte
+# ou WHITELIST_CIDR). Comble l'angle mort : une IP bannie PUIS whitelistée n'apparaît plus
+# dans les candidats (awk l'exclut côté IP exacte ; elle ne floode plus), donc elle n'était
+# jamais retirée et n'expirait qu'au BAN_TIMEOUT. Idempotent ; respecte --dry-run.
+enforce_whitelist_unban() {
+    local ip removed=false
+    while read -r ip; do
+        [ -z "$ip" ] && continue
+        in_whitelist_ip "$ip" || in_whitelist_cidr "$ip" || continue
+        if [ "$DRY_RUN" = true ]; then
+            t wl.sim_unban "$ip"
+        elif ipset del "$IPSET_NAME" "$ip" 2>/dev/null; then
+            t wl.unban "$ip"; removed=true
+        fi
+    done < <(ipset list "$IPSET_NAME" 2>/dev/null | awk '/^Members:/{m=1;next} m&&NF{print $1}')
+    if [ "$removed" = true ]; then
+        mkdir -p "$(dirname "$IPSET_SAVE_FILE")"
+        ipset save > "$IPSET_SAVE_FILE"
+    fi
 }
 
 # ---------- Exclusion de vhosts (découverte des logs) ----------
@@ -943,6 +1040,27 @@ check_notification() {  # $1 = email|webhook|all (défaut all)
     exit 0
 }
 
+# ---------- --unban <IP|all> : retrait manuel de l'ipset (sans bricoler ipset à la main) ----------
+do_unban() {  # $1 = IP | all  (valeur requise, pas de défaut)
+    local target="${1:-}" n
+    [ -z "$target" ] && { t unban.missing; exit 1; }
+    [ "$(id -u)" -ne 0 ] && { t unban.needroot; exit 1; }
+    ipset list "$IPSET_NAME" &>/dev/null || { t unban.noset "$IPSET_NAME"; exit 1; }
+    if [ "${target,,}" = "all" ]; then
+        n=$(ipset list "$IPSET_NAME" 2>/dev/null | awk '/^Members:/{m=1;next} m&&NF{c++} END{print c+0}')
+        ipset flush "$IPSET_NAME" 2>/dev/null || { t unban.fail "all"; exit 1; }
+        t unban.all_done "$n"
+    elif ipset test "$IPSET_NAME" "$target" &>/dev/null; then
+        ipset del "$IPSET_NAME" "$target" 2>/dev/null || { t unban.fail "$target"; exit 1; }
+        t unban.done "$target"
+    else
+        t unban.notfound "$target"; exit 0
+    fi
+    mkdir -p "$(dirname "$IPSET_SAVE_FILE")"
+    ipset save > "$IPSET_SAVE_FILE" 2>/dev/null
+    exit 0
+}
+
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --dry-run) DRY_RUN=true; shift ;;
@@ -956,6 +1074,8 @@ while [[ $# -gt 0 ]]; do
         --summary) do_summary ;;
         --check-notification) check_notification "${2:-all}" ;;
         --check-notification=*) check_notification "${1#*=}" ;;
+        --unban) do_unban "${2:-}" ;;
+        --unban=*) do_unban "${1#*=}" ;;
         --version) t version.line "$BAN404_VERSION"; t version.author; exit 0 ;;
         --help|-h) show_help ;;
         *) t err.unknown_opt "$1"; exit 1 ;;
@@ -1055,6 +1175,10 @@ if [ "$DRY_RUN" = false ]; then
         /sbin/iptables-save > /etc/iptables/rules.v4
     fi
 fi
+
+# Débannissement actif des IP whitelistées déjà présentes dans l'ipset (avant l'analyse,
+# pour s'appliquer même s'il n'y a aucun nouveau suspect ce passage-ci).
+enforce_whitelist_unban
 
 # Auto-guérison éventuelle de l'updater legacy (one-shot ; sans effet si déjà moderne).
 self_heal_updater
@@ -1194,10 +1318,12 @@ while read -r count ip; do
         else
             if [ "$count" -ge "$HONEYPOT_SCORE" ]; then
                 t ban.honeypot "$ip"; hp=1
+                # Ban honeypot : timeout différencié (plus long que le défaut du set).
+                ipset -exist add "$IPSET_NAME" "$ip" timeout "$HONEYPOT_BAN_TIMEOUT"
             else
                 t ban.add "$ip" "$count"; hp=0
+                ipset -exist add "$IPSET_NAME" "$ip"
             fi
-            ipset -exist add "$IPSET_NAME" "$ip"
             changes_made=true
             new_bans+=("$ip|$count|$hp")
         fi

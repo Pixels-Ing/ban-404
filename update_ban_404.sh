@@ -6,7 +6,7 @@
 # à la conf si elle est absente (langue héritée du shell/système, sinon en).
 set -u
 
-UPDATER_VERSION="1.2.4"
+UPDATER_VERSION="1.2.5"
 CONF_FILE="/etc/ban_404.conf"
 TARGET="/usr/local/sbin/ban_404.sh"
 SELF="/usr/local/sbin/update_ban_404.sh"
@@ -294,12 +294,12 @@ C_OTHER=(
 "# --- Otros ajustes activos conservados tal cual ---"
 "# --- Altre impostazioni attive conservate così come sono ---")
 C_SEC=(opt cidr vhosts notif motifs)
-C_opt_v=( $'WINDOW\t#WINDOW=7200' $'BAN_TIMEOUT\t#BAN_TIMEOUT=172800' $'TAIL_LINES\t#TAIL_LINES=50000' $'BAN_THRESHOLD\t#BAN_THRESHOLD=10' $'HONEYPOT_SCORE\t#HONEYPOT_SCORE=100' )
+C_opt_v=( $'WINDOW\t#WINDOW=7200' $'BAN_TIMEOUT\t#BAN_TIMEOUT=172800' $'TAIL_LINES\t#TAIL_LINES=50000' $'BAN_THRESHOLD\t#BAN_THRESHOLD=10' $'HONEYPOT_SCORE\t#HONEYPOT_SCORE=100' $'HONEYPOT_BAN_TIMEOUT\t#HONEYPOT_BAN_TIMEOUT=604800' )
 C_cidr_v=( $'WHITELIST_CIDR\t#WHITELIST_CIDR="10.0.0.0/8|192.168.0.0/16"' )
 C_vhosts_v=( $'EXCLUDE_VHOSTS\t#EXCLUDE_VHOSTS="staging.exemple.com|interne.exemple.com"' )
 C_notif_v=( $'WEBHOOK_URL\t#WEBHOOK_URL=""' $'NOTIFY_EMAIL\t#NOTIFY_EMAIL=""' $'NOTIFY_FROM\t#NOTIFY_FROM=""' $'NOTIFY_MIN_BANS\t#NOTIFY_MIN_BANS=1' $'NOTIFY_BANS\t#NOTIFY_BANS=false' $'DAILY_SUMMARY\t#DAILY_SUMMARY=false' )
 C_motifs_v=( $'HONEYPOT_PATTERN\t#HONEYPOT_PATTERN='\''\.env|wp-config\.php|phpmyadmin|config\.json|setup\.php|actuator|xmlrpc\.php'\''' $'NOISE_PATTERN\t#NOISE_PATTERN='\''\.(jpg|jpeg|png|gif|webp|ico|css|js|svg|woff2?|map)$|apple-touch-icon|favicon|browserconfig\.xml|mstile|autodiscover\.xml|sitemap\.xml|robots\.txt|ads\.txt|\.well-known/(security\.txt|pki-validation)'\''' )
-C_KNOWN=" REPO_RAW WHITELIST_IP BAN404_LANG WINDOW BAN_TIMEOUT TAIL_LINES BAN_THRESHOLD HONEYPOT_SCORE WHITELIST_CIDR EXCLUDE_VHOSTS WEBHOOK_URL NOTIFY_EMAIL NOTIFY_FROM NOTIFY_MIN_BANS NOTIFY_BANS DAILY_SUMMARY HONEYPOT_PATTERN NOISE_PATTERN "
+C_KNOWN=" REPO_RAW WHITELIST_IP BAN404_LANG WINDOW BAN_TIMEOUT TAIL_LINES BAN_THRESHOLD HONEYPOT_SCORE HONEYPOT_BAN_TIMEOUT WHITELIST_CIDR EXCLUDE_VHOSTS WEBHOOK_URL NOTIFY_EMAIL NOTIFY_FROM NOTIFY_MIN_BANS NOTIFY_BANS DAILY_SUMMARY HONEYPOT_PATTERN NOISE_PATTERN "
 
 reconcile_conf() {  # $1 = chemin de la conf
     local f="$1" line t var sec entry def tmp pairs

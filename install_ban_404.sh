@@ -270,7 +270,9 @@ echo "iptables-persistent iptables-persistent/autosave_v4 boolean true" | debcon
 echo "iptables-persistent iptables-persistent/autosave_v6 boolean true" | debconf-set-selections
 apt-get update || t inst.apt_update_warn
 # curl : requis pour la récupération initiale du moteur via l'updater (l'install dépend du réseau).
-install_pkgs(){ apt-get install -y ipset iptables-persistent ipset-persistent cron curl; }
+# anacron : sur Debian/Ubuntu, /etc/crontab délègue cron.daily à anacron ; sans lui, le cron.daily
+# de l'updater peut ne jamais se déclencher et le serveur fige ses versions (cf. --diag, pilote cron.daily).
+install_pkgs(){ apt-get install -y ipset iptables-persistent ipset-persistent cron anacron curl; }
 if ! install_pkgs; then
     t inst.universe_try
     command -v add-apt-repository >/dev/null 2>&1 && { add-apt-repository -y universe && apt-get update || true; }

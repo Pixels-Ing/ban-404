@@ -41,6 +41,9 @@ sudo nano /etc/ban_404.conf      # WHITELIST_IP="127.0.0.1|TES.IP.FIXES"
 # (Optionnel) changer la langue des messages : en | fr | de | es | it
 sudo /usr/local/sbin/ban_404.sh --lang fr
 
+# Diagnostic de l'installation
+sudo /usr/local/sbin/ban_404.sh --diag
+
 # Vérifier sans rien bannir
 sudo /usr/local/sbin/ban_404.sh --dry-run --verbose
 ```

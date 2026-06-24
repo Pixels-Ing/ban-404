@@ -46,6 +46,9 @@ sudo /usr/local/sbin/ban_404.sh --diag
 
 # Vérifier sans rien bannir
 sudo /usr/local/sbin/ban_404.sh --dry-run --verbose
+
+# Détail des options
+sudo /usr/local/sbin/ban_404.sh --help
 ```
 
 L'installeur est **idempotent** (relançable) et gère la migration de l'ancien

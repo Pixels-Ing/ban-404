@@ -113,3 +113,40 @@ Ubuntu/Debian. Sur Ubuntu 22.04, `ipset-persistent` est dans le dépôt
 **universe** (activé par défaut sur Ubuntu Server). Aucune dépendance externe
 au-delà des paquets posés par l'installeur (`ipset`, `iptables-persistent`,
 `ipset-persistent`, `cron`).
+
+## ⚠️ ufw et pare-feu existant
+
+ban-404 écrit **directement** dans ipset + iptables et persiste son état via
+`iptables-persistent` / `netfilter-persistent`. Or, sur **Debian 12+ et Ubuntu
+récentes**, le paquet `ufw` déclare lui-même `Breaks: iptables-persistent,
+netfilter-persistent` : installer `iptables-persistent` fait donc **retirer ufw
+par apt**. Ce n'est pas ban-404 qui désinstalle ufw (le mot n'apparaît nulle
+part dans le code) — c'est une résolution de dépendances d'`apt`, déclenchée par
+le choix « ipset + iptables-persistent ».
+
+**L'installeur gère ce cas** : si ufw est installé, il **sauvegarde d'abord les
+règles en vigueur** — `iptables-save`, `ip6tables-save`, une copie de `/etc/ufw/`
+et la sortie de `ufw status verbose` — sous
+`/var/lib/ban_404/ufw-backup-<horodatage>/`, **avertit** que ufw va être retiré,
+puis **demande confirmation**. En contexte non interactif (sans TTY), il
+**s'arrête** au lieu de retirer ufw en silence ; relancer avec
+`BAN404_REMOVE_UFW=1` pour autoriser le retrait, ou `apt remove ufw` au préalable.
+
+**Important — ban-404 n'est pas un pare-feu.** Il n'ajoute qu'une règle `DROP`
+ciblant son propre ipset de scanners 404 ; il n'a **aucune** politique « deny par
+défaut » et n'ouvre/ferme aucun port de service. Si ufw portait la politique
+d'accès de ce serveur, une fois ufw retiré cette politique n'est plus réappliquée
+(notamment **au reboot**) et l'hôte peut être **plus exposé** que prévu.
+Reconstitue alors une politique équivalente **directement en iptables**, persistée
+via `netfilter-persistent save`, à partir de la sauvegarde ci-dessus :
+
+```bash
+# Repérer ce qui était filtré : règles ufw sauvegardées + ports réellement à l'écoute
+sudo cat /var/lib/ban_404/ufw-backup-*/etc-ufw/user.rules     # règles IPv4 qu'avait ufw
+sudo cat /var/lib/ban_404/ufw-backup-*/ufw-status.txt         # vue lisible (allow/deny)
+sudo ss -tulpn                                                # services à l'écoute (à protéger)
+
+# Recréer les règles voulues en iptables, puis persister
+sudo iptables -A INPUT ...                                    # politique d'accès reconstituée
+sudo netfilter-persistent save
+```

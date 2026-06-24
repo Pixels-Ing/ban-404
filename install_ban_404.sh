@@ -63,6 +63,54 @@ T_DE[inst.pkg_fail]="Paketinstallation fehlgeschlagen (ist das Repo 'universe' a
 T_ES[inst.pkg_fail]="fallo en la instalación de paquetes (¿está activado el repositorio 'universe'?)."
 T_IT[inst.pkg_fail]="installazione dei pacchetti non riuscita (il repository 'universe' è attivo?)."
 
+T_EN[inst.ufw_detected]="==> ufw is installed: it will be REMOVED by apt (ufw declares Breaks: iptables-persistent/netfilter-persistent)."
+T_FR[inst.ufw_detected]="==> ufw est installé : il va être RETIRÉ par apt (ufw déclare Breaks: iptables-persistent/netfilter-persistent)."
+T_DE[inst.ufw_detected]="==> ufw ist installiert: es wird von apt ENTFERNT (ufw deklariert Breaks: iptables-persistent/netfilter-persistent)."
+T_ES[inst.ufw_detected]="==> ufw está instalado: apt lo VA A ELIMINAR (ufw declara Breaks: iptables-persistent/netfilter-persistent)."
+T_IT[inst.ufw_detected]="==> ufw è installato: verrà RIMOSSO da apt (ufw dichiara Breaks: iptables-persistent/netfilter-persistent)."
+
+T_EN[inst.ufw_explain]="   ban-404 uses ipset+iptables and needs iptables-persistent, which recent ufw refuses to coexist with. ban-404 is NOT a firewall: it only adds a DROP rule for its own ipset."
+T_FR[inst.ufw_explain]="   ban-404 utilise ipset+iptables et requiert iptables-persistent, avec lequel ufw récent refuse de cohabiter. ban-404 n'est PAS un pare-feu : il n'ajoute qu'une règle DROP pour son propre ipset."
+T_DE[inst.ufw_explain]="   ban-404 nutzt ipset+iptables und benötigt iptables-persistent, mit dem aktuelles ufw nicht koexistieren will. ban-404 ist KEINE Firewall: es fügt nur eine DROP-Regel für sein eigenes ipset hinzu."
+T_ES[inst.ufw_explain]="   ban-404 usa ipset+iptables y necesita iptables-persistent, con el que ufw reciente se niega a convivir. ban-404 NO es un cortafuegos: solo añade una regla DROP para su propio ipset."
+T_IT[inst.ufw_explain]="   ban-404 usa ipset+iptables e richiede iptables-persistent, con cui ufw recente rifiuta di coesistere. ban-404 NON è un firewall: aggiunge solo una regola DROP per il proprio ipset."
+
+T_EN[inst.ufw_backup]="   Current firewall rules saved (iptables/ip6tables + /etc/ufw + ufw status) to: %s"
+T_FR[inst.ufw_backup]="   Règles pare-feu en vigueur sauvegardées (iptables/ip6tables + /etc/ufw + ufw status) dans : %s"
+T_DE[inst.ufw_backup]="   Aktuelle Firewall-Regeln gesichert (iptables/ip6tables + /etc/ufw + ufw status) nach: %s"
+T_ES[inst.ufw_backup]="   Reglas del cortafuegos en vigor guardadas (iptables/ip6tables + /etc/ufw + ufw status) en: %s"
+T_IT[inst.ufw_backup]="   Regole firewall in vigore salvate (iptables/ip6tables + /etc/ufw + ufw status) in: %s"
+
+T_EN[inst.ufw_backup_hint]="   Keep this: once ufw is gone its rules are no longer visible via ufw. Re-create any access policy in iptables (persisted via 'netfilter-persistent save') from that folder."
+T_FR[inst.ufw_backup_hint]="   À conserver : ufw parti, ses règles ne sont plus visibles via ufw. Reconstitue ta politique d'accès en iptables (persistée via « netfilter-persistent save ») à partir de ce dossier."
+T_DE[inst.ufw_backup_hint]="   Aufbewahren: Ist ufw weg, sind seine Regeln nicht mehr über ufw sichtbar. Zugriffsrichtlinie in iptables neu erstellen (persistiert via „netfilter-persistent save“) aus diesem Ordner."
+T_ES[inst.ufw_backup_hint]="   Consérvalo: sin ufw, sus reglas ya no se ven con ufw. Recrea tu política de acceso en iptables (persistida con « netfilter-persistent save ») a partir de esa carpeta."
+T_IT[inst.ufw_backup_hint]="   Da conservare: senza ufw, le sue regole non sono più visibili via ufw. Ricrea la tua politica d'accesso in iptables (persistita con « netfilter-persistent save ») da quella cartella."
+
+T_EN[inst.ufw_prompt]="   Proceed and let apt remove ufw? [y/N] "
+T_FR[inst.ufw_prompt]="   Continuer et laisser apt retirer ufw ? [o/N] "
+T_DE[inst.ufw_prompt]="   Fortfahren und apt ufw entfernen lassen? [j/N] "
+T_ES[inst.ufw_prompt]="   ¿Continuar y dejar que apt elimine ufw? [s/N] "
+T_IT[inst.ufw_prompt]="   Continuare e lasciare che apt rimuova ufw? [s/N] "
+
+T_EN[inst.ufw_aborted]="Aborted: ufw kept, nothing changed (backup retained)."
+T_FR[inst.ufw_aborted]="Abandon : ufw conservé, rien n'a été modifié (sauvegarde conservée)."
+T_DE[inst.ufw_aborted]="Abbruch: ufw beibehalten, nichts geändert (Sicherung bleibt erhalten)."
+T_ES[inst.ufw_aborted]="Cancelado: ufw conservado, nada cambiado (copia de seguridad conservada)."
+T_IT[inst.ufw_aborted]="Annullato: ufw mantenuto, nulla è cambiato (backup conservato)."
+
+T_EN[inst.ufw_noninteractive]="ufw would be removed but no TTY to confirm. Re-run with BAN404_REMOVE_UFW=1 to allow it, or 'apt remove ufw' first."
+T_FR[inst.ufw_noninteractive]="ufw serait retiré mais pas de TTY pour confirmer. Relance avec BAN404_REMOVE_UFW=1 pour l'autoriser, ou « apt remove ufw » d'abord."
+T_DE[inst.ufw_noninteractive]="ufw würde entfernt, aber kein TTY zum Bestätigen. Mit BAN404_REMOVE_UFW=1 erneut starten, um es zu erlauben, oder zuerst „apt remove ufw“."
+T_ES[inst.ufw_noninteractive]="ufw se eliminaría pero no hay TTY para confirmar. Reejecuta con BAN404_REMOVE_UFW=1 para permitirlo, o « apt remove ufw » primero."
+T_IT[inst.ufw_noninteractive]="ufw verrebbe rimosso ma nessun TTY per confermare. Riesegui con BAN404_REMOVE_UFW=1 per consentirlo, oppure « apt remove ufw » prima."
+
+T_EN[inst.ufw_proceeding]="   Proceeding: ufw will be removed by apt."
+T_FR[inst.ufw_proceeding]="   Poursuite : ufw va être retiré par apt."
+T_DE[inst.ufw_proceeding]="   Fortsetzung: ufw wird von apt entfernt."
+T_ES[inst.ufw_proceeding]="   Continuando: apt eliminará ufw."
+T_IT[inst.ufw_proceeding]="   Proseguimento: ufw verrà rimosso da apt."
+
 T_EN[inst.migrate_ipset]="==> Possible migration of the old ipset persistence path..."
 T_FR[inst.migrate_ipset]="==> Migration éventuelle de l'ancien chemin de persistance ipset..."
 T_DE[inst.migrate_ipset]="==> Mögliche Migration des alten ipset-Persistenzpfads..."
@@ -263,6 +311,37 @@ t() {
 
 die(){ printf -- '%s%s\n' "$(t inst.error_prefix)" "$*" >&2; exit 1; }
 [ "$(id -u)" -eq 0 ] || die "$(t inst.need_root)"
+
+# --- ufw : sur les versions récentes (Debian 12+, Ubuntu récentes) ufw déclare
+# « Breaks: iptables-persistent, netfilter-persistent » ; installer iptables-persistent
+# le fait donc RETIRER par apt — silencieusement avec -y. On prévient AVANT et on
+# SAUVEGARDE les règles en vigueur : ufw parti, elles ne sont plus consultables via ufw.
+# Détection sur paquet *installé* (le Breaks ne dépend pas de l'état actif/inactif).
+if dpkg-query -W -f='${Status}' ufw 2>/dev/null | grep -q 'ok installed'; then
+    t inst.ufw_detected
+    t inst.ufw_explain
+    ufw_backup="/var/lib/ban_404/ufw-backup-$(date +%Y%m%d-%H%M%S)"
+    mkdir -p "$ufw_backup"
+    iptables-save  > "$ufw_backup/iptables.rules"  2>/dev/null || true
+    ip6tables-save > "$ufw_backup/ip6tables.rules" 2>/dev/null || true
+    command -v ufw >/dev/null 2>&1 && ufw status verbose > "$ufw_backup/ufw-status.txt" 2>/dev/null || true
+    [ -d /etc/ufw ] && cp -a /etc/ufw "$ufw_backup/etc-ufw" 2>/dev/null || true
+    [ -f /etc/default/ufw ] && cp -a /etc/default/ufw "$ufw_backup/default-ufw" 2>/dev/null || true
+    t inst.ufw_backup "$ufw_backup"
+    t inst.ufw_backup_hint
+    if [ -t 0 ]; then
+        printf -- '%s' "$(t inst.ufw_prompt)"
+        read -r _ufw_ans || _ufw_ans=""
+        case "$_ufw_ans" in
+            [oOyYjJsS]*) t inst.ufw_proceeding ;;
+            *) t inst.ufw_aborted; exit 0 ;;
+        esac
+    elif [ "${BAN404_REMOVE_UFW:-}" = "1" ]; then
+        t inst.ufw_proceeding
+    else
+        die "$(t inst.ufw_noninteractive)"
+    fi
+fi
 
 t inst.pkg_install
 export DEBIAN_FRONTEND=noninteractive

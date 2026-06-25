@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="1.4.15"
+BAN404_VERSION="1.4.16"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -899,6 +899,24 @@ T_DE[stats.top_item_rdns]="  %s  (%s Ereignis(se))  [%s]"
 T_ES[stats.top_item_rdns]="  %s  (%s evento(s))  [%s]"
 T_IT[stats.top_item_rdns]="  %s  (%s evento/i)  [%s]"
 
+T_EN[stats.versions]="Versions: engine v%s — updater v%s"
+T_FR[stats.versions]="Versions : moteur v%s — updater v%s"
+T_DE[stats.versions]="Versionen: Engine v%s — Updater v%s"
+T_ES[stats.versions]="Versiones: motor v%s — updater v%s"
+T_IT[stats.versions]="Versioni: motore v%s — updater v%s"
+
+T_EN[stats.health_header]="Health (anomalies only):"
+T_FR[stats.health_header]="Santé (anomalies uniquement) :"
+T_DE[stats.health_header]="Zustand (nur Anomalien):"
+T_ES[stats.health_header]="Estado (solo anomalías):"
+T_IT[stats.health_header]="Stato (solo anomalie):"
+
+T_EN[stats.health_ok]="  No anomaly detected."
+T_FR[stats.health_ok]="  Aucune anomalie détectée."
+T_DE[stats.health_ok]="  Keine Anomalie erkannt."
+T_ES[stats.health_ok]="  Ninguna anomalía detectada."
+T_IT[stats.health_ok]="  Nessuna anomalia rilevata."
+
 T_EN[cidr.unban]="[-] Unbanning IP (whitelisted CIDR): %s (score %s)"
 T_FR[cidr.unban]="[-] Déblocage de l'IP (CIDR en liste blanche) : %s (score %s)"
 T_DE[cidr.unban]="[-] Entsperrung der IP (CIDR auf Whitelist): %s (Score %s)"
@@ -1259,7 +1277,7 @@ reverse_dns() {  # $1 = IP
 resolve_ptr_on() { case "${RESOLVE_PTR:-}" in true|1|yes|on) return 0 ;; *) return 1 ;; esac; }
 
 build_stats_text() {
-    local banned bans unbans cutoff24 top cnt ip rdns
+    local banned bans unbans cutoff24 top cnt ip rdns updater upd_ver issue
     banned=$(ipset list "$IPSET_NAME" 2>/dev/null | awk '/^Members:/{m=1;next} m&&NF{c++} END{print c+0}')
     cutoff24=$(date -d '24 hours ago' '+%Y-%m-%d %H:%M:%S' 2>/dev/null)
     bans=0; unbans=0
@@ -1287,6 +1305,25 @@ build_stats_text() {
                 fi
             done <<< "$top"
         fi
+    fi
+    # --- Versions (moteur + updater installé) ---
+    updater="/usr/local/sbin/update_ban_404.sh"; upd_ver="?"
+    if [ -f "$updater" ]; then
+        upd_ver=$(grep -m1 '^UPDATER_VERSION=' "$updater" 2>/dev/null | cut -d'"' -f2)
+        [ -z "$upd_ver" ] && upd_ver="?"   # updater legacy sans UPDATER_VERSION
+    fi
+    t stats.versions "$BAN404_VERSION" "$upd_ver"
+    # --- Santé : uniquement les WARN/FAIL des contrôles de diagnostic (réseau inclus) ---
+    DIAG_QUIET=true; DIAG_PROBLEMS=0; DIAG_ISSUES=()
+    run_diag_checks            # remplit DIAG_ISSUES sans rien imprimer
+    DIAG_QUIET=false
+    t stats.health_header
+    if [ "${#DIAG_ISSUES[@]}" -eq 0 ]; then
+        t stats.health_ok
+    else
+        for issue in "${DIAG_ISSUES[@]}"; do
+            printf '%s\n' "$issue"   # déjà préfixé [WARN]/[FAIL] + déjà localisé (pas de re-format t)
+        done
     fi
 }
 do_list() {
@@ -1387,22 +1424,27 @@ check_notification() {  # $1 = email|webhook|all (défaut all)
 # Calque check_notification : en-tête, une ligne [ OK ]/[WARN]/[FAIL] par contrôle, bilan, exit
 # (0 = sain, 1 = au moins une anomalie). DIAG_PROBLEMS compte les WARN + FAIL.
 DIAG_PROBLEMS=0
+DIAG_QUIET=false           # true => diag_line accumule sans imprimer (réutilisé par le résumé)
+declare -a DIAG_ISSUES=()  # lignes "[WARN]/[FAIL] message" accumulées (pour le résumé quotidien)
 diag_line() {  # $1 = ok|warn|fail ; $2 = message déjà localisé
     local tag
     case "$1" in
         ok)   tag="[ OK ]" ;;
-        warn) tag="[WARN]"; DIAG_PROBLEMS=$((DIAG_PROBLEMS + 1)) ;;
-        *)    tag="[FAIL]"; DIAG_PROBLEMS=$((DIAG_PROBLEMS + 1)) ;;
+        warn) tag="[WARN]"; DIAG_PROBLEMS=$((DIAG_PROBLEMS + 1)); DIAG_ISSUES+=("$tag $2") ;;
+        *)    tag="[FAIL]"; DIAG_PROBLEMS=$((DIAG_PROBLEMS + 1)); DIAG_ISSUES+=("$tag $2") ;;
     esac
+    [ "$DIAG_QUIET" = true ] && return 0
     printf '%s %s\n' "$tag" "$2"
 }
 diag_is_on() { case "${1:-}" in true|1|yes|on) return 0 ;; *) return 1 ;; esac; }
 
-do_diag() {
+# run_diag_checks : exécute les ~25 contrôles (appels diag_line), SANS en-tête ni bilan ni exit.
+# Extrait de do_diag pour être réutilisable par le résumé quotidien (build_stats_text) en mode
+# DIAG_QUIET (accumulation dans DIAG_ISSUES sans impression). do_diag l'enrobe (en-tête + bilan).
+run_diag_checks() {
     local engine="/usr/local/sbin/ban_404.sh" updater="/usr/local/sbin/update_ban_404.sh"
     local upd_ver="" repo_engine repo_upd up n chans
     local active inactive excluded unreadable log_dir vhost f now mt age_d
-    t diag.header
 
     # 1. Composants & versions (local)
     if [ -f "$engine" ]; then diag_line ok "$(t diag.engine_ok "$BAN404_VERSION")"
@@ -1538,8 +1580,12 @@ do_diag() {
     else diag_line ok "$(t diag.notify_none)"; fi
     if diag_is_on "$NOTIFY_BANS"   && [ -z "$WEBHOOK_URL" ] && [ -z "$NOTIFY_EMAIL" ]; then diag_line warn "$(t diag.notify_orphan_bans)"; fi
     if diag_is_on "$DAILY_SUMMARY" && [ -z "$WEBHOOK_URL" ] && [ -z "$NOTIFY_EMAIL" ]; then diag_line warn "$(t diag.notify_orphan_summary)"; fi
+}
 
-    # 8. Bilan
+do_diag() {
+    t diag.header
+    run_diag_checks
+    # Bilan
     echo ""
     if [ "$DIAG_PROBLEMS" -eq 0 ]; then t diag.tally_clean; exit 0; fi
     t diag.tally_problems "$DIAG_PROBLEMS"; exit 1

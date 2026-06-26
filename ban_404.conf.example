@@ -58,6 +58,7 @@ WHITELIST_IP="127.0.0.1"
 # --- Benachrichtigungen (leer => deaktiviert; Meldungen in der Sprache BAN404_LANG) ---
 # --- Notificaciones (vacías => desactivadas; mensajes en el idioma BAN404_LANG) ---
 # --- Notifiche (vuote => disattivate; messaggi nella lingua BAN404_LANG) ---
+#SERVER_NICKNAME=""
 #WEBHOOK_URL=""
 #NOTIFY_EMAIL=""
 #NOTIFY_FROM=""

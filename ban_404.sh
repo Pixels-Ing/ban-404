@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="1.4.18"
+BAN404_VERSION="1.4.19"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -1340,11 +1340,12 @@ build_stats_text() {
     printf '\n── %s ──\n' "$(t stats.sec_stats)"
     t stats.banned_now "$banned"
     t stats.bans_unbans "$bans" "$unbans"
-    # --- Top des IP fautives (24h) : classé par nb de 404 (honeypot en tête) ; débans exclus ---
+    # --- Top des IP fautives (24h) : classé par nb de 404 (honeypot en bas) ; débans exclus ---
     if [ -r "$LOG_FILE" ] && [ -n "$cutoff24" ]; then
-        # awk émet « grp cnt type ip » : grp 2 = honeypot (ban immédiat, sans compteur 404) trié
-        # AU-DESSUS de grp 1 = ban classique ; cnt = nb de 404 relu entre parenthèses « (48 … »,
-        # robuste aux 5 langues (le nombre suit toujours la « ( » après l'IP).
+        # awk émet « grp cnt type ip » : grp 1 = ban classique trié par nb de 404 (relu entre
+        # parenthèses « (48 … », robuste aux 5 langues : le nombre suit toujours la « ( » après
+        # l'IP) ; grp 0 = honeypot (ban immédiat, AUCUN compteur 404 dans le log) listé EN BAS,
+        # sinon il noie les vrais floods. cnt = nb de 404.
         top=$(awk -v c="$cutoff24" '
             ($1" "$2) >= c && /\[\+\]/ {
                 ip=""; ipi=0
@@ -1357,7 +1358,7 @@ build_stats_text() {
             }
             END{
                 for(ip in seen)
-                    if(hp[ip]) printf "2 0 h %s\n", ip
+                    if(hp[ip]) printf "0 0 h %s\n", ip
                     else       printf "1 %d n %s\n", c404[ip]+0, ip
             }
         ' "$LOG_FILE" | sort -k1,1nr -k2,2nr | head -n 10)

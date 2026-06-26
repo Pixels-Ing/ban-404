@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="1.4.19"
+BAN404_VERSION="1.4.20"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -274,11 +274,11 @@ T_DE[sim.ban_add]="[SIMULATION] [+] IP %s würde zum ipset hinzugefügt (%s 404-
 T_ES[sim.ban_add]="[SIMULATION] [+] La IP %s se añadiría al ipset (%s errores 404)."
 T_IT[sim.ban_add]="[SIMULATION] [+] L'IP %s verrebbe aggiunto all'ipset (%s errori 404)."
 
-T_EN[ban.honeypot]="[+] IMMEDIATE block (honeypot) of IP: %s"
-T_FR[ban.honeypot]="[+] Blocage IMMÉDIAT (honeypot) de l'IP : %s"
-T_DE[ban.honeypot]="[+] SOFORTIGE Sperre (Honeypot) der IP: %s"
-T_ES[ban.honeypot]="[+] Bloqueo INMEDIATO (honeypot) de la IP: %s"
-T_IT[ban.honeypot]="[+] Blocco IMMEDIATO (honeypot) dell'IP: %s"
+T_EN[ban.honeypot]="[+] IMMEDIATE block (honeypot) of IP: %s (score %s)"
+T_FR[ban.honeypot]="[+] Blocage IMMÉDIAT (honeypot) de l'IP : %s (score %s)"
+T_DE[ban.honeypot]="[+] SOFORTIGE Sperre (Honeypot) der IP: %s (Score %s)"
+T_ES[ban.honeypot]="[+] Bloqueo INMEDIATO (honeypot) de la IP: %s (puntuación %s)"
+T_IT[ban.honeypot]="[+] Blocco IMMEDIATO (honeypot) dell'IP: %s (punteggio %s)"
 
 T_EN[ban.add]="[+] Block (ipset) of IP: %s (%s 404 errors)"
 T_FR[ban.add]="[+] Blocage (ipset) de l'IP : %s (%s erreurs 404)"
@@ -906,11 +906,17 @@ T_DE[stats.bans_unbans]="Neue Sperren: %s · Entsperrungen: %s"
 T_ES[stats.bans_unbans]="Nuevos bloqueos: %s · Desbloqueos: %s"
 T_IT[stats.bans_unbans]="Nuovi blocchi: %s · Sblocchi: %s"
 
-T_EN[stats.top_header]="Top offending IPs (24h)"
-T_FR[stats.top_header]="Top des IP fautives (24h)"
-T_DE[stats.top_header]="Top der auffälligen IPs (24h)"
-T_ES[stats.top_header]="Top de IP infractoras (24h)"
-T_IT[stats.top_header]="Top degli IP colpevoli (24h)"
+T_EN[stats.top_header]="Top 404 (24h)"
+T_FR[stats.top_header]="Top 404 (24h)"
+T_DE[stats.top_header]="Top 404 (24h)"
+T_ES[stats.top_header]="Top 404 (24h)"
+T_IT[stats.top_header]="Top 404 (24h)"
+
+T_EN[stats.top_hp_header]="Top honeypot (24h)"
+T_FR[stats.top_hp_header]="Top honeypot (24h)"
+T_DE[stats.top_hp_header]="Top honeypot (24h)"
+T_ES[stats.top_hp_header]="Top honeypot (24h)"
+T_IT[stats.top_hp_header]="Top honeypot (24h)"
 
 T_EN[stats.top_item]="%s — %s 404 errors"
 T_FR[stats.top_item]="%s — %s erreurs 404"
@@ -935,6 +941,18 @@ T_FR[stats.top_item_hp_rdns]="%s — honeypot  [%s]"
 T_DE[stats.top_item_hp_rdns]="%s — honeypot  [%s]"
 T_ES[stats.top_item_hp_rdns]="%s — honeypot  [%s]"
 T_IT[stats.top_item_hp_rdns]="%s — honeypot  [%s]"
+
+T_EN[stats.top_item_hp_score]="%s — score %s"
+T_FR[stats.top_item_hp_score]="%s — score %s"
+T_DE[stats.top_item_hp_score]="%s — Score %s"
+T_ES[stats.top_item_hp_score]="%s — puntuación %s"
+T_IT[stats.top_item_hp_score]="%s — punteggio %s"
+
+T_EN[stats.top_item_hp_score_rdns]="%s — score %s  [%s]"
+T_FR[stats.top_item_hp_score_rdns]="%s — score %s  [%s]"
+T_DE[stats.top_item_hp_score_rdns]="%s — Score %s  [%s]"
+T_ES[stats.top_item_hp_score_rdns]="%s — puntuación %s  [%s]"
+T_IT[stats.top_item_hp_score_rdns]="%s — punteggio %s  [%s]"
 
 T_EN[cidr.unban]="[-] Unbanning IP (whitelisted CIDR): %s (score %s)"
 T_FR[cidr.unban]="[-] Déblocage de l'IP (CIDR en liste blanche) : %s (score %s)"
@@ -1305,7 +1323,7 @@ reverse_dns() {  # $1 = IP
 resolve_ptr_on() { case "${RESOLVE_PTR:-}" in true|1|yes|on) return 0 ;; *) return 1 ;; esac; }
 
 build_stats_text() {
-    local banned bans unbans cutoff24 top cnt ip rdns updater upd_ver issue div typ s1
+    local banned bans unbans cutoff24 cnt ip rdns updater upd_ver issue div kind sc top_raw top404 tophp
     printf -v div '─%.0s' {1..30}        # filet sous le titre (largeur fixe)
     banned=$(ipset list "$IPSET_NAME" 2>/dev/null | awk '/^Members:/{m=1;next} m&&NF{c++} END{print c+0}')
     cutoff24=$(date -d '24 hours ago' '+%Y-%m-%d %H:%M:%S' 2>/dev/null)
@@ -1340,39 +1358,48 @@ build_stats_text() {
     printf '\n── %s ──\n' "$(t stats.sec_stats)"
     t stats.banned_now "$banned"
     t stats.bans_unbans "$bans" "$unbans"
-    # --- Top des IP fautives (24h) : classé par nb de 404 (honeypot en bas) ; débans exclus ---
+    # --- Top 404 (24h) PUIS Top honeypot (24h) : deux classements distincts ; débans exclus ---
     if [ -r "$LOG_FILE" ] && [ -n "$cutoff24" ]; then
-        # awk émet « grp cnt type ip » : grp 1 = ban classique trié par nb de 404 (relu entre
-        # parenthèses « (48 … », robuste aux 5 langues : le nombre suit toujours la « ( » après
-        # l'IP) ; grp 0 = honeypot (ban immédiat, AUCUN compteur 404 dans le log) listé EN BAS,
-        # sinon il noie les vrais floods. cnt = nb de 404.
-        top=$(awk -v c="$cutoff24" '
+        # awk émet « kind score ip » : kind r = ban classique (score = nb de 404) ; kind h = honeypot
+        # (score pondéré = 100/hit-honeypot + 1/autre-404 ; 0 sur les vieilles lignes sans score). Le
+        # nombre est relu entre parenthèses après l'IP (« (48 … » ou « (score 250) »), robuste aux 5
+        # langues ; honeypot reconnu par le mot « honeypot » (présent tel quel dans les 5 langues).
+        top_raw=$(awk -v c="$cutoff24" '
             ($1" "$2) >= c && /\[\+\]/ {
                 ip=""; ipi=0
                 for(i=3;i<=NF;i++) if($i ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/){ip=$i; ipi=i; break}
                 if(ip=="") next
-                found=0; n=0
-                for(i=ipi+1;i<=NF;i++) if($i ~ /[0-9]/){ s=$i; gsub(/[^0-9]/,"",s); if(s!=""){n=s+0; found=1; break} }
-                seen[ip]=1
-                if(found){ if(n>c404[ip]) c404[ip]=n } else hp[ip]=1
+                n=0
+                for(i=ipi+1;i<=NF;i++) if($i ~ /[0-9]/){ s=$i; gsub(/[^0-9]/,"",s); if(s!=""){n=s+0; break} }
+                if($0 ~ /[Hh]oneypot/){ if(n>H[ip]) H[ip]=n; hs[ip]=1 }
+                else                  { if(n>R[ip]) R[ip]=n; rs[ip]=1 }
             }
             END{
-                for(ip in seen)
-                    if(hp[ip]) printf "0 0 h %s\n", ip
-                    else       printf "1 %d n %s\n", c404[ip]+0, ip
+                for(ip in rs) printf "r %d %s\n", R[ip]+0, ip
+                for(ip in hs) printf "h %d %s\n", H[ip]+0, ip
             }
-        ' "$LOG_FILE" | sort -k1,1nr -k2,2nr | head -n 10)
-        if [ -n "$top" ]; then
+        ' "$LOG_FILE")
+        top404=$(printf '%s\n' "$top_raw" | awk '$1=="r"' | sort -k2,2nr | head -n 10)
+        tophp=$( printf '%s\n' "$top_raw" | awk '$1=="h"' | sort -k2,2nr | head -n 10)
+        if [ -n "$top404" ]; then
             printf '\n── %s ──\n' "$(t stats.top_header)"
-            while read -r s1 cnt typ ip; do
+            while read -r kind cnt ip; do
                 [ -z "$ip" ] && continue
                 rdns=""; if resolve_ptr_on; then rdns=$(reverse_dns "$ip"); fi
-                if [ "$typ" = h ]; then
-                    [ -n "$rdns" ] && t stats.top_item_hp_rdns "$ip" "$rdns" || t stats.top_item_hp "$ip"
+                [ -n "$rdns" ] && t stats.top_item_rdns "$ip" "$cnt" "$rdns" || t stats.top_item "$ip" "$cnt"
+            done <<< "$top404"
+        fi
+        if [ -n "$tophp" ]; then
+            printf '\n── %s ──\n' "$(t stats.top_hp_header)"
+            while read -r kind sc ip; do
+                [ -z "$ip" ] && continue
+                rdns=""; if resolve_ptr_on; then rdns=$(reverse_dns "$ip"); fi
+                if [ "${sc:-0}" -gt 0 ] 2>/dev/null; then
+                    [ -n "$rdns" ] && t stats.top_item_hp_score_rdns "$ip" "$sc" "$rdns" || t stats.top_item_hp_score "$ip" "$sc"
                 else
-                    [ -n "$rdns" ] && t stats.top_item_rdns "$ip" "$cnt" "$rdns" || t stats.top_item "$ip" "$cnt"
+                    [ -n "$rdns" ] && t stats.top_item_hp_rdns "$ip" "$rdns" || t stats.top_item_hp "$ip"
                 fi
-            done <<< "$top"
+            done <<< "$tophp"
         fi
     fi
 }
@@ -1974,7 +2001,7 @@ while read -r count ip; do
             rules_simulated=$((rules_simulated + 1))
         else
             if [ "$count" -ge "$HONEYPOT_SCORE" ]; then
-                t ban.honeypot "$ip"; hp=1
+                t ban.honeypot "$ip" "$count"; hp=1
                 # Ban honeypot : timeout différencié (plus long que le défaut du set).
                 ipset -exist add "$IPSET_NAME" "$ip" timeout "$HONEYPOT_BAN_TIMEOUT"
             else

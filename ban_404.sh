@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="1.4.16"
+BAN404_VERSION="1.4.17"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -38,6 +38,7 @@ NOTIFY_FROM=""        # expéditeur e-mail (optionnel)
 NOTIFY_MIN_BANS=1     # ne notifier que si AU MOINS N nouveaux bans dans le run
 NOTIFY_BANS=false     # alerte à chaque run quand des IP sont bannies (true pour activer)
 DAILY_SUMMARY=false   # résumé quotidien (opt-in) : --summary n'envoie que si =true ET canal configuré
+SERVER_NICKNAME=""    # nom convivial ajouté au hostname dans les notifs (vide => hostname seul). Ex: "Jaubalet (prod)"
 
 # Reverse DNS (PTR) des IP affichées par --list/--stats/--summary (opt-in ; le flag --resolve force)
 RESOLVE_PTR=false     # true => résoudre le PTR des IP ; borné par PTR_TIMEOUT pour ne pas bloquer
@@ -773,6 +774,12 @@ T_DE[help.conf_honeypot_timeout]="  HONEYPOT_BAN_TIMEOUT  Sperrdauer (s) für Ho
 T_ES[help.conf_honeypot_timeout]="  HONEYPOT_BAN_TIMEOUT  Duración del bloqueo (s) para hits honeypot (por defecto 604800 = 7 días)."
 T_IT[help.conf_honeypot_timeout]="  HONEYPOT_BAN_TIMEOUT  Durata del blocco (s) per gli hit honeypot (predefinito 604800 = 7 giorni)."
 
+T_EN[help.conf_nickname]="  SERVER_NICKNAME  Friendly server name shown with the hostname in notifications (empty = hostname only)."
+T_FR[help.conf_nickname]="  SERVER_NICKNAME  Nom convivial affiché avec le hostname dans les notifications (vide = hostname seul)."
+T_DE[help.conf_nickname]="  SERVER_NICKNAME  Anzeigename des Servers, zusammen mit dem Hostnamen in Benachrichtigungen (leer = nur Hostname)."
+T_ES[help.conf_nickname]="  SERVER_NICKNAME  Nombre descriptivo mostrado junto al hostname en las notificaciones (vacío = solo hostname)."
+T_IT[help.conf_nickname]="  SERVER_NICKNAME  Nome descrittivo mostrato con l'hostname nelle notifiche (vuoto = solo hostname)."
+
 T_EN[help.conf_webhook]="  WEBHOOK_URL      JSON POST of new bans (Slack/Discord/Teams/Google Chat...); empty = off."
 T_FR[help.conf_webhook]="  WEBHOOK_URL      POST JSON des nouveaux bans (Slack/Discord/Teams/Google Chat...) ; vide = inactif."
 T_DE[help.conf_webhook]="  WEBHOOK_URL      JSON-POST neuer Sperren (Slack/Discord/Teams/Google Chat...); leer = aus."
@@ -857,11 +864,35 @@ T_DE[list.item_rdns]="  %s  (Timeout: %s s)  [%s]"
 T_ES[list.item_rdns]="  %s  (timeout: %s s)  [%s]"
 T_IT[list.item_rdns]="  %s  (timeout: %s s)  [%s]"
 
-T_EN[stats.header]="=[ ban-404 statistics ]="
-T_FR[stats.header]="=[ Statistiques ban-404 ]="
-T_DE[stats.header]="=[ ban-404-Statistiken ]="
-T_ES[stats.header]="=[ Estadísticas ban-404 ]="
-T_IT[stats.header]="=[ Statistiche ban-404 ]="
+T_EN[stats.header]="ban-404 · report"
+T_FR[stats.header]="ban-404 · rapport"
+T_DE[stats.header]="ban-404 · Bericht"
+T_ES[stats.header]="ban-404 · informe"
+T_IT[stats.header]="ban-404 · rapporto"
+
+T_EN[stats.versions]="Versions: engine v%s · updater v%s"
+T_FR[stats.versions]="Versions : moteur v%s · updater v%s"
+T_DE[stats.versions]="Versionen: Engine v%s · Updater v%s"
+T_ES[stats.versions]="Versiones: motor v%s · updater v%s"
+T_IT[stats.versions]="Versioni: motore v%s · updater v%s"
+
+T_EN[stats.health_header]="Health (anomalies):"
+T_FR[stats.health_header]="Santé (anomalies) :"
+T_DE[stats.health_header]="Zustand (Anomalien):"
+T_ES[stats.health_header]="Estado (anomalías):"
+T_IT[stats.health_header]="Stato (anomalie):"
+
+T_EN[stats.health_ok]="Health: no anomaly detected."
+T_FR[stats.health_ok]="Santé : aucune anomalie détectée."
+T_DE[stats.health_ok]="Zustand: keine Anomalie erkannt."
+T_ES[stats.health_ok]="Estado: ninguna anomalía detectada."
+T_IT[stats.health_ok]="Stato: nessuna anomalia rilevata."
+
+T_EN[stats.sec_stats]="Statistics (24h)"
+T_FR[stats.sec_stats]="Statistiques (24h)"
+T_DE[stats.sec_stats]="Statistiken (24h)"
+T_ES[stats.sec_stats]="Estadísticas (24h)"
+T_IT[stats.sec_stats]="Statistiche (24h)"
 
 T_EN[stats.banned_now]="Currently banned: %s IP(s)"
 T_FR[stats.banned_now]="Actuellement bannies : %s IP"
@@ -869,53 +900,29 @@ T_DE[stats.banned_now]="Aktuell gesperrt: %s IP(s)"
 T_ES[stats.banned_now]="Actualmente bloqueadas: %s IP"
 T_IT[stats.banned_now]="Attualmente bloccati: %s IP"
 
-T_EN[stats.last24_bans]="Bans in the last 24h: %s"
-T_FR[stats.last24_bans]="Bans sur les dernières 24h : %s"
-T_DE[stats.last24_bans]="Sperren in den letzten 24h: %s"
-T_ES[stats.last24_bans]="Bloqueos en las últimas 24h: %s"
-T_IT[stats.last24_bans]="Blocchi nelle ultime 24h: %s"
+T_EN[stats.bans_unbans]="New bans: %s · unbans: %s"
+T_FR[stats.bans_unbans]="Nouveaux bans : %s · Débans : %s"
+T_DE[stats.bans_unbans]="Neue Sperren: %s · Entsperrungen: %s"
+T_ES[stats.bans_unbans]="Nuevos bloqueos: %s · Desbloqueos: %s"
+T_IT[stats.bans_unbans]="Nuovi blocchi: %s · Sblocchi: %s"
 
-T_EN[stats.last24_unbans]="Unbans in the last 24h: %s"
-T_FR[stats.last24_unbans]="Débans sur les dernières 24h : %s"
-T_DE[stats.last24_unbans]="Entsperrungen in den letzten 24h: %s"
-T_ES[stats.last24_unbans]="Desbloqueos en las últimas 24h: %s"
-T_IT[stats.last24_unbans]="Sblocchi nelle ultime 24h: %s"
+T_EN[stats.top_header]="Top offending IPs (24h)"
+T_FR[stats.top_header]="Top des IP fautives (24h)"
+T_DE[stats.top_header]="Top der auffälligen IPs (24h)"
+T_ES[stats.top_header]="Top de IP infractoras (24h)"
+T_IT[stats.top_header]="Top degli IP colpevoli (24h)"
 
-T_EN[stats.top_header]="Top offending IPs (last 24h):"
-T_FR[stats.top_header]="Top des IP fautives (24h) :"
-T_DE[stats.top_header]="Top der auffälligen IPs (24h):"
-T_ES[stats.top_header]="Top de IP infractoras (24h):"
-T_IT[stats.top_header]="Top degli IP colpevoli (24h):"
+T_EN[stats.top_item]="%s — %s event(s)"
+T_FR[stats.top_item]="%s — %s événement(s)"
+T_DE[stats.top_item]="%s — %s Ereignis(se)"
+T_ES[stats.top_item]="%s — %s evento(s)"
+T_IT[stats.top_item]="%s — %s evento/i"
 
-T_EN[stats.top_item]="  %s  (%s event(s))"
-T_FR[stats.top_item]="  %s  (%s événement(s))"
-T_DE[stats.top_item]="  %s  (%s Ereignis(se))"
-T_ES[stats.top_item]="  %s  (%s evento(s))"
-T_IT[stats.top_item]="  %s  (%s evento/i)"
-
-T_EN[stats.top_item_rdns]="  %s  (%s event(s))  [%s]"
-T_FR[stats.top_item_rdns]="  %s  (%s événement(s))  [%s]"
-T_DE[stats.top_item_rdns]="  %s  (%s Ereignis(se))  [%s]"
-T_ES[stats.top_item_rdns]="  %s  (%s evento(s))  [%s]"
-T_IT[stats.top_item_rdns]="  %s  (%s evento/i)  [%s]"
-
-T_EN[stats.versions]="Versions: engine v%s — updater v%s"
-T_FR[stats.versions]="Versions : moteur v%s — updater v%s"
-T_DE[stats.versions]="Versionen: Engine v%s — Updater v%s"
-T_ES[stats.versions]="Versiones: motor v%s — updater v%s"
-T_IT[stats.versions]="Versioni: motore v%s — updater v%s"
-
-T_EN[stats.health_header]="Health (anomalies only):"
-T_FR[stats.health_header]="Santé (anomalies uniquement) :"
-T_DE[stats.health_header]="Zustand (nur Anomalien):"
-T_ES[stats.health_header]="Estado (solo anomalías):"
-T_IT[stats.health_header]="Stato (solo anomalie):"
-
-T_EN[stats.health_ok]="  No anomaly detected."
-T_FR[stats.health_ok]="  Aucune anomalie détectée."
-T_DE[stats.health_ok]="  Keine Anomalie erkannt."
-T_ES[stats.health_ok]="  Ninguna anomalía detectada."
-T_IT[stats.health_ok]="  Nessuna anomalia rilevata."
+T_EN[stats.top_item_rdns]="%s — %s event(s)  [%s]"
+T_FR[stats.top_item_rdns]="%s — %s événement(s)  [%s]"
+T_DE[stats.top_item_rdns]="%s — %s Ereignis(se)  [%s]"
+T_ES[stats.top_item_rdns]="%s — %s evento(s)  [%s]"
+T_IT[stats.top_item_rdns]="%s — %s evento/i  [%s]"
 
 T_EN[cidr.unban]="[-] Unbanning IP (whitelisted CIDR): %s (score %s)"
 T_FR[cidr.unban]="[-] Déblocage de l'IP (CIDR en liste blanche) : %s (score %s)"
@@ -1100,6 +1107,7 @@ show_help() {
     t help.conf_threshold
     t help.conf_honeypot_score
     t help.conf_honeypot_timeout
+    t help.conf_nickname
     t help.conf_webhook
     t help.conf_email
     t help.conf_from
@@ -1244,6 +1252,14 @@ send_email() {  # $1 = sujet, $2 = corps
         t notify.no_mta >&2
     fi
 }
+# Identifiant du serveur dans les notifications (mail/webhook). Si SERVER_NICKNAME est défini,
+# on l'affiche AVEC le hostname (« nickname [hostname] ») : repérage humain immédiat sans perdre
+# l'identifiant technique. Sinon, le hostname seul.
+server_label() {
+    local host; host=$(hostname 2>/dev/null || printf '?')
+    if [ -n "${SERVER_NICKNAME:-}" ]; then printf '%s [%s]' "$SERVER_NICKNAME" "$host"
+    else printf '%s' "$host"; fi
+}
 notify() {  # $1 = sujet, $2 = corps
     send_webhook "$1"$'\n'"$2"
     send_email "$1" "$2"
@@ -1251,7 +1267,7 @@ notify() {  # $1 = sujet, $2 = corps
 maybe_notify_new_bans() {
     [ -z "$WEBHOOK_URL" ] && [ -z "$NOTIFY_EMAIL" ] && return 0
     local host n subj body line ip sc hp
-    host=$(hostname 2>/dev/null || echo '?')
+    host=$(server_label)
     n=${#new_bans[@]}
     subj=$(t notify.subject "$host" "$n")
     body=$(t notify.body_header "$n" "$host")
@@ -1277,7 +1293,8 @@ reverse_dns() {  # $1 = IP
 resolve_ptr_on() { case "${RESOLVE_PTR:-}" in true|1|yes|on) return 0 ;; *) return 1 ;; esac; }
 
 build_stats_text() {
-    local banned bans unbans cutoff24 top cnt ip rdns updater upd_ver issue
+    local banned bans unbans cutoff24 top cnt ip rdns updater upd_ver issue div
+    printf -v div '─%.0s' {1..30}        # filet sous le titre (largeur fixe)
     banned=$(ipset list "$IPSET_NAME" 2>/dev/null | awk '/^Members:/{m=1;next} m&&NF{c++} END{print c+0}')
     cutoff24=$(date -d '24 hours ago' '+%Y-%m-%d %H:%M:%S' 2>/dev/null)
     bans=0; unbans=0
@@ -1285,28 +1302,10 @@ build_stats_text() {
         bans=$(awk -v c="$cutoff24" '($1" "$2) >= c && /\[\+\]/' "$LOG_FILE" | wc -l)
         unbans=$(awk -v c="$cutoff24" '($1" "$2) >= c && /\[-\]/' "$LOG_FILE" | wc -l)
     fi
+    # --- En-tête + filet ---
     t stats.header
-    t stats.banned_now "$banned"
-    t stats.last24_bans "$bans"
-    t stats.last24_unbans "$unbans"
-    if [ -r "$LOG_FILE" ] && [ -n "$cutoff24" ]; then
-        top=$(awk -v c="$cutoff24" '($1" "$2) >= c && (/\[\+\]/||/\[-\]/){
-            for(i=1;i<=NF;i++) if($i ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/){print $i; break}
-        }' "$LOG_FILE" | sort | uniq -c | sort -rn | head -n 10)
-        if [ -n "$top" ]; then
-            t stats.top_header
-            while read -r cnt ip; do
-                [ -z "$ip" ] && continue
-                if resolve_ptr_on; then
-                    rdns=$(reverse_dns "$ip")
-                    [ -n "$rdns" ] && t stats.top_item_rdns "$ip" "$cnt" "$rdns" || t stats.top_item "$ip" "$cnt"
-                else
-                    t stats.top_item "$ip" "$cnt"
-                fi
-            done <<< "$top"
-        fi
-    fi
-    # --- Versions (moteur + updater installé) ---
+    printf '%s\n\n' "$div"
+    # --- Versions (moteur + updater installé) — en tête pour surveiller le parc ---
     updater="/usr/local/sbin/update_ban_404.sh"; upd_ver="?"
     if [ -f "$updater" ]; then
         upd_ver=$(grep -m1 '^UPDATER_VERSION=' "$updater" 2>/dev/null | cut -d'"' -f2)
@@ -1317,13 +1316,35 @@ build_stats_text() {
     DIAG_QUIET=true; DIAG_PROBLEMS=0; DIAG_ISSUES=()
     run_diag_checks            # remplit DIAG_ISSUES sans rien imprimer
     DIAG_QUIET=false
-    t stats.health_header
     if [ "${#DIAG_ISSUES[@]}" -eq 0 ]; then
-        t stats.health_ok
+        t stats.health_ok                       # ligne inline « Santé : aucune anomalie détectée. »
     else
+        t stats.health_header                   # « Santé (anomalies) : »
         for issue in "${DIAG_ISSUES[@]}"; do
-            printf '%s\n' "$issue"   # déjà préfixé [WARN]/[FAIL] + déjà localisé (pas de re-format t)
+            printf '  %s\n' "$issue"             # déjà préfixé [WARN]/[FAIL] + déjà localisé (pas de re-format t)
         done
+    fi
+    # --- Statistiques (24h) ---
+    printf '\n── %s ──\n' "$(t stats.sec_stats)"
+    t stats.banned_now "$banned"
+    t stats.bans_unbans "$bans" "$unbans"
+    # --- Top des IP fautives (24h) ---
+    if [ -r "$LOG_FILE" ] && [ -n "$cutoff24" ]; then
+        top=$(awk -v c="$cutoff24" '($1" "$2) >= c && (/\[\+\]/||/\[-\]/){
+            for(i=1;i<=NF;i++) if($i ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/){print $i; break}
+        }' "$LOG_FILE" | sort | uniq -c | sort -rn | head -n 10)
+        if [ -n "$top" ]; then
+            printf '\n── %s ──\n' "$(t stats.top_header)"
+            while read -r cnt ip; do
+                [ -z "$ip" ] && continue
+                if resolve_ptr_on; then
+                    rdns=$(reverse_dns "$ip")
+                    [ -n "$rdns" ] && t stats.top_item_rdns "$ip" "$cnt" "$rdns" || t stats.top_item "$ip" "$cnt"
+                else
+                    t stats.top_item "$ip" "$cnt"
+                fi
+            done <<< "$top"
+        fi
     fi
 }
 do_list() {
@@ -1364,7 +1385,7 @@ do_list() {
 do_summary() {
     case "$DAILY_SUMMARY" in true|1|yes|on) ;; *) exit 0 ;; esac
     [ -z "$WEBHOOK_URL" ] && [ -z "$NOTIFY_EMAIL" ] && exit 0
-    local host; host=$(hostname 2>/dev/null || echo '?')
+    local host; host=$(server_label)
     notify "$(t summary.subject "$host")" "$(build_stats_text)"
     exit 0
 }
@@ -1375,7 +1396,7 @@ check_webhook() {
     [ -z "$WEBHOOK_URL" ] && { t check.webhook_off; return 2; }
     command -v curl >/dev/null 2>&1 || { t check.webhook_nocurl; return 1; }
     local host code rc tmp body
-    host=$(hostname 2>/dev/null || echo '?')
+    host=$(server_label)
     tmp=$(mktemp 2>/dev/null) || tmp=""
     code=$(curl -sS -m 15 -o "${tmp:-/dev/null}" -w '%{http_code}' -H 'Content-Type: application/json' \
                 -X POST -d "$(build_webhook_payload "$(t check.body "$host")")" "$WEBHOOK_URL" 2>/dev/null); rc=$?
@@ -1389,7 +1410,7 @@ check_webhook() {
 check_email() {
     [ -z "$NOTIFY_EMAIL" ] && { t check.email_off; return 2; }
     local host subj body rc tmp err
-    host=$(hostname 2>/dev/null || echo '?')
+    host=$(server_label)
     subj=$(t check.subject "$host"); body=$(t check.body "$host")
     tmp=$(mktemp 2>/dev/null) || tmp=""
     if command -v mail >/dev/null 2>&1; then

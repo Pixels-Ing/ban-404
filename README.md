@@ -86,6 +86,7 @@ sudo /usr/local/sbin/update_ban_404.sh --force   # redéploie même si le conten
 | `HONEYPOT_SCORE`  | `100`       | Score ajouté par hit honeypot (≥ ce score ⇒ ban immédiat). |
 | `WHITELIST_CIDR`  | (vide)      | Sous-réseaux jamais bannis (CIDR séparés par `\|`, ex. `10.0.0.0/8`). |
 | `EXCLUDE_VHOSTS`  | (vide)      | Vhosts exclus de l'analyse (noms de dossier sous `/var/www`, séparés par `\|`). Leurs 404 ne génèrent aucun ban. |
+| `SERVER_NICKNAME` | (vide)      | Nom convivial ajouté **à côté** du hostname dans les notifications (mail/webhook), pour repérer le serveur sans perdre l'identifiant technique. Ex. `Jaubalet (prod) [ns3071395]`. Vide ⇒ hostname seul. |
 | `WEBHOOK_URL`     | (vide)      | Si défini : POST JSON des nouveaux bans (Slack/Discord/Teams/n8n/Google Chat…). Tester avec `--check-notification`. |
 | `NOTIFY_EMAIL`    | (vide)      | Si défini : e-mail des nouveaux bans (nécessite un MTA `mail`/`sendmail`). |
 | `NOTIFY_MIN_BANS` | `1`         | Ne notifier que si ≥ N nouveaux bans dans l'exécution. |

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="1.4.17"
+BAN404_VERSION="1.4.18"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -912,17 +912,29 @@ T_DE[stats.top_header]="Top der auffälligen IPs (24h)"
 T_ES[stats.top_header]="Top de IP infractoras (24h)"
 T_IT[stats.top_header]="Top degli IP colpevoli (24h)"
 
-T_EN[stats.top_item]="%s — %s event(s)"
-T_FR[stats.top_item]="%s — %s événement(s)"
-T_DE[stats.top_item]="%s — %s Ereignis(se)"
-T_ES[stats.top_item]="%s — %s evento(s)"
-T_IT[stats.top_item]="%s — %s evento/i"
+T_EN[stats.top_item]="%s — %s 404 errors"
+T_FR[stats.top_item]="%s — %s erreurs 404"
+T_DE[stats.top_item]="%s — %s 404-Fehler"
+T_ES[stats.top_item]="%s — %s errores 404"
+T_IT[stats.top_item]="%s — %s errori 404"
 
-T_EN[stats.top_item_rdns]="%s — %s event(s)  [%s]"
-T_FR[stats.top_item_rdns]="%s — %s événement(s)  [%s]"
-T_DE[stats.top_item_rdns]="%s — %s Ereignis(se)  [%s]"
-T_ES[stats.top_item_rdns]="%s — %s evento(s)  [%s]"
-T_IT[stats.top_item_rdns]="%s — %s evento/i  [%s]"
+T_EN[stats.top_item_rdns]="%s — %s 404 errors  [%s]"
+T_FR[stats.top_item_rdns]="%s — %s erreurs 404  [%s]"
+T_DE[stats.top_item_rdns]="%s — %s 404-Fehler  [%s]"
+T_ES[stats.top_item_rdns]="%s — %s errores 404  [%s]"
+T_IT[stats.top_item_rdns]="%s — %s errori 404  [%s]"
+
+T_EN[stats.top_item_hp]="%s — honeypot"
+T_FR[stats.top_item_hp]="%s — honeypot"
+T_DE[stats.top_item_hp]="%s — honeypot"
+T_ES[stats.top_item_hp]="%s — honeypot"
+T_IT[stats.top_item_hp]="%s — honeypot"
+
+T_EN[stats.top_item_hp_rdns]="%s — honeypot  [%s]"
+T_FR[stats.top_item_hp_rdns]="%s — honeypot  [%s]"
+T_DE[stats.top_item_hp_rdns]="%s — honeypot  [%s]"
+T_ES[stats.top_item_hp_rdns]="%s — honeypot  [%s]"
+T_IT[stats.top_item_hp_rdns]="%s — honeypot  [%s]"
 
 T_EN[cidr.unban]="[-] Unbanning IP (whitelisted CIDR): %s (score %s)"
 T_FR[cidr.unban]="[-] Déblocage de l'IP (CIDR en liste blanche) : %s (score %s)"
@@ -1293,7 +1305,7 @@ reverse_dns() {  # $1 = IP
 resolve_ptr_on() { case "${RESOLVE_PTR:-}" in true|1|yes|on) return 0 ;; *) return 1 ;; esac; }
 
 build_stats_text() {
-    local banned bans unbans cutoff24 top cnt ip rdns updater upd_ver issue div
+    local banned bans unbans cutoff24 top cnt ip rdns updater upd_ver issue div typ s1
     printf -v div '─%.0s' {1..30}        # filet sous le titre (largeur fixe)
     banned=$(ipset list "$IPSET_NAME" 2>/dev/null | awk '/^Members:/{m=1;next} m&&NF{c++} END{print c+0}')
     cutoff24=$(date -d '24 hours ago' '+%Y-%m-%d %H:%M:%S' 2>/dev/null)
@@ -1328,20 +1340,36 @@ build_stats_text() {
     printf '\n── %s ──\n' "$(t stats.sec_stats)"
     t stats.banned_now "$banned"
     t stats.bans_unbans "$bans" "$unbans"
-    # --- Top des IP fautives (24h) ---
+    # --- Top des IP fautives (24h) : classé par nb de 404 (honeypot en tête) ; débans exclus ---
     if [ -r "$LOG_FILE" ] && [ -n "$cutoff24" ]; then
-        top=$(awk -v c="$cutoff24" '($1" "$2) >= c && (/\[\+\]/||/\[-\]/){
-            for(i=1;i<=NF;i++) if($i ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/){print $i; break}
-        }' "$LOG_FILE" | sort | uniq -c | sort -rn | head -n 10)
+        # awk émet « grp cnt type ip » : grp 2 = honeypot (ban immédiat, sans compteur 404) trié
+        # AU-DESSUS de grp 1 = ban classique ; cnt = nb de 404 relu entre parenthèses « (48 … »,
+        # robuste aux 5 langues (le nombre suit toujours la « ( » après l'IP).
+        top=$(awk -v c="$cutoff24" '
+            ($1" "$2) >= c && /\[\+\]/ {
+                ip=""; ipi=0
+                for(i=3;i<=NF;i++) if($i ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/){ip=$i; ipi=i; break}
+                if(ip=="") next
+                found=0; n=0
+                for(i=ipi+1;i<=NF;i++) if($i ~ /[0-9]/){ s=$i; gsub(/[^0-9]/,"",s); if(s!=""){n=s+0; found=1; break} }
+                seen[ip]=1
+                if(found){ if(n>c404[ip]) c404[ip]=n } else hp[ip]=1
+            }
+            END{
+                for(ip in seen)
+                    if(hp[ip]) printf "2 0 h %s\n", ip
+                    else       printf "1 %d n %s\n", c404[ip]+0, ip
+            }
+        ' "$LOG_FILE" | sort -k1,1nr -k2,2nr | head -n 10)
         if [ -n "$top" ]; then
             printf '\n── %s ──\n' "$(t stats.top_header)"
-            while read -r cnt ip; do
+            while read -r s1 cnt typ ip; do
                 [ -z "$ip" ] && continue
-                if resolve_ptr_on; then
-                    rdns=$(reverse_dns "$ip")
-                    [ -n "$rdns" ] && t stats.top_item_rdns "$ip" "$cnt" "$rdns" || t stats.top_item "$ip" "$cnt"
+                rdns=""; if resolve_ptr_on; then rdns=$(reverse_dns "$ip"); fi
+                if [ "$typ" = h ]; then
+                    [ -n "$rdns" ] && t stats.top_item_hp_rdns "$ip" "$rdns" || t stats.top_item_hp "$ip"
                 else
-                    t stats.top_item "$ip" "$cnt"
+                    [ -n "$rdns" ] && t stats.top_item_rdns "$ip" "$cnt" "$rdns" || t stats.top_item "$ip" "$cnt"
                 fi
             done <<< "$top"
         fi

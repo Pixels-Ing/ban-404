@@ -453,7 +453,7 @@ cat > "$UPDATER_PATH" <<'UPD_EOF'
 # à la conf si elle est absente (langue héritée du shell/système, sinon en).
 set -u
 
-UPDATER_VERSION="1.2.8"
+UPDATER_VERSION="1.2.9"
 CONF_FILE="/etc/ban_404.conf"
 TARGET="/usr/local/sbin/ban_404.sh"
 SELF="/usr/local/sbin/update_ban_404.sh"
@@ -510,6 +510,12 @@ T_FR[upd.forced]="Mode forcé activé (--force) : redéploiement même si identi
 T_DE[upd.forced]="Force-Modus aktiv (--force): Neuausrollung auch ohne Änderung."
 T_ES[upd.forced]="Modo forzado activado (--force): redespliegue aunque sin cambios."
 T_IT[upd.forced]="Modalità forzata attiva (--force): ridistribuzione anche se invariato."
+
+T_EN[upd.self_reexec]="Updater self-updated: relaunching the new version in the same run."
+T_FR[upd.self_reexec]="Updater auto-mis à jour : relance de la nouvelle version dans le même passage."
+T_DE[upd.self_reexec]="Updater selbst aktualisiert: Neustart der neuen Version im selben Lauf."
+T_ES[upd.self_reexec]="Updater autoactualizado: relanzando la nueva versión en la misma ejecución."
+T_IT[upd.self_reexec]="Updater autoaggiornato: riavvio della nuova versione nella stessa esecuzione."
 
 T_EN[err.unknown_opt]="Unknown option: %s. Use --help."
 T_FR[err.unknown_opt]="Option inconnue : %s. Utilisez --help."
@@ -856,10 +862,21 @@ update_file(){
 # 1) Le moteur de détection/ban.
 update_file "ban_404.sh" "$TARGET" "ban_404.sh"
 
-# 2) L'updater lui-même, EN DERNIER. La bascule par 'mv' crée un nouvel inode :
-#    le process en cours garde l'ancien inode ouvert et termine sans surprise ;
-#    le prochain passage cron utilisera la nouvelle version.
-update_file "update_ban_404.sh" "$SELF" "update_ban_404.sh"
+# 2) L'updater lui-même, EN DERNIER. La bascule par 'mv' crée un nouvel inode : le process en
+#    cours garde l'ancien inode ouvert et termine sans surprise.
+update_file "update_ban_404.sh" "$SELF" "update_ban_404.sh"; _rc_self=$?
+
+# Auto-relance immédiate après une VRAIE bascule de l'updater : la nouvelle version reprend la main
+# DANS LE MÊME passage (réconciliation conf + migrations à jour → plus de décalage d'un cycle, p.ex.
+# une nouvelle variable de conf apparaît dès cette exécution). Pas de boucle : au tour suivant
+# l'updater est déjà à jour (rc != 0) ; le garde BAN404_SELF_REEXEC neutralise aussi le cas --force.
+# La nouvelle version est déjà validée (shebang + bash -n) avant la bascule : exec ne lance jamais
+# un script cassé, et remplace le process courant (pas de second process concurrent).
+if [ "$_rc_self" -eq 0 ] && [ "${BAN404_SELF_REEXEC:-0}" != 1 ]; then
+    log "$(t upd.self_reexec)"
+    export BAN404_SELF_REEXEC=1
+    exec "$SELF"
+fi
 
 exit 0
 UPD_EOF

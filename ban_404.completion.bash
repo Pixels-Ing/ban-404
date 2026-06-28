@@ -27,12 +27,13 @@ _ban_404() {
     esac
 
     # 2) Balayer les options DÉJÀ posées (hors mot en cours de frappe) pour classer le contexte.
-    local has_diag="" has_report="" has_terminal="" seen=" "
+    local has_diag="" has_report="" has_terminal="" has_list="" has_stats="" seen=" "
     for ((i=1; i<COMP_CWORD; i++)); do
         w="${COMP_WORDS[i]}"
         case "$w" in
-            --diag)         has_diag=1 ;;
-            --list|--stats) has_report=1 ;;
+            --diag)  has_diag=1 ;;
+            --list)  has_report=1; has_list=1 ;;
+            --stats) has_report=1; has_stats=1 ;;
             --unban|--summary|--check-notification|--lang|--version|--help) has_terminal=1 ;;
         esac
         seen="$seen$w "
@@ -40,9 +41,12 @@ _ban_404() {
 
     # 3) Sous-ensemble pertinent selon le contexte.
     local opts
-    if   [ -n "$has_terminal" ]; then opts=""                                       # action terminale : plus rien
-    elif [ -n "$has_diag" ];     then opts="--verbose"                              # seul modificateur de --diag
-    elif [ -n "$has_report" ];   then opts="--list --stats --by-timeout --resolve"  # rapports cumulables + modifs
+    if   [ -n "$has_terminal" ]; then opts=""                       # action terminale : plus rien
+    elif [ -n "$has_diag" ];     then opts="--verbose"              # seul modificateur de --diag
+    elif [ -n "$has_report" ];   then
+        opts="--list --stats --resolve"                            # rapports cumulables + PTR
+        [ -n "$has_list" ]  && opts="$opts --by-timeout"           # tri : pertinent pour --list seul
+        [ -n "$has_stats" ] && opts="$opts --verbose"              # --verbose rejoue le diag dans --stats
     else opts="--dry-run --show-blocked --verbose --list --stats --diag --unban --summary --check-notification --lang --version --help"
     fi
 

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="1.4.20"
+BAN404_VERSION="1.4.21"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -88,11 +88,11 @@ T_DE[help.showblocked]="  --show-blocked   Auch IPs anzeigen, die bereits im ips
 T_ES[help.showblocked]="  --show-blocked   Mostrar también las IP que ya están en el ipset."
 T_IT[help.showblocked]="  --show-blocked   Mostrare anche gli IP già presenti nell'ipset."
 
-T_EN[help.verbose]="  --verbose        Show details of the log search."
-T_FR[help.verbose]="  --verbose        Afficher le détail de la recherche des logs."
-T_DE[help.verbose]="  --verbose        Details der Log-Suche anzeigen."
-T_ES[help.verbose]="  --verbose        Mostrar el detalle de la búsqueda de registros."
-T_IT[help.verbose]="  --verbose        Mostrare il dettaglio della ricerca dei log."
+T_EN[help.verbose]="  --verbose        Detail the run (log search) or, with --diag, each folder's cause."
+T_FR[help.verbose]="  --verbose        Détailler le run (recherche des logs) ou, avec --diag, chaque dossier."
+T_DE[help.verbose]="  --verbose        Den Lauf (Log-Suche) oder, mit --diag, jedes Verzeichnis detaillieren."
+T_ES[help.verbose]="  --verbose        Detallar el run (búsqueda de registros) o, con --diag, cada carpeta."
+T_IT[help.verbose]="  --verbose        Dettagliare il run (ricerca dei log) o, con --diag, ogni cartella."
 
 T_EN[help.lang]="  --lang <code>    Set the language (en, fr, de, es, it) in the config and exit."
 T_FR[help.lang]="  --lang <code>    Définir la langue (en, fr, de, es, it) dans la config et quitter."
@@ -1102,6 +1102,7 @@ SHOW_BLOCKED=false
 VERBOSE=false
 DO_LIST=false
 DO_STATS=false
+DO_DIAG=false
 LIST_BY_TIMEOUT=false
 
 show_help() {
@@ -1703,7 +1704,7 @@ while [[ $# -gt 0 ]]; do
         --summary) do_summary ;;
         --check-notification) check_notification "${2:-all}" ;;
         --check-notification=*) check_notification "${1#*=}" ;;
-        --diag) do_diag ;;
+        --diag) DO_DIAG=true; shift ;;
         --unban) do_unban "${2:-}" ;;
         --unban=*) do_unban "${1#*=}" ;;
         --version) t version.line "$BAN404_VERSION"; t version.author; exit 0 ;;
@@ -1711,6 +1712,11 @@ while [[ $# -gt 0 ]]; do
         *) t err.unknown_opt "$1"; exit 1 ;;
     esac
 done
+
+# --- Auto-diagnostic (lecture seule), exécuté APRÈS la boucle de parsing : ainsi --verbose est
+# déjà pris en compte par run_diag_checks (détail par dossier) quel que soit l'ordre sur la ligne
+# (--diag --verbose autant que --verbose --diag). do_diag sort. ---
+[ "$DO_DIAG" = true ] && do_diag
 
 # --- Actions de rapport (cumulables) : --stats et/ou --list, puis on sort. ---
 if [ "$DO_STATS" = true ] || [ "$DO_LIST" = true ]; then

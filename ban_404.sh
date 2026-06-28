@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="1.4.21"
+BAN404_VERSION="1.4.22"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -526,6 +526,12 @@ T_FR[diag.absent]="Absent : %s"
 T_DE[diag.absent]="Fehlt: %s"
 T_ES[diag.absent]="Ausente: %s"
 T_IT[diag.absent]="Assente: %s"
+
+T_EN[diag.completion_na]="Tab completion: N/A (package bash-completion not installed)"
+T_FR[diag.completion_na]="Complétion Tab : N/A (paquet bash-completion non installé)"
+T_DE[diag.completion_na]="Tab-Vervollständigung: nicht zutreffend (Paket bash-completion nicht installiert)"
+T_ES[diag.completion_na]="Autocompletado Tab: N/D (paquete bash-completion no instalado)"
+T_IT[diag.completion_na]="Completamento Tab: N/D (pacchetto bash-completion non installato)"
 
 T_EN[diag.update_stale]="Updater not run for %s day(s) — cron.daily/anacron down?"
 T_FR[diag.update_stale]="Updater non exécuté depuis %s jour(s) — cron.daily/anacron en panne ?"
@@ -1625,6 +1631,12 @@ run_diag_checks() {
     else diag_line fail "$(t diag.absent "$CONF_FILE")"; fi
     if [ -f /etc/logrotate.d/ban_404 ]; then diag_line ok "$(t diag.present /etc/logrotate.d/ban_404)"
     else diag_line warn "$(t diag.absent /etc/logrotate.d/ban_404)"; fi
+    # Fichier de complétion Bash (cosmétique) : n'a de sens que si bash-completion est installé.
+    # bash-completion absent => non applicable (OK, pas de bruit) ; présent mais fichier manquant =>
+    # l'updater ne l'a pas (encore) déposé : WARN (le contrôle réseau ci-dessus signale déjà une MAJ dispo).
+    if   [ ! -d /usr/share/bash-completion ]; then diag_line ok "$(t diag.completion_na)"
+    elif [ -f /usr/share/bash-completion/completions/ban_404.sh ]; then diag_line ok "$(t diag.present /usr/share/bash-completion/completions/ban_404.sh)"
+    else diag_line warn "$(t diag.absent /usr/share/bash-completion/completions/ban_404.sh)"; fi
 
     # 6. Découverte des logs (même logique que l'analyse ; purement lecture). On sépare les cas
     # BÉNINS (site inactif : aucun access.log, symlink cassé, ou fichier vide — fréquent en

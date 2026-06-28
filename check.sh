@@ -8,7 +8,7 @@
 # Pre-commit : créer .git/hooks/pre-commit contenant :  #!/bin/sh \n exec bash check.sh
 set -u
 
-SCRIPTS="ban_404.sh update_ban_404.sh install_ban_404.sh check.sh"
+SCRIPTS="ban_404.sh update_ban_404.sh install_ban_404.sh check.sh ban_404.completion.bash"
 
 # Doit tourner à la racine du dépôt (les chemins sont relatifs).
 if [ ! -f ban_404.sh ] || [ ! -f install_ban_404.sh ]; then

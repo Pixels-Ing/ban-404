@@ -351,7 +351,9 @@ apt-get update || t inst.apt_update_warn
 # curl : requis pour la récupération initiale du moteur via l'updater (l'install dépend du réseau).
 # anacron : sur Debian/Ubuntu, /etc/crontab délègue cron.daily à anacron ; sans lui, le cron.daily
 # de l'updater peut ne jamais se déclencher et le serveur fige ses versions (cf. --diag, pilote cron.daily).
-install_pkgs(){ apt-get install -y ipset iptables-persistent ipset-persistent cron anacron curl; }
+# bash-completion : fournit le chargement à la demande pour la complétion Tab de ban_404.sh (le fichier
+# lui-même est déposé par l'updater, appelé plus bas, dans /usr/share/bash-completion/completions/).
+install_pkgs(){ apt-get install -y ipset iptables-persistent ipset-persistent cron anacron curl bash-completion; }
 if ! install_pkgs; then
     t inst.universe_try
     command -v add-apt-repository >/dev/null 2>&1 && { add-apt-repository -y universe && apt-get update || true; }
@@ -453,10 +455,11 @@ cat > "$UPDATER_PATH" <<'UPD_EOF'
 # à la conf si elle est absente (langue héritée du shell/système, sinon en).
 set -u
 
-UPDATER_VERSION="1.2.9"
+UPDATER_VERSION="1.2.10"
 CONF_FILE="/etc/ban_404.conf"
 TARGET="/usr/local/sbin/ban_404.sh"
 SELF="/usr/local/sbin/update_ban_404.sh"
+COMPLETION_PATH="/usr/share/bash-completion/completions/ban_404.sh"  # complétion Bash (interactif)
 LOG="/var/log/ban_404.log"
 UPDATE_STAMP_FILE="/var/lib/ban_404/last_update"   # repère « l'updater a tourné » (lu par le moteur)
 
@@ -861,6 +864,15 @@ update_file(){
 
 # 1) Le moteur de détection/ban.
 update_file "ban_404.sh" "$TARGET" "ban_404.sh"
+
+# 1bis) Le fichier de complétion Bash (interactif uniquement, aucun impact sur le cron). Déposé
+#    SEULEMENT si bash-completion est présent (sinon rien ne le sourcerait) ; auto-correcteur, car
+#    re-testé à chaque passage si le paquet est posé plus tard. mkdir car la bascule de update_file
+#    fait un mktemp dans le répertoire de la cible, qui doit donc exister. Réutilise les clés upd.*.
+if [ -d /usr/share/bash-completion ]; then
+    mkdir -p "$(dirname "$COMPLETION_PATH")" 2>/dev/null
+    update_file "ban_404.completion.bash" "$COMPLETION_PATH" "completion"
+fi
 
 # 2) L'updater lui-même, EN DERNIER. La bascule par 'mv' crée un nouvel inode : le process en
 #    cours garde l'ancien inode ouvert et termine sans surprise.

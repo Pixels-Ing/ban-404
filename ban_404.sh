@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="1.4.22"
+BAN404_VERSION="1.4.23"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -88,11 +88,11 @@ T_DE[help.showblocked]="  --show-blocked   Auch IPs anzeigen, die bereits im ips
 T_ES[help.showblocked]="  --show-blocked   Mostrar también las IP que ya están en el ipset."
 T_IT[help.showblocked]="  --show-blocked   Mostrare anche gli IP già presenti nell'ipset."
 
-T_EN[help.verbose]="  --verbose        Detail the run (log search) or, with --diag, each folder's cause."
-T_FR[help.verbose]="  --verbose        Détailler le run (recherche des logs) ou, avec --diag, chaque dossier."
-T_DE[help.verbose]="  --verbose        Den Lauf (Log-Suche) oder, mit --diag, jedes Verzeichnis detaillieren."
-T_ES[help.verbose]="  --verbose        Detallar el run (búsqueda de registros) o, con --diag, cada carpeta."
-T_IT[help.verbose]="  --verbose        Dettagliare il run (ricerca dei log) o, con --diag, ogni cartella."
+T_EN[help.verbose]="  --verbose        Detail the run (log search), or per-folder causes with --diag/--stats."
+T_FR[help.verbose]="  --verbose        Détailler le run (recherche des logs), ou les dossiers avec --diag/--stats."
+T_DE[help.verbose]="  --verbose        Den Lauf (Log-Suche) oder die Verzeichnisse mit --diag/--stats detaillieren."
+T_ES[help.verbose]="  --verbose        Detallar el run (búsqueda de registros), o las carpetas con --diag/--stats."
+T_IT[help.verbose]="  --verbose        Dettagliare il run (ricerca dei log), o le cartelle con --diag/--stats."
 
 T_EN[help.lang]="  --lang <code>    Set the language (en, fr, de, es, it) in the config and exit."
 T_FR[help.lang]="  --lang <code>    Définir la langue (en, fr, de, es, it) dans la config et quitter."
@@ -1449,6 +1449,10 @@ do_summary() {
     case "$DAILY_SUMMARY" in true|1|yes|on) ;; *) exit 0 ;; esac
     [ -z "$WEBHOOK_URL" ] && [ -z "$NOTIFY_EMAIL" ] && exit 0
     local host; host=$(server_label)
+    # Résumé DESTINÉ À L'ENVOI : on neutralise --verbose afin que le détail par dossier
+    # (lignes verbose de run_diag_checks, rejoué par build_stats_text) ne soit PAS injecté dans
+    # le corps notifié. L'affichage direct de --stats (sans cette neutralisation) le conserve.
+    VERBOSE=false
     notify "$(t summary.subject "$host")" "$(build_stats_text)"
     exit 0
 }

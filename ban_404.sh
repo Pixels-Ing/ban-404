@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="1.4.24"
+BAN404_VERSION="1.4.25"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -1785,9 +1785,12 @@ fi
 # FCrDNS sans dépendance externe (getent, via la libc/nsswitch) :
 #   1) PTR de l'IP  2) hostname = sous-domaine d'un crawler connu
 #   3) ce hostname doit RE-RÉSOUDRE vers l'IP d'origine (anti-spoofing du PTR)
+# Chaque lookup est borné par PTR_TIMEOUT (via reverse_dns / timeout) : les IP de botnet
+# ont massivement des PTR morts, et un getent non borné attend le timeout du résolveur
+# (5-10 s) — sur un run de rattrapage à ~1000 candidats, cela coûtait ~45 min de DNS.
 is_legit_crawler() {
     local ip="$1" rdns
-    rdns=$(getent hosts "$ip" 2>/dev/null | awk '{print $2}' | head -n1 | tr 'A-Z' 'a-z')
+    rdns=$(reverse_dns "$ip" | tr 'A-Z' 'a-z')
     [ -z "$rdns" ] && return 1
 
     case "$rdns" in
@@ -1798,7 +1801,11 @@ is_legit_crawler() {
     esac
 
     # Forward-confirmed : l'IP d'origine doit figurer parmi les adresses du hostname
-    getent ahosts "$rdns" 2>/dev/null | awk '{print $1}' | grep -qxF "$ip" || return 1
+    if command -v timeout >/dev/null 2>&1; then
+        timeout "${PTR_TIMEOUT:-2}" getent ahosts "$rdns" 2>/dev/null | awk '{print $1}' | grep -qxF "$ip" || return 1
+    else
+        getent ahosts "$rdns" 2>/dev/null | awk '{print $1}' | grep -qxF "$ip" || return 1
+    fi
 
     echo "$rdns"
     return 0

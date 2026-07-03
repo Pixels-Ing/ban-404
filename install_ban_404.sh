@@ -908,12 +908,13 @@ t inst.fetch_engine "$SCRIPT_PATH"
 [ -s "$SCRIPT_PATH" ] || die "$(t inst.fetch_fail "$SCRIPT_PATH" "$REPO_RAW" "$CONF_PATH" "$LOG_PATH")"
 
 t inst.cron_hourly "$CRON_PATH"
+# Lanceur muet : depuis ban_404 1.4.28 le moteur journalise LUI-MÊME ses événements dans
+# LOG_PATH (une seule méthode de log, cron comme manuel). Garder ce contenu en phase avec
+# le wrapper canonique de self_heal_hourly_cron (ban_404.sh).
 cat > "$CRON_PATH" <<EOF
 #!/bin/sh
-# Horodate chaque ligne de sortie du script avant de l'écrire dans le log.
-$SCRIPT_PATH 2>&1 | while IFS= read -r line; do
-    printf '%s %s\n' "\$(date '+%Y-%m-%d %H:%M:%S')" "\$line"
-done >> $LOG_PATH
+# Depuis ban_404 1.4.28, le moteur journalise lui-même ses événements dans $LOG_PATH.
+exec $SCRIPT_PATH >/dev/null 2>&1
 EOF
 chmod 755 "$CRON_PATH"
 

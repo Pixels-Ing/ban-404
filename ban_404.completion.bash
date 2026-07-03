@@ -47,7 +47,7 @@ _ban_404() {
         opts="--list --stats --resolve"                            # rapports cumulables + PTR
         [ -n "$has_list" ]  && opts="$opts --by-timeout"           # tri : pertinent pour --list seul
         [ -n "$has_stats" ] && opts="$opts --verbose"              # --verbose rejoue le diag dans --stats
-    else opts="--dry-run --show-blocked --verbose --list --stats --diag --unban --summary --check-notification --lang --version --help"
+    else opts="--dry-run --show-blocked --verbose --no-log --list --stats --diag --unban --summary --check-notification --lang --version --help"
     fi
 
     # 4) Retirer ce qui est déjà sur la ligne (pas de doublon proposé).

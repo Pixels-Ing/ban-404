@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="1.4.23"
+BAN404_VERSION="1.4.24"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -20,6 +20,16 @@ HONEYPOT_SCORE=100   # Score ajouté par hit honeypot (>= ce score => ban imméd
 HONEYPOT_BAN_TIMEOUT=604800   # Timeout du ban honeypot (s) : 7 j, plus long que BAN_TIMEOUT (flood 404).
 HONEYPOT_PATTERN='\.env|wp-config\.php|phpmyadmin|config\.json|setup\.php|actuator|xmlrpc\.php'
 NOISE_PATTERN='\.(jpg|jpeg|png|gif|webp|ico|css|js|svg|woff2?|map)$|apple-touch-icon|favicon|browserconfig\.xml|mstile|autodiscover\.xml|sitemap\.xml|robots\.txt|ads\.txt|\.well-known/(security\.txt|pki-validation)'
+# Signatures sécurité testées sur la requête ($7) QUEL QUE SOIT le statut HTTP (contrairement aux
+# honeypots, limités aux 404) : traversée de répertoires, sondes RCE, SQLi encodées, bots à liens
+# ré-encodés. Match => +HONEYPOT_SCORE (ban immédiat, timeout HONEYPOT_BAN_TIMEOUT). Critère
+# d'inclusion : aucun client légitime ne produit jamais ces chaînes. Vide => désactivé.
+SECURITY_PATTERN='etc(/|%2f)passwd|\.\./\.\.|%2e%2e%2f|\.\.%2f|%00|vendor/phpunit|eval-stdin\.php|union(\+|%20)select|information_schema|amp%3bamp%3b'
+# Flood POST (brute-force) : POST dont la requête matche ce motif, comptés dans la fenêtre WINDOW ;
+# au-delà de POST_FLOOD_THRESHOLD => +HONEYPOT_SCORE. Défaut : login/xmlrpc WordPress. Le seuil
+# tolère plusieurs utilisateurs légitimes derrière un même NAT. Motif vide => désactivé.
+POST_FLOOD_PATTERN='wp-login\.php|xmlrpc\.php'
+POST_FLOOD_THRESHOLD=20
 
 # Whitelist des IPs à ne JAMAIS bannir (séparées par | ) -- correspondance EXACTE
 WHITELIST_IP="127.0.0.1"
@@ -834,11 +844,17 @@ T_DE[help.conf_ptr_timeout]="  PTR_TIMEOUT      Max. Sekunden pro Reverse-DNS-Ab
 T_ES[help.conf_ptr_timeout]="  PTR_TIMEOUT      Segundos máx. por consulta de DNS inverso (por defecto 2)."
 T_IT[help.conf_ptr_timeout]="  PTR_TIMEOUT      Secondi max per query reverse DNS (predefinito 2)."
 
-T_EN[help.conf_advanced]="  Advanced: HONEYPOT_PATTERN / NOISE_PATTERN (awk regex) — override with care."
-T_FR[help.conf_advanced]="  Avancé : HONEYPOT_PATTERN / NOISE_PATTERN (regex awk) — surcharger avec prudence."
-T_DE[help.conf_advanced]="  Erweitert: HONEYPOT_PATTERN / NOISE_PATTERN (awk-Regex) — mit Bedacht ändern."
-T_ES[help.conf_advanced]="  Avanzado: HONEYPOT_PATTERN / NOISE_PATTERN (regex awk) — sobrescribir con cuidado."
-T_IT[help.conf_advanced]="  Avanzato: HONEYPOT_PATTERN / NOISE_PATTERN (regex awk) — sovrascrivere con cautela."
+T_EN[help.conf_postflood]="  POST_FLOOD_THRESHOLD  Ban when more than N monitored POSTs in the window (default 20)."
+T_FR[help.conf_postflood]="  POST_FLOOD_THRESHOLD  Ban au-delà de N POST surveillés dans la fenêtre (défaut 20)."
+T_DE[help.conf_postflood]="  POST_FLOOD_THRESHOLD  Sperre bei mehr als N überwachten POSTs im Zeitfenster (Standard 20)."
+T_ES[help.conf_postflood]="  POST_FLOOD_THRESHOLD  Bloqueo al superar N POST vigilados en la ventana (por defecto 20)."
+T_IT[help.conf_postflood]="  POST_FLOOD_THRESHOLD  Blocco oltre N POST sorvegliati nella finestra (predefinito 20)."
+
+T_EN[help.conf_advanced]="  Advanced: HONEYPOT_PATTERN / NOISE_PATTERN / SECURITY_PATTERN / POST_FLOOD_PATTERN (awk regex) — override with care."
+T_FR[help.conf_advanced]="  Avancé : HONEYPOT_PATTERN / NOISE_PATTERN / SECURITY_PATTERN / POST_FLOOD_PATTERN (regex awk) — surcharger avec prudence."
+T_DE[help.conf_advanced]="  Erweitert: HONEYPOT_PATTERN / NOISE_PATTERN / SECURITY_PATTERN / POST_FLOOD_PATTERN (awk-Regex) — mit Bedacht ändern."
+T_ES[help.conf_advanced]="  Avanzado: HONEYPOT_PATTERN / NOISE_PATTERN / SECURITY_PATTERN / POST_FLOOD_PATTERN (regex awk) — sobrescribir con cuidado."
+T_IT[help.conf_advanced]="  Avanzato: HONEYPOT_PATTERN / NOISE_PATTERN / SECURITY_PATTERN / POST_FLOOD_PATTERN (regex awk) — sovrascrivere con cautela."
 
 T_EN[help.conf_example_pointer]="  See ban_404.conf.example for full documentation and defaults."
 T_FR[help.conf_example_pointer]="  Voir ban_404.conf.example pour la doc complète et les valeurs par défaut."
@@ -1153,6 +1169,7 @@ show_help() {
     t help.conf_daily
     t help.conf_resolve
     t help.conf_ptr_timeout
+    t help.conf_postflood
     t help.conf_advanced
     t help.conf_example_pointer
     exit 0
@@ -1929,22 +1946,32 @@ CUTOFF=$(date -d "@$(( $(date +%s) - WINDOW ))" '+%Y%m%d%H%M%S')
 # 3. Extraction et tri via awk
 #    - tail -q : seulement les dernières lignes de CHAQUE log (borne le coût)
 #    - whitelist en correspondance EXACTE (split sur |)
-#    - fenêtre temporelle (on ignore les 404 trop vieux)
+#    - fenêtre temporelle (on ignore les lignes trop vieilles)
 #    - insensibilité à la casse via tolower() (le flag /i n'existe pas en awk)
-#    - filtre anti-bruit + honeypots, seuils/motifs surchargeables via la conf.
+#    - filtre anti-bruit + honeypots (sur les 404) ; signatures sécurité + flood POST
+#      (quel que soit le statut HTTP), seuils/motifs surchargeables via la conf.
 #    Les motifs passent par ENVIRON (pas -v) : pas de re-traitement des échappements
 #    (\.  reste \.) ; les seuils numériques passent par -v.
+#    Signatures et flood POST ne testent que $7 (la requête) — jamais $0 : le referer
+#    d'un visiteur arrivant depuis une URL piégée ne doit pas le faire bannir.
 ips_data=$(tail -n "$TAIL_LINES" -q "${VALID_FILES[@]}" | \
     HONEYPOT_RE="$HONEYPOT_PATTERN" NOISE_RE="$NOISE_PATTERN" \
-    awk -v wl="$WHITELIST_IP" -v cutoff="$CUTOFF" -v thr="$BAN_THRESHOLD" -v hp="$HONEYPOT_SCORE" '
+    SECURITY_RE="$SECURITY_PATTERN" POSTFLOOD_RE="$POST_FLOOD_PATTERN" \
+    awk -v wl="$WHITELIST_IP" -v cutoff="$CUTOFF" -v thr="$BAN_THRESHOLD" -v hp="$HONEYPOT_SCORE" \
+        -v pf_thr="$POST_FLOOD_THRESHOLD" '
 BEGIN {
     split("Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec", M, " ")
     for (i=1;i<=12;i++) mon[M[i]]=i
     n=split(wl, Wl, "|"); for (i=1;i<=n;i++) white[Wl[i]]=1
     noise_re = ENVIRON["NOISE_RE"]
     honeypot_re = ENVIRON["HONEYPOT_RE"]
+    security_re = ENVIRON["SECURITY_RE"]
+    postflood_re = ENVIRON["POSTFLOOD_RE"]
 }
-$9 == 404 && !($1 in white) {
+# Garde rapide : seules les lignes candidates (404, signature sécurité, POST surveillé)
+# paient le parse de date qui suit.
+!($1 in white) && ($9 == 404 || (security_re != "" && tolower($7) ~ security_re) || \
+                   (postflood_re != "" && $6 ~ /POST/ && tolower($7) ~ postflood_re)) {
 
     # --- Fenêtre temporelle : $4 = [jj/Mon/aaaa:hh:mm:ss ---
     split(substr($4,2), d, /[\/:]/)
@@ -1952,6 +1979,14 @@ $9 == 404 && !($1 in white) {
     if (ts < cutoff) next
 
     p = tolower($7)
+
+    # --- S. Signature sécurité (tout statut) : +HONEYPOT_SCORE (ban immédiat) ---
+    if (security_re != "" && p ~ security_re) { count[$1] += hp; next }
+
+    # --- P. Flood POST (tout statut) : compté ici, seuil appliqué en END ---
+    if (postflood_re != "" && $6 ~ /POST/ && p ~ postflood_re) { post[$1]++; next }
+
+    if ($9 != 404) next
 
     # --- A. Bruit de fond (faux positifs) ---
     if (p ~ noise_re) next
@@ -1964,6 +1999,7 @@ $9 == 404 && !($1 in white) {
     }
 }
 END {
+    for (x in post) if (post[x] > pf_thr) count[x] += hp
     for (ip in count) if (count[ip] > thr) print count[ip], ip
 }' | sort -rn)
 

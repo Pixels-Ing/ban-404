@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="1.4.26"
+BAN404_VERSION="1.4.27"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -2035,7 +2035,7 @@ BEGIN {
 END {
     for (x in post) if (post[x] > pf_thr) count[x] += hp
     for (ip in count) if (count[ip] > thr) print count[ip], ip
-}' | sort -rn)
+}' | sort -k1,1rn -k2,2V)
 
 if [ -z "$ips_data" ]; then
     [ "$VERBOSE" = true ] && t no_suspect

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="1.4.25"
+BAN404_VERSION="1.4.26"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -861,6 +861,12 @@ T_FR[help.conf_example_pointer]="  Voir ban_404.conf.example pour la doc complè
 T_DE[help.conf_example_pointer]="  Siehe ban_404.conf.example für vollständige Doku und Standardwerte."
 T_ES[help.conf_example_pointer]="  Vea ban_404.conf.example para la documentación completa y los valores por defecto."
 T_IT[help.conf_example_pointer]="  Vedere ban_404.conf.example per la documentazione completa e i valori predefiniti."
+
+T_EN[heal.ipset_grown]="[i] ipset %s enlarged (maxelem %s -> 1048576), existing bans preserved."
+T_FR[heal.ipset_grown]="[i] ipset %s agrandi (maxelem %s -> 1048576), bans existants conservés."
+T_DE[heal.ipset_grown]="[i] ipset %s vergrößert (maxelem %s -> 1048576), bestehende Sperren erhalten."
+T_ES[heal.ipset_grown]="[i] ipset %s ampliado (maxelem %s -> 1048576), bloqueos existentes conservados."
+T_IT[heal.ipset_grown]="[i] ipset %s ampliato (maxelem %s -> 1048576), blocchi esistenti conservati."
 
 T_EN[list.header]="Currently banned IPs (ipset %s):"
 T_FR[list.header]="IP actuellement bannies (ipset %s) :"
@@ -1891,7 +1897,28 @@ self_heal_update_trigger() {
 if [ "$DRY_RUN" = false ]; then
     ipset list "$IPSET_NAME" &>/dev/null
     if [ $? -ne 0 ]; then
-        ipset create "$IPSET_NAME" hash:ip timeout $BAN_TIMEOUT
+        ipset create "$IPSET_NAME" hash:ip timeout $BAN_TIMEOUT maxelem 1048576 hashsize 65536
+    else
+        # Auto-agrandissement (one-shot) : les sets créés avant 1.4.26 plafonnent au défaut
+        # noyau maxelem=65536 — saturable en < 1 jour sous botnet (bans honeypot 7 j à
+        # plusieurs milliers d'IP/h). Un set plein refuse tout nouvel ajout EN SILENCE :
+        # la protection meurt sans bruit. Même principe que les self_heal_* : détection et
+        # réparation au passage horaire, bans existants conservés (copie + swap atomique).
+        cur_max=$(ipset list "$IPSET_NAME" -t 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="maxelem"){print $(i+1); exit}}')
+        if [ -n "$cur_max" ] && [ "$cur_max" -lt 1048576 ]; then
+            tmp_set="${IPSET_NAME}_grow"
+            ipset destroy "$tmp_set" 2>/dev/null
+            if ipset create "$tmp_set" hash:ip timeout $BAN_TIMEOUT maxelem 1048576 hashsize 65536 2>/dev/null; then
+                ipset save "$IPSET_NAME" 2>/dev/null | awk -v t="$tmp_set" '/^add /{$2=t; print}' | ipset restore -exist 2>/dev/null
+                if ipset swap "$tmp_set" "$IPSET_NAME" 2>/dev/null; then
+                    ipset destroy "$tmp_set" 2>/dev/null
+                    ipset save > "$IPSET_SAVE_FILE"
+                    t heal.ipset_grown "$IPSET_NAME" "$cur_max"
+                else
+                    ipset destroy "$tmp_set" 2>/dev/null
+                fi
+            fi
+        fi
     fi
     /sbin/iptables -C INPUT -m set --match-set "$IPSET_NAME" src -j DROP &>/dev/null
     if [ $? -ne 0 ]; then

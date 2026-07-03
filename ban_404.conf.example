@@ -36,6 +36,7 @@ WHITELIST_IP="127.0.0.1"
 #BAN_THRESHOLD=10
 #HONEYPOT_SCORE=100
 #HONEYPOT_BAN_TIMEOUT=604800
+#POST_FLOOD_THRESHOLD=20
 #RESOLVE_PTR=false
 #PTR_TIMEOUT=2
 
@@ -73,3 +74,15 @@ WHITELIST_IP="127.0.0.1"
 # --- Pattern di rilevamento (regex awk) — AVANZATO: sovrascrivere solo con cognizione di causa ---
 #HONEYPOT_PATTERN='\.env|wp-config\.php|phpmyadmin|config\.json|setup\.php|actuator|xmlrpc\.php'
 #NOISE_PATTERN='\.(jpg|jpeg|png|gif|webp|ico|css|js|svg|woff2?|map)$|apple-touch-icon|favicon|browserconfig\.xml|mstile|autodiscover\.xml|sitemap\.xml|robots\.txt|ads\.txt|\.well-known/(security\.txt|pki-validation)'
+# SECURITY_PATTERN: tested on the request for ANY HTTP status (not only 404); match = immediate ban.
+# SECURITY_PATTERN : testé sur la requête QUEL QUE SOIT le statut HTTP (pas seulement 404) ; match = ban immédiat.
+# SECURITY_PATTERN: auf die Anfrage bei JEDEM HTTP-Status geprüft (nicht nur 404); Treffer = sofortige Sperre.
+# SECURITY_PATTERN: probado en la petición con CUALQUIER estado HTTP (no solo 404); coincidencia = bloqueo inmediato.
+# SECURITY_PATTERN: testato sulla richiesta con QUALSIASI stato HTTP (non solo 404); corrispondenza = blocco immediato.
+#SECURITY_PATTERN='etc(/|%2f)passwd|\.\./\.\.|%2e%2e%2f|\.\.%2f|%00|vendor/phpunit|eval-stdin\.php|union(\+|%20)select|information_schema|amp%3bamp%3b'
+# POST_FLOOD_PATTERN: monitored POST paths; over POST_FLOOD_THRESHOLD hits in the window = ban (brute force).
+# POST_FLOOD_PATTERN : chemins POST surveillés ; au-delà de POST_FLOOD_THRESHOLD dans la fenêtre = ban (brute force).
+# POST_FLOOD_PATTERN: überwachte POST-Pfade; mehr als POST_FLOOD_THRESHOLD im Zeitfenster = Sperre (Brute-Force).
+# POST_FLOOD_PATTERN: rutas POST vigiladas; superar POST_FLOOD_THRESHOLD en la ventana = bloqueo (fuerza bruta).
+# POST_FLOOD_PATTERN: percorsi POST sorvegliati; oltre POST_FLOOD_THRESHOLD nella finestra = blocco (forza bruta).
+#POST_FLOOD_PATTERN='wp-login\.php|xmlrpc\.php'

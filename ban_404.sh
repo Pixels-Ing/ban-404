@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="1.4.27"
+BAN404_VERSION="1.4.28"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -11,7 +11,7 @@ WINDOW=7200          # Fenêtre glissante en secondes (2h). Cron horaire => reco
 TAIL_LINES=50000     # On n'analyse que les N dernières lignes de chaque log (borne le coût sur gros sites).
                      # À augmenter si un site dépasse TAIL_LINES requêtes dans la fenêtre WINDOW.
 LOCK_FILE="/run/ban_404_list.lock"
-LOG_FILE="/var/log/ban_404.log"   # journal (écrit par le wrapper cron) ; lu par --stats/--summary
+LOG_FILE="/var/log/ban_404.log"   # journal des événements (écrit par le moteur via log_line) ; lu par --stats/--summary
 UPDATE_STAMP_FILE="/var/lib/ban_404/last_update"   # repère « l'updater a tourné » (écrit par update_ban_404.sh)
 
 # Seuils & motifs de détection (surchargeables par la conf)
@@ -103,6 +103,12 @@ T_FR[help.verbose]="  --verbose        Détailler le run (recherche des logs), o
 T_DE[help.verbose]="  --verbose        Den Lauf (Log-Suche) oder die Verzeichnisse mit --diag/--stats detaillieren."
 T_ES[help.verbose]="  --verbose        Detallar el run (búsqueda de registros), o las carpetas con --diag/--stats."
 T_IT[help.verbose]="  --verbose        Dettagliare il run (ricerca dei log), o le cartelle con --diag/--stats."
+
+T_EN[help.nolog]="  --no-log         Do not write this run's events ([+]/[-]) to the log file."
+T_FR[help.nolog]="  --no-log         Ne pas écrire les événements de ce run ([+]/[-]) dans le journal."
+T_DE[help.nolog]="  --no-log         Die Ereignisse dieses Laufs ([+]/[-]) nicht in die Logdatei schreiben."
+T_ES[help.nolog]="  --no-log         No escribir los eventos de esta ejecución ([+]/[-]) en el registro."
+T_IT[help.nolog]="  --no-log         Non scrivere gli eventi di questa esecuzione ([+]/[-]) nel registro."
 
 T_EN[help.lang]="  --lang <code>    Set the language (en, fr, de, es, it) in the config and exit."
 T_FR[help.lang]="  --lang <code>    Définir la langue (en, fr, de, es, it) dans la config et quitter."
@@ -1124,6 +1130,25 @@ t() {
     printf -- "$fmt\n" "$@"
 }
 
+# Journalisation UNIFIÉE par le moteur (depuis 1.4.28) : le moteur écrit LUI-MÊME ses
+# ÉVÉNEMENTS ([+] bans, [-] débans, [i] réparations, verrou occupé) dans LOG_FILE, horodatés —
+# que le run soit cron ou manuel (avant 1.4.28, seul le wrapper cron journalisait : les bans
+# des runs manuels échappaient aux compteurs de --stats/--summary). Le wrapper cron n'est plus
+# qu'un lanceur muet (cf. self_heal_hourly_cron). --no-log coupe l'écriture ; le dry-run ne
+# journalise JAMAIS (les lignes [SIMULATION] [+] contiennent le marqueur [+] et fausseraient
+# les compteurs). Les messages non événementiels (--help, --list, --diag, verbose...) ne vont
+# jamais au journal.
+log_line() {  # $1 = ligne déjà formatée
+    [ "$LOG_EVENTS" = true ] || return 0
+    { printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$1" >> "$LOG_FILE"; } 2>/dev/null
+    return 0
+}
+t_log() {  # comme t, mais duplique la ligne (horodatée) dans LOG_FILE
+    local m; m=$(t "$@")
+    printf '%s\n' "$m"
+    log_line "$m"
+}
+
 # Initialisation des options
 DRY_RUN=false
 SHOW_BLOCKED=false
@@ -1132,6 +1157,7 @@ DO_LIST=false
 DO_STATS=false
 DO_DIAG=false
 LIST_BY_TIMEOUT=false
+LOG_EVENTS=true      # écriture des événements dans LOG_FILE (--no-log ou dry-run => false)
 
 show_help() {
     t version.line "$BAN404_VERSION"
@@ -1142,6 +1168,7 @@ show_help() {
     t help.dryrun
     t help.showblocked
     t help.verbose
+    t help.nolog
     t help.list
     t help.bytimeout
     t help.resolve
@@ -1259,7 +1286,7 @@ enforce_whitelist_unban() {
         if [ "$DRY_RUN" = true ]; then
             t wl.sim_unban "$ip"
         elif ipset del "$IPSET_NAME" "$ip" 2>/dev/null; then
-            t wl.unban "$ip"; removed=true
+            t_log wl.unban "$ip"; removed=true
         fi
     done < <(ipset list "$IPSET_NAME" 2>/dev/null | awk '/^Members:/{m=1;next} m&&NF{print $1}')
     if [ "$removed" = true ]; then
@@ -1717,10 +1744,10 @@ do_unban() {  # $1 = IP | all  (valeur requise, pas de défaut)
     if [ "${target,,}" = "all" ]; then
         n=$(ipset list "$IPSET_NAME" 2>/dev/null | awk '/^Members:/{m=1;next} m&&NF{c++} END{print c+0}')
         ipset flush "$IPSET_NAME" 2>/dev/null || { t unban.fail "all"; exit 1; }
-        t unban.all_done "$n"
+        t_log unban.all_done "$n"
     elif ipset test "$IPSET_NAME" "$target" &>/dev/null; then
         ipset del "$IPSET_NAME" "$target" 2>/dev/null || { t unban.fail "$target"; exit 1; }
-        t unban.done "$target"
+        t_log unban.done "$target"
     else
         t unban.notfound "$target"; exit 0
     fi
@@ -1734,6 +1761,7 @@ while [[ $# -gt 0 ]]; do
         --dry-run) DRY_RUN=true; shift ;;
         --show-blocked) SHOW_BLOCKED=true; shift ;;
         --verbose) VERBOSE=true; shift ;;
+        --no-log) LOG_EVENTS=false; shift ;;
         --lang) change_lang "${2:-}" ;;
         --lang=*) change_lang "${1#*=}" ;;
         --by-timeout) LIST_BY_TIMEOUT=true; shift ;;
@@ -1752,6 +1780,9 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# Le dry-run ne journalise jamais (lignes [SIMULATION] [+] => compteurs de --stats faussés).
+[ "$DRY_RUN" = true ] && LOG_EVENTS=false
+
 # --- Auto-diagnostic (lecture seule), exécuté APRÈS la boucle de parsing : ainsi --verbose est
 # déjà pris en compte par run_diag_checks (détail par dossier) quel que soit l'ordre sur la ligne
 # (--diag --verbose autant que --verbose --diag). do_diag sort. ---
@@ -1769,7 +1800,7 @@ fi
 if [ "$DRY_RUN" = false ]; then
     exec 9>"$LOCK_FILE" || { t lock.open_fail "$LOCK_FILE"; exit 1; }
     if ! flock -n 9; then
-        t lock.busy "$LOCK_FILE"
+        t_log lock.busy "$LOCK_FILE"
         exit 1
     fi
 fi
@@ -1894,6 +1925,33 @@ self_heal_update_trigger() {
     return 0
 }
 
+# --- Wrapper cron horaire : lanceur muet ------------------------------------------------
+# Depuis 1.4.28 le moteur journalise LUI-MÊME ses événements dans LOG_FILE (log_line) : le
+# wrapper historique (qui horodatait tout stdout vers le log) ferait DOUBLON. Ce self-heal
+# migre le wrapper vers sa forme canonique « exec … >/dev/null » au premier passage.
+# Anti-doublon de transition : si l'ancien wrapper vient d'être détecté ET que stdout n'est
+# pas un terminal (ce run a donc très probablement été lancé par l'ancien wrapper, qui
+# journalise encore son stdout), on coupe LOG_EVENTS pour CE run — dès le suivant, le
+# nouveau wrapper est en place. Neutre en dry-run ; sans effet si déjà migré.
+self_heal_hourly_cron() {
+    local f="/etc/cron.hourly/ban_404"
+    [ "$DRY_RUN" = true ] && return 0
+    [ "$(id -u)" -eq 0 ] || return 0
+    [ -f "$f" ] || return 0                                   # pas de cron horaire : rien à migrer
+    grep -q 'while IFS= read' "$f" 2>/dev/null || return 0    # déjà canonique
+    cat > "$f" <<'EOF'
+#!/bin/sh
+# Depuis ban_404 1.4.28, le moteur journalise lui-même ses événements dans /var/log/ban_404.log.
+exec /usr/local/sbin/ban_404.sh >/dev/null 2>&1
+EOF
+    chmod 755 "$f"
+    [ -t 1 ] || LOG_EVENTS=false
+    return 0
+}
+# Appelé AVANT le premier événement possible du run (l'auto-agrandissement ipset ci-dessous),
+# pour que l'anti-doublon de transition couvre tout le run.
+self_heal_hourly_cron
+
 if [ "$DRY_RUN" = false ]; then
     ipset list "$IPSET_NAME" &>/dev/null
     if [ $? -ne 0 ]; then
@@ -1913,7 +1971,7 @@ if [ "$DRY_RUN" = false ]; then
                 if ipset swap "$tmp_set" "$IPSET_NAME" 2>/dev/null; then
                     ipset destroy "$tmp_set" 2>/dev/null
                     ipset save > "$IPSET_SAVE_FILE"
-                    t heal.ipset_grown "$IPSET_NAME" "$cur_max"
+                    t_log heal.ipset_grown "$IPSET_NAME" "$cur_max"
                 else
                     ipset destroy "$tmp_set" 2>/dev/null
                 fi
@@ -2054,7 +2112,7 @@ while read -r count ip; do
     crawler_domain=$(is_legit_crawler "$ip")
     if [ $? -eq 0 ]; then
         if [ "$DRY_RUN" = false ] && ipset test "$IPSET_NAME" "$ip" &>/dev/null; then
-            t unban.crawler "$ip" "$crawler_domain" "$count"
+            t_log unban.crawler "$ip" "$crawler_domain" "$count"
             ipset del "$IPSET_NAME" "$ip"
             changes_made=true
         elif [ "$DRY_RUN" = true ] && ipset test "$IPSET_NAME" "$ip" &>/dev/null; then
@@ -2069,7 +2127,7 @@ while read -r count ip; do
     # Whitelist CIDR : même logique que les crawlers (deban si présent, sinon skip)
     if in_whitelist_cidr "$ip"; then
         if [ "$DRY_RUN" = false ] && ipset test "$IPSET_NAME" "$ip" &>/dev/null; then
-            t cidr.unban "$ip" "$count"
+            t_log cidr.unban "$ip" "$count"
             ipset del "$IPSET_NAME" "$ip"
             changes_made=true
         elif [ "$DRY_RUN" = true ] && ipset test "$IPSET_NAME" "$ip" &>/dev/null; then
@@ -2093,11 +2151,11 @@ while read -r count ip; do
             rules_simulated=$((rules_simulated + 1))
         else
             if [ "$count" -ge "$HONEYPOT_SCORE" ]; then
-                t ban.honeypot "$ip" "$count"; hp=1
+                t_log ban.honeypot "$ip" "$count"; hp=1
                 # Ban honeypot : timeout différencié (plus long que le défaut du set).
                 ipset -exist add "$IPSET_NAME" "$ip" timeout "$HONEYPOT_BAN_TIMEOUT"
             else
-                t ban.add "$ip" "$count"; hp=0
+                t_log ban.add "$ip" "$count"; hp=0
                 ipset -exist add "$IPSET_NAME" "$ip"
             fi
             changes_made=true

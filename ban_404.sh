@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="1.4.28"
+BAN404_VERSION="1.4.29"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -223,6 +223,12 @@ T_FR[heal.summary_cron_removed]="[*] Cron de résumé quotidien retiré (DAILY_S
 T_DE[heal.summary_cron_removed]="[*] Tageszusammenfassungs-Cron entfernt (DAILY_SUMMARY deaktiviert): %s"
 T_ES[heal.summary_cron_removed]="[*] Cron de resumen diario eliminado (DAILY_SUMMARY desactivado): %s"
 T_IT[heal.summary_cron_removed]="[*] Cron del riepilogo giornaliero rimosso (DAILY_SUMMARY disattivato): %s"
+
+T_EN[heal.summary_cron_renamed]="[*] Daily-summary cron renamed to %s (now runs after the updater)."
+T_FR[heal.summary_cron_renamed]="[*] Cron de résumé quotidien renommé en %s (passe désormais après l'updater)."
+T_DE[heal.summary_cron_renamed]="[*] Tageszusammenfassungs-Cron umbenannt in %s (läuft nun nach dem Updater)."
+T_ES[heal.summary_cron_renamed]="[*] Cron de resumen diario renombrado a %s (ahora se ejecuta después del updater)."
+T_IT[heal.summary_cron_renamed]="[*] Cron del riepilogo giornaliero rinominato in %s (ora viene eseguito dopo l'updater)."
 
 T_EN[heal.update_triggered]="[*] cron.daily silent — updater triggered from the hourly run."
 T_FR[heal.update_triggered]="[*] cron.daily muet — updater relancé depuis le passage horaire."
@@ -1620,8 +1626,11 @@ run_diag_checks() {
     # 3. Crons (hourly = FAIL si absent ; update = WARN ; summary = cohérence avec DAILY_SUMMARY)
     if [ -f /etc/cron.hourly/ban_404 ]; then diag_line ok "$(t diag.present /etc/cron.hourly/ban_404)"
     else diag_line fail "$(t diag.absent /etc/cron.hourly/ban_404)"; fi
-    if [ -f /etc/cron.daily/ban_404_update ]; then diag_line ok "$(t diag.present /etc/cron.daily/ban_404_update)"
-    else diag_line warn "$(t diag.absent /etc/cron.daily/ban_404_update)"; fi
+    # Nom courant 0_ban_404_update (préfixe forçant l'ordre run-parts : updater AVANT résumé) ;
+    # l'ancien nom ban_404_update reste OK (fonctionnel, renommé par l'updater >= 1.2.12).
+    if [ -f /etc/cron.daily/0_ban_404_update ]; then diag_line ok "$(t diag.present /etc/cron.daily/0_ban_404_update)"
+    elif [ -f /etc/cron.daily/ban_404_update ]; then diag_line ok "$(t diag.present /etc/cron.daily/ban_404_update)"
+    else diag_line warn "$(t diag.absent /etc/cron.daily/0_ban_404_update)"; fi
     # Pilote de cron.daily. /etc/crontab le délègue à anacron SI présent (test -x /usr/sbin/anacron),
     # SINON le lance lui-même à 06:25 via run-parts (le `||` est un fallback, pas une dépendance).
     # Pièges détectés ici :
@@ -1651,10 +1660,10 @@ run_diag_checks() {
         diag_line warn "$(t diag.update_never)"
     fi
     if diag_is_on "$DAILY_SUMMARY"; then
-        if [ -f /etc/cron.daily/ban_404_summary ]; then diag_line ok "$(t diag.summary_cron_ok)"
+        if [ -f /etc/cron.daily/1_ban_404_summary ] || [ -f /etc/cron.daily/ban_404_summary ]; then diag_line ok "$(t diag.summary_cron_ok)"
         else diag_line warn "$(t diag.summary_cron_missing_wanted)"; fi
     else
-        if [ -f /etc/cron.daily/ban_404_summary ]; then diag_line warn "$(t diag.summary_cron_orphan)"
+        if [ -f /etc/cron.daily/1_ban_404_summary ] || [ -f /etc/cron.daily/ban_404_summary ]; then diag_line warn "$(t diag.summary_cron_orphan)"
         else diag_line ok "$(t diag.summary_cron_off)"; fi
     fi
 
@@ -1883,9 +1892,18 @@ self_heal_updater() {
 # devient ainsi l'interrupteur unique (exécution ET présence du cron) ; le moteur en est seul maître
 # (l'installeur ne le pose plus). Idempotent : sans effet si le fichier est déjà dans l'état voulu.
 self_heal_summary_cron() {
-    local f="/etc/cron.daily/ban_404_summary"
+    # Préfixe « 1_ » : run-parts exécute cron.daily en ordre lexicographique, et l'ancien nom
+    # ban_404_summary passait AVANT ban_404_update — le résumé partait avec les versions de la
+    # veille (faux [WARN] « MAJ dispo »). Avec 0_ban_404_update (renommé par l'updater >= 1.2.12)
+    # et 1_ban_404_summary, l'updater précède toujours le résumé.
+    local f="/etc/cron.daily/1_ban_404_summary" legacy="/etc/cron.daily/ban_404_summary"
     [ "$DRY_RUN" = true ] && return 0
     [ "$(id -u)" -eq 0 ] || return 0
+    # Migration one-shot de l'ancien nom (contenu identique : simple renommage ; si DAILY_SUMMARY
+    # est désactivé, le case retire ensuite le fichier renommé comme n'importe quel orphelin).
+    if [ -f "$legacy" ]; then
+        mv -f "$legacy" "$f" 2>/dev/null && t_log heal.summary_cron_renamed "$f"
+    fi
     case "$DAILY_SUMMARY" in
         true|1|yes|on)
             [ -f "$f" ] && return 0                   # déjà présent => rien à faire

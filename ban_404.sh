@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="1.4.29"
+BAN404_VERSION="1.4.30"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -2049,9 +2049,11 @@ if [ ${#VALID_FILES[@]} -eq 0 ]; then
     exit 0
 fi
 
-# Borne basse de la fenêtre, au format AAAAMMJJHHMMSS (comparable directement, sans mktime)
-CUTOFF=$(date -d "@$(( $(date +%s) - WINDOW ))" '+%Y%m%d%H%M%S')
-[ "$VERBOSE" = true ] && t verbose.analyzing "${TAIL_LINES}" "$CUTOFF"
+# Borne basse de la fenêtre, au format AAAAMMJJHHMMSS (comparable directement, sans mktime) ;
+# l'affichage --verbose reprend le même instant en date/heure lisible
+CUTOFF_EPOCH=$(( $(date +%s) - WINDOW ))
+CUTOFF=$(date -d "@$CUTOFF_EPOCH" '+%Y%m%d%H%M%S')
+[ "$VERBOSE" = true ] && t verbose.analyzing "${TAIL_LINES}" "$(date -d "@$CUTOFF_EPOCH" '+%Y-%m-%d %H:%M:%S')"
 
 # 3. Extraction et tri via awk
 #    - tail -q : seulement les dernières lignes de CHAQUE log (borne le coût)

@@ -19,7 +19,7 @@ LOG_PATH="/var/log/ban_404.log"
 LOGROTATE_PATH="/etc/logrotate.d/ban_404"
 UPDATER_PATH="/usr/local/sbin/update_ban_404.sh"
 CONF_PATH="/etc/ban_404.conf"
-UPDATE_CRON="/etc/cron.daily/ban_404_update"
+UPDATE_CRON="/etc/cron.daily/0_ban_404_update"
 
 # >>> À ÉDITER UNE FOIS avant distribution : URL "raw" de ton dépôt (sans slash final) <<<
 REPO_RAW="https://raw.githubusercontent.com/Pixels-Ing/ban-404/main"
@@ -455,7 +455,7 @@ cat > "$UPDATER_PATH" <<'UPD_EOF'
 # à la conf si elle est absente (langue héritée du shell/système, sinon en).
 set -u
 
-UPDATER_VERSION="1.2.11"
+UPDATER_VERSION="1.2.12"
 CONF_FILE="/etc/ban_404.conf"
 TARGET="/usr/local/sbin/ban_404.sh"
 SELF="/usr/local/sbin/update_ban_404.sh"
@@ -610,6 +610,12 @@ T_DE[upd.repo_migrated]="REPO_RAW migriert zu %s (PixelsIng -> Pixels-Ing)."
 T_ES[upd.repo_migrated]="REPO_RAW migrado a %s (PixelsIng -> Pixels-Ing)."
 T_IT[upd.repo_migrated]="REPO_RAW migrato a %s (PixelsIng -> Pixels-Ing)."
 
+T_EN[upd.cron_renamed]="Daily cron renamed to %s (updater now runs before the daily summary)."
+T_FR[upd.cron_renamed]="Cron quotidien renommé en %s (l'updater passe désormais avant le résumé quotidien)."
+T_DE[upd.cron_renamed]="Täglicher Cron umbenannt in %s (der Updater läuft nun vor der täglichen Zusammenfassung)."
+T_ES[upd.cron_renamed]="Cron diario renombrado a %s (el updater ahora se ejecuta antes del resumen diario)."
+T_IT[upd.cron_renamed]="Cron giornaliero rinominato in %s (l'updater ora viene eseguito prima del riepilogo giornaliero)."
+
 # Détection de la langue : locale du shell (ou /etc/default/locale en repli pour cron).
 detect_lang() {
     local l="${LC_ALL:-${LC_MESSAGES:-${LANG:-}}}"
@@ -686,6 +692,21 @@ case "$REPO_RAW" in
         REPO_RAW="$_new"
         ;;
 esac
+
+# --- Migration cron : ban_404_update -> 0_ban_404_update (ordre run-parts) ---------------------
+# run-parts exécute cron.daily en ordre lexicographique : « ban_404_summary » passait AVANT
+# « ban_404_update », le résumé quotidien partait donc avec les versions de la veille (faux
+# [WARN] « MAJ dispo »). Le préfixe « 0_ » place l'updater en tête ; le moteur renomme de son
+# côté le cron résumé en « 1_ban_404_summary » (self_heal_summary_cron). One-shot, idempotent
+# (un simple mv : le contenu — exec de $SELF — ne change pas).
+if [ -f /etc/cron.daily/ban_404_update ]; then
+    if [ ! -e /etc/cron.daily/0_ban_404_update ]; then
+        mv -f /etc/cron.daily/ban_404_update /etc/cron.daily/0_ban_404_update 2>/dev/null \
+            && log "$(t upd.cron_renamed /etc/cron.daily/0_ban_404_update)"
+    else
+        rm -f /etc/cron.daily/ban_404_update 2>/dev/null
+    fi
+fi
 
 # >>> RECONCILE_BLOCK_BEGIN (testable par extraction entre les marqueurs) ---------------------
 # Migration conf : RÉCONCILIATION canonique multilingue (5 langues).

@@ -195,6 +195,12 @@ T_DE[inst.conf_kept]="   vorhandene beibehalten (nicht überschrieben)"
 T_ES[inst.conf_kept]="   se conserva el existente (no sobrescrito)"
 T_IT[inst.conf_kept]="   esistente conservato (non sovrascritto)"
 
+T_EN[inst.wl_self]="   server IP (%s) added to WHITELIST_IP (a server must never ban itself)"
+T_FR[inst.wl_self]="   IP du serveur (%s) ajoutée à WHITELIST_IP (un serveur ne doit jamais s'auto-bannir)"
+T_DE[inst.wl_self]="   Server-IP (%s) zu WHITELIST_IP hinzugefügt (ein Server darf sich nie selbst sperren)"
+T_ES[inst.wl_self]="   IP del servidor (%s) añadida a WHITELIST_IP (un servidor nunca debe bloquearse a sí mismo)"
+T_IT[inst.wl_self]="   IP del server (%s) aggiunto a WHITELIST_IP (un server non deve mai bloccare sé stesso)"
+
 T_EN[inst.selfupdater]="==> Self-updater: %s (+ %s)"
 T_FR[inst.selfupdater]="==> Self-updater : %s (+ %s)"
 T_DE[inst.selfupdater]="==> Self-Updater: %s (+ %s)"
@@ -440,6 +446,24 @@ EOF
     t inst.conf_created
 else
     t inst.conf_kept
+fi
+
+# IP du serveur lui-même : whitelistée d'office (un serveur ne doit jamais s'auto-bannir —
+# healthchecks, wget internes… peuvent générer des 404 en rafale). Détection PUREMENT LOCALE
+# (adresse source de la route par défaut ; aucun appel à un service externe). Idempotent, et
+# n'écrase rien : on PRÉFIXE la valeur existante de WHITELIST_IP (conf neuve comme conservée).
+# Les IP d'AUTRES serveurs d'un parc relèvent de la conf locale, jamais de ce script (dépôt
+# public : n'y publier ni la cartographie d'un parc, ni une immunité croisée exploitable).
+srv_ip=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src"){print $(i+1); exit}}')
+if [ -n "$srv_ip" ]; then
+    esc=$(printf '%s' "$srv_ip" | sed 's/\./\\./g')
+    if ! grep -qE "^WHITELIST_IP=" "$CONF_PATH"; then
+        printf 'WHITELIST_IP="%s|127.0.0.1"\n' "$srv_ip" >> "$CONF_PATH"
+        t inst.wl_self "$srv_ip"
+    elif ! grep -qE "^WHITELIST_IP=.*(\"|\|)${esc}(\"|\|)" "$CONF_PATH"; then
+        sed -i "s#^WHITELIST_IP=\"#WHITELIST_IP=\"${srv_ip}|#" "$CONF_PATH"
+        t inst.wl_self "$srv_ip"
+    fi
 fi
 
 # Seule copie embarquée restante : l'updater (amorce). À garder synchronisé avec

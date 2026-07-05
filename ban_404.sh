@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="1.4.32"
+BAN404_VERSION="1.4.33"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -1755,8 +1755,12 @@ run_diag_checks() {
     # et sans le framework RIEN ne charge notre fichier : Tab muet alors que tout semblait [ OK ].
     # L'installeur pose le paquet ; son absence sur un serveur géré est donc une vraie anomalie.
     if   [ ! -f /usr/share/bash-completion/bash_completion ]; then diag_line warn "$(t diag.completion_pkg)"
-    elif [ -f /usr/share/bash-completion/completions/ban_404.sh ]; then diag_line ok "$(t diag.present /usr/share/bash-completion/completions/ban_404.sh)"
-    else diag_line warn "$(t diag.absent /usr/share/bash-completion/completions/ban_404.sh)"; fi
+    elif [ ! -f /usr/share/bash-completion/completions/ban_404.sh ]; then diag_line warn "$(t diag.absent /usr/share/bash-completion/completions/ban_404.sh)"
+    # Shim de chargement anticipé (déposé par l'updater >= 1.2.13) : sans lui, « sudo ban_404.sh
+    # <Tab> » ne complète pas (la délégation sudo de bash-completion <= 2.11 ne charge pas à la
+    # demande) — seul le Tab direct fonctionne.
+    elif [ ! -f /etc/bash_completion.d/ban_404 ]; then diag_line warn "$(t diag.absent /etc/bash_completion.d/ban_404)"
+    else diag_line ok "$(t diag.present /usr/share/bash-completion/completions/ban_404.sh)"; fi
 
     # 6. Découverte des logs (même logique que l'analyse ; purement lecture). On sépare les cas
     # BÉNINS (site inactif : aucun access.log, symlink cassé, ou fichier vide — fréquent en

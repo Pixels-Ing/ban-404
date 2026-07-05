@@ -455,7 +455,7 @@ cat > "$UPDATER_PATH" <<'UPD_EOF'
 # à la conf si elle est absente (langue héritée du shell/système, sinon en).
 set -u
 
-UPDATER_VERSION="1.2.12"
+UPDATER_VERSION="1.2.13"
 CONF_FILE="/etc/ban_404.conf"
 TARGET="/usr/local/sbin/ban_404.sh"
 SELF="/usr/local/sbin/update_ban_404.sh"
@@ -893,6 +893,21 @@ update_file "ban_404.sh" "$TARGET" "ban_404.sh"
 if [ -d /usr/share/bash-completion ]; then
     mkdir -p "$(dirname "$COMPLETION_PATH")" 2>/dev/null
     update_file "ban_404.completion.bash" "$COMPLETION_PATH" "completion"
+fi
+
+# 1ter) Shim de chargement ANTICIPÉ dans /etc/bash_completion.d/ (sourcé par le framework à
+#    l'ouverture du shell). Indispensable pour « sudo ban_404.sh <Tab> » : la délégation sudo de
+#    bash-completion <= 2.11 (_command_offset) ne fait PAS de chargement à la demande — sans shim,
+#    la complétion ne marche après sudo que si elle a déjà été chargée par un Tab direct dans la
+#    même session. Statique et minuscule (coût d'ouverture de shell négligeable) ; idempotent.
+if [ -d /etc/bash_completion.d ]; then
+    _shim="/etc/bash_completion.d/ban_404"
+    _shim_body="# ban-404 : chargement anticipé de la complétion (requis pour « sudo ban_404.sh <Tab> »,
+# la délégation sudo de bash-completion <= 2.11 ne charge pas à la demande). Géré par update_ban_404.sh.
+[ -f $COMPLETION_PATH ] && . $COMPLETION_PATH"
+    if [ ! -f "$_shim" ] || [ "$(cat "$_shim" 2>/dev/null)" != "$_shim_body" ]; then
+        printf '%s\n' "$_shim_body" > "$_shim" && chmod 644 "$_shim"
+    fi
 fi
 
 # 2) L'updater lui-même, EN DERNIER. La bascule par 'mv' crée un nouvel inode : le process en

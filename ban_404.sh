@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="1.4.31"
+BAN404_VERSION="1.4.32"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -13,6 +13,7 @@ TAIL_LINES=50000     # On n'analyse que les N dernières lignes de chaque log (b
 LOCK_FILE="/run/ban_404_list.lock"
 LOG_FILE="/var/log/ban_404.log"   # journal des événements (écrit par le moteur via log_line) ; lu par --stats/--summary
 UPDATE_STAMP_FILE="/var/lib/ban_404/last_update"   # repère « l'updater a tourné » (écrit par update_ban_404.sh)
+RUN_STAMP_FILE="/var/lib/ban_404/last_run"         # repère « le moteur a fini un run réel » (lu par --diag/--summary)
 
 # Seuils & motifs de détection (surchargeables par la conf)
 BAN_THRESHOLD=10     # Ban si le score dépasse ce seuil dans la fenêtre.
@@ -549,11 +550,41 @@ T_DE[diag.absent]="Fehlt: %s"
 T_ES[diag.absent]="Ausente: %s"
 T_IT[diag.absent]="Assente: %s"
 
-T_EN[diag.completion_na]="Tab completion: N/A (package bash-completion not installed)"
-T_FR[diag.completion_na]="Complétion Tab : N/A (paquet bash-completion non installé)"
-T_DE[diag.completion_na]="Tab-Vervollständigung: nicht zutreffend (Paket bash-completion nicht installiert)"
-T_ES[diag.completion_na]="Autocompletado Tab: N/D (paquete bash-completion no instalado)"
-T_IT[diag.completion_na]="Completamento Tab: N/D (pacchetto bash-completion non installato)"
+T_EN[diag.completion_pkg]="Package bash-completion not installed — Tab completion cannot work (apt install bash-completion)."
+T_FR[diag.completion_pkg]="Paquet bash-completion non installé — la complétion Tab ne peut pas fonctionner (apt install bash-completion)."
+T_DE[diag.completion_pkg]="Paket bash-completion nicht installiert — Tab-Vervollständigung kann nicht funktionieren (apt install bash-completion)."
+T_ES[diag.completion_pkg]="Paquete bash-completion no instalado — el autocompletado Tab no puede funcionar (apt install bash-completion)."
+T_IT[diag.completion_pkg]="Pacchetto bash-completion non installato — il completamento Tab non può funzionare (apt install bash-completion)."
+
+T_EN[diag.cron_noexec]="Present but NOT executable: %s (run-parts silently skips it)"
+T_FR[diag.cron_noexec]="Présent mais NON exécutable : %s (run-parts l'ignore en silence)"
+T_DE[diag.cron_noexec]="Vorhanden, aber NICHT ausführbar: %s (run-parts überspringt sie stillschweigend)"
+T_ES[diag.cron_noexec]="Presente pero NO ejecutable: %s (run-parts lo omite en silencio)"
+T_IT[diag.cron_noexec]="Presente ma NON eseguibile: %s (run-parts lo salta in silenzio)"
+
+T_EN[diag.engine_fresh]="Engine ran recently (hourly cron active)."
+T_FR[diag.engine_fresh]="Moteur exécuté récemment (cron horaire actif)."
+T_DE[diag.engine_fresh]="Engine kürzlich gelaufen (stündlicher Cron aktiv)."
+T_ES[diag.engine_fresh]="Motor ejecutado recientemente (cron horario activo)."
+T_IT[diag.engine_fresh]="Motore eseguito di recente (cron orario attivo)."
+
+T_EN[diag.engine_stale]="No completed engine run for %s hour(s) — cron.hourly down or stuck lock?"
+T_FR[diag.engine_stale]="Aucun run complet du moteur depuis %s heure(s) — cron.hourly en panne ou verrou bloqué ?"
+T_DE[diag.engine_stale]="Kein vollständiger Engine-Lauf seit %s Stunde(n) — cron.hourly defekt oder Sperre blockiert?"
+T_ES[diag.engine_stale]="Ningún run completo del motor desde hace %s hora(s) — ¿cron.hourly caído o candado bloqueado?"
+T_IT[diag.engine_stale]="Nessuna esecuzione completa del motore da %s ora/e — cron.hourly fermo o lock bloccato?"
+
+T_EN[diag.engine_never]="No completed engine run recorded (normal within 1 h of an install/update; otherwise check cron.hourly)."
+T_FR[diag.engine_never]="Aucun run complet du moteur tracé (normal < 1 h après install/MAJ ; sinon vérifier cron.hourly)."
+T_DE[diag.engine_never]="Kein vollständiger Engine-Lauf verzeichnet (normal < 1 h nach Installation/Update; sonst cron.hourly prüfen)."
+T_ES[diag.engine_never]="Ningún run completo del motor registrado (normal < 1 h tras instalar/actualizar; si no, revisar cron.hourly)."
+T_IT[diag.engine_never]="Nessuna esecuzione completa del motore registrata (normale < 1 h dopo installazione/aggiornamento; altrimenti verificare cron.hourly)."
+
+T_EN[diag.lock_stuck]="Lock %s held by another process — run in progress, or a stuck run blocking every hourly pass."
+T_FR[diag.lock_stuck]="Verrou %s tenu par un autre processus — run en cours, ou run bloqué qui neutralise chaque passage horaire."
+T_DE[diag.lock_stuck]="Sperre %s von einem anderen Prozess gehalten — laufender Lauf, oder ein hängender Lauf blockiert jeden stündlichen Durchgang."
+T_ES[diag.lock_stuck]="Candado %s retenido por otro proceso — ejecución en curso, o una ejecución colgada que bloquea cada pasada horaria."
+T_IT[diag.lock_stuck]="Lock %s detenuto da un altro processo — esecuzione in corso, o un'esecuzione bloccata che ferma ogni passaggio orario."
 
 T_EN[diag.update_stale]="Updater not run for %s day(s) — cron.daily/anacron down?"
 T_FR[diag.update_stale]="Updater non exécuté depuis %s jour(s) — cron.daily/anacron en panne ?"
@@ -1624,12 +1655,17 @@ run_diag_checks() {
     fi
 
     # 3. Crons (hourly = FAIL si absent ; update = WARN ; summary = cohérence avec DAILY_SUMMARY)
-    if [ -f /etc/cron.hourly/ban_404 ]; then diag_line ok "$(t diag.present /etc/cron.hourly/ban_404)"
+    # Présence ET bit exécutable : run-parts saute EN SILENCE un fichier non exécutable — le cron
+    # « existe » mais ne tourne jamais (bans, self-heals et MAJ figés sans le moindre symptôme).
+    if   [ -x /etc/cron.hourly/ban_404 ]; then diag_line ok "$(t diag.present /etc/cron.hourly/ban_404)"
+    elif [ -f /etc/cron.hourly/ban_404 ]; then diag_line warn "$(t diag.cron_noexec /etc/cron.hourly/ban_404)"
     else diag_line fail "$(t diag.absent /etc/cron.hourly/ban_404)"; fi
     # Nom courant 0_ban_404_update (préfixe forçant l'ordre run-parts : updater AVANT résumé) ;
     # l'ancien nom ban_404_update reste OK (fonctionnel, renommé par l'updater >= 1.2.12).
-    if [ -f /etc/cron.daily/0_ban_404_update ]; then diag_line ok "$(t diag.present /etc/cron.daily/0_ban_404_update)"
-    elif [ -f /etc/cron.daily/ban_404_update ]; then diag_line ok "$(t diag.present /etc/cron.daily/ban_404_update)"
+    if   [ -x /etc/cron.daily/0_ban_404_update ]; then diag_line ok "$(t diag.present /etc/cron.daily/0_ban_404_update)"
+    elif [ -x /etc/cron.daily/ban_404_update ]; then diag_line ok "$(t diag.present /etc/cron.daily/ban_404_update)"
+    elif [ -f /etc/cron.daily/0_ban_404_update ]; then diag_line warn "$(t diag.cron_noexec /etc/cron.daily/0_ban_404_update)"
+    elif [ -f /etc/cron.daily/ban_404_update ]; then diag_line warn "$(t diag.cron_noexec /etc/cron.daily/ban_404_update)"
     else diag_line warn "$(t diag.absent /etc/cron.daily/0_ban_404_update)"; fi
     # Pilote de cron.daily. /etc/crontab le délègue à anacron SI présent (test -x /usr/sbin/anacron),
     # SINON le lance lui-même à 06:25 via run-parts (le `||` est un fallback, pas une dépendance).
@@ -1659,8 +1695,28 @@ run_diag_checks() {
     else
         diag_line warn "$(t diag.update_never)"
     fi
+    # Fraîcheur du MOTEUR : un cron.hourly qui ne s'exécute plus (bit -x perdu, verrou zombie,
+    # crontab mutilé) fige bans ET self-heals en silence — l'updater daily, lui, peut continuer à
+    # rafraîchir le moteur, masquant la panne. Le moteur touche RUN_STAMP_FILE en FIN de run réel :
+    # >= 3 h sans trace = au moins 2 passages horaires manqués.
+    if [ -f "$RUN_STAMP_FILE" ]; then
+        now=$(date +%s); mt=$(stat -c %Y "$RUN_STAMP_FILE" 2>/dev/null || echo 0)
+        age_h=$(( (now - mt) / 3600 ))
+        if [ "$age_h" -ge 3 ]; then diag_line warn "$(t diag.engine_stale "$age_h")"
+        else diag_line ok "$(t diag.engine_fresh)"; fi
+    else
+        diag_line warn "$(t diag.engine_never)"
+    fi
+    # Verrou anti-chevauchement : s'il est tenu ALORS QUE --diag tourne (donc hors run — le diag
+    # sort avant la prise de verrou), c'est soit un run en cours (bénin), soit un run bloqué qui
+    # fait échouer chaque passage horaire. Test non bloquant en LECTURE seule ; muet si libre/absent.
+    if [ -e "$LOCK_FILE" ] && ! ( flock -n 9 ) 9<"$LOCK_FILE" 2>/dev/null; then
+        diag_line warn "$(t diag.lock_stuck "$LOCK_FILE")"
+    fi
     if diag_is_on "$DAILY_SUMMARY"; then
-        if [ -f /etc/cron.daily/1_ban_404_summary ] || [ -f /etc/cron.daily/ban_404_summary ]; then diag_line ok "$(t diag.summary_cron_ok)"
+        if [ -x /etc/cron.daily/1_ban_404_summary ] || [ -x /etc/cron.daily/ban_404_summary ]; then diag_line ok "$(t diag.summary_cron_ok)"
+        elif [ -f /etc/cron.daily/1_ban_404_summary ]; then diag_line warn "$(t diag.cron_noexec /etc/cron.daily/1_ban_404_summary)"
+        elif [ -f /etc/cron.daily/ban_404_summary ]; then diag_line warn "$(t diag.cron_noexec /etc/cron.daily/ban_404_summary)"
         else diag_line warn "$(t diag.summary_cron_missing_wanted)"; fi
     else
         if [ -f /etc/cron.daily/1_ban_404_summary ] || [ -f /etc/cron.daily/ban_404_summary ]; then diag_line warn "$(t diag.summary_cron_orphan)"
@@ -1694,10 +1750,11 @@ run_diag_checks() {
     else diag_line fail "$(t diag.absent "$CONF_FILE")"; fi
     if [ -f /etc/logrotate.d/ban_404 ]; then diag_line ok "$(t diag.present /etc/logrotate.d/ban_404)"
     else diag_line warn "$(t diag.absent /etc/logrotate.d/ban_404)"; fi
-    # Fichier de complétion Bash (cosmétique) : n'a de sens que si bash-completion est installé.
-    # bash-completion absent => non applicable (OK, pas de bruit) ; présent mais fichier manquant =>
-    # l'updater ne l'a pas (encore) déposé : WARN (le contrôle réseau ci-dessus signale déjà une MAJ dispo).
-    if   [ ! -d /usr/share/bash-completion ]; then diag_line ok "$(t diag.completion_na)"
+    # Complétion Bash : tester le FRAMEWORK (fichier bash_completion, propre au paquet), pas le
+    # répertoire — apt/systemd créent /usr/share/bash-completion/completions même sans le paquet,
+    # et sans le framework RIEN ne charge notre fichier : Tab muet alors que tout semblait [ OK ].
+    # L'installeur pose le paquet ; son absence sur un serveur géré est donc une vraie anomalie.
+    if   [ ! -f /usr/share/bash-completion/bash_completion ]; then diag_line warn "$(t diag.completion_pkg)"
     elif [ -f /usr/share/bash-completion/completions/ban_404.sh ]; then diag_line ok "$(t diag.present /usr/share/bash-completion/completions/ban_404.sh)"
     else diag_line warn "$(t diag.absent /usr/share/bash-completion/completions/ban_404.sh)"; fi
 
@@ -2203,6 +2260,15 @@ else
                 maybe_notify_new_bans
             fi ;;
     esac
+fi
+
+# Repère « le moteur a fini un run réel » (lu par --diag et le résumé quotidien) : sa fraîcheur
+# prouve que cron.hourly s'exécute VRAIMENT et que le verrou n'est pas bloqué — un cron mort fige
+# bans et self-heals en silence pendant que l'updater daily continue de rafraîchir le moteur.
+# Touché en FIN de run seulement (un run qui meurt en route ne compte pas) ; jamais en dry-run.
+if [ "$DRY_RUN" = false ] && [ "$(id -u)" -eq 0 ]; then
+    mkdir -p "$(dirname "$RUN_STAMP_FILE")" 2>/dev/null
+    touch "$RUN_STAMP_FILE" 2>/dev/null
 fi
 
 # Filet de sécurité MAJ : relance l'updater si cron.daily est resté muet (~36 h). En toute fin de

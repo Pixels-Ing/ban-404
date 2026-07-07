@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="1.5.2"
+BAN404_VERSION="1.5.3"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -1339,6 +1339,14 @@ T_DE[summary.subject]="ban-404 [%s]: tägliche Zusammenfassung"
 T_ES[summary.subject]="ban-404 [%s]: resumen diario"
 T_IT[summary.subject]="ban-404 [%s]: riepilogo giornaliero"
 
+# Sujet FLAGGÉ quand le résumé contient au moins une anomalie (WARN/FAIL) : %s = hôte, %s = nombre.
+# Le préfixe [WARN] rend l'alerte visible d'un coup d'œil (boîte mail + 1re ligne du webhook).
+T_EN[summary.subject_warn]="[WARN] ban-404 [%s]: daily summary (%s issue(s))"
+T_FR[summary.subject_warn]="[WARN] ban-404 [%s] : résumé quotidien (%s anomalie(s))"
+T_DE[summary.subject_warn]="[WARN] ban-404 [%s]: tägliche Zusammenfassung (%s Problem(e))"
+T_ES[summary.subject_warn]="[WARN] ban-404 [%s]: resumen diario (%s anomalía(s))"
+T_IT[summary.subject_warn]="[WARN] ban-404 [%s]: riepilogo giornaliero (%s anomalia/e)"
+
 # Détection de la langue : locale du shell (ou /etc/default/locale en repli pour
 # le contexte cron), code 2 lettres retenu s'il fait partie des langues gérées.
 detect_lang() {
@@ -1815,7 +1823,7 @@ do_list() {
 do_summary() {
     case "$DAILY_SUMMARY" in true|1|yes|on) ;; *) exit 0 ;; esac
     [ -z "$WEBHOOK_URL" ] && [ -z "$NOTIFY_EMAIL" ] && exit 0
-    local host; host=$(server_label)
+    local host tmp body subj; host=$(server_label)
     # Résumé DESTINÉ À L'ENVOI : on neutralise --verbose afin que le détail par dossier
     # (lignes verbose de run_diag_checks, rejoué par build_stats_text) ne soit PAS injecté dans
     # le corps notifié. L'affichage direct de --stats (sans cette neutralisation) le conserve.
@@ -1823,7 +1831,23 @@ do_summary() {
     # Moyennes 24 h affichées PAR DÉFAUT dans le résumé (sauf santé désactivée : cohérent avec le
     # bloc « Signes vitaux »). En interactif, stats/diag exigent --avg ; ici on force le flag.
     diag_is_on "${HEALTH_CHECKS:-true}" && SHOW_AVG24=true
-    notify "$(t summary.subject "$host")" "$(build_stats_text)"
+    # On construit le corps via REDIRECTION fichier (pas $(...)) : build_stats_text tourne alors dans
+    # le shell COURANT et laisse DIAG_PROBLEMS/DIAG_ISSUES renseignés (une command substitution les
+    # perdrait dans son sous-shell). On peut ainsi FLAGGER le sujet — mail ET webhook, ce dernier
+    # recevant « sujet\ncorps » (cf. notify) — quand le résumé contient au moins un [WARN]/[FAIL].
+    DIAG_PROBLEMS=0
+    tmp=$(mktemp 2>/dev/null) || tmp=""
+    if [ -n "$tmp" ]; then
+        build_stats_text > "$tmp"; body=$(cat "$tmp"); rm -f "$tmp"
+    else
+        body=$(build_stats_text)          # repli : sous-shell => sujet non flaggé (dégradation propre)
+    fi
+    if [ "${DIAG_PROBLEMS:-0}" -gt 0 ]; then
+        subj=$(t summary.subject_warn "$host" "$DIAG_PROBLEMS")
+    else
+        subj=$(t summary.subject "$host")
+    fi
+    notify "$subj" "$body"
     exit 0
 }
 

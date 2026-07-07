@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="1.5.0"
+BAN404_VERSION="1.5.1"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -2351,6 +2351,24 @@ self_heal_update_trigger() {
     return 0
 }
 
+# --- Fin de run commune : repère de fraîcheur + filet MAJ --------------------------------
+# Appelée sur TOUTES les fins de run réelles, y compris les sorties anticipées SAINES (aucun
+# log valide, aucun suspect dans la fenêtre) : un run « rien à faire » est un run COMPLET.
+# Sans cela, les heures creuses d'un serveur calme laissaient vieillir RUN_STAMP_FILE et
+# déclenchaient un faux [WARN] « cron.hourly en panne » (fraîcheur >= 3 h) dans diag et le
+# résumé — et le filet MAJ (36 h) ne s'armait jamais sur ces serveurs. Seules les morts en
+# route (erreur, verrou occupé) ne stampent pas. Le filet reste en dernier : si l'updater
+# remplace ce script (bascule atomique = nouvel inode), le process courant n'est pas affecté.
+# Neutre en dry-run et non-root.
+finish_run() {
+    if [ "$DRY_RUN" = false ] && [ "$(id -u)" -eq 0 ]; then
+        mkdir -p "$(dirname "$RUN_STAMP_FILE")" 2>/dev/null
+        touch "$RUN_STAMP_FILE" 2>/dev/null
+    fi
+    self_heal_update_trigger
+    return 0
+}
+
 # --- Wrapper cron horaire : lanceur muet ------------------------------------------------
 # Depuis 1.4.28 le moteur journalise LUI-MÊME ses événements dans LOG_FILE (log_line) : le
 # wrapper historique (qui horodatait tout stdout vers le log) ferait DOUBLON. Ce self-heal
@@ -2454,6 +2472,7 @@ done
 
 if [ ${#VALID_FILES[@]} -eq 0 ]; then
     t no_valid_files
+    finish_run   # fin saine : stamp de fraîcheur + filet MAJ (l'anomalie logs est vue par diag)
     exit 0
 fi
 
@@ -2525,6 +2544,7 @@ END {
 
 if [ -z "$ips_data" ]; then
     [ "$VERBOSE" = true ] && t no_suspect
+    finish_run   # fin saine (la plus fréquente sur un serveur calme) : stamp + filet MAJ
     exit 0
 fi
 
@@ -2613,16 +2633,7 @@ else
     esac
 fi
 
-# Repère « le moteur a fini un run réel » (lu par --diag et le résumé quotidien) : sa fraîcheur
-# prouve que cron.hourly s'exécute VRAIMENT et que le verrou n'est pas bloqué — un cron mort fige
-# bans et self-heals en silence pendant que l'updater daily continue de rafraîchir le moteur.
-# Touché en FIN de run seulement (un run qui meurt en route ne compte pas) ; jamais en dry-run.
-if [ "$DRY_RUN" = false ] && [ "$(id -u)" -eq 0 ]; then
-    mkdir -p "$(dirname "$RUN_STAMP_FILE")" 2>/dev/null
-    touch "$RUN_STAMP_FILE" 2>/dev/null
-fi
-
-# Filet de sécurité MAJ : relance l'updater si cron.daily est resté muet (~36 h). En toute fin de
-# run pour que, si l'updater remplace ce script (bascule atomique = nouvel inode), le process
-# courant — déjà terminé — ne soit pas affecté. Dormant sur un serveur sain ; ne fait rien en dry-run.
-self_heal_update_trigger
+# Fin de run nominale : repère de fraîcheur (lu par --diag et le résumé quotidien) + filet de
+# sécurité MAJ. Voir finish_run — les sorties anticipées saines (aucun log, aucun suspect)
+# passent par le même chemin.
+finish_run

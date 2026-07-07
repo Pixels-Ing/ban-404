@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="1.5.1"
+BAN404_VERSION="1.5.2"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -14,6 +14,7 @@ LOCK_FILE="/run/ban_404_list.lock"
 LOG_FILE="/var/log/ban_404.log"   # journal des événements (écrit par le moteur via log_line) ; lu par --stats/--summary
 UPDATE_STAMP_FILE="/var/lib/ban_404/last_update"   # repère « l'updater a tourné » (écrit par update_ban_404.sh)
 RUN_STAMP_FILE="/var/lib/ban_404/last_run"         # repère « le moteur a fini un run réel » (lu par --diag/--summary)
+METRICS_FILE="/var/lib/ban_404/metrics"            # historique horaire load/IO/réseau/mémoire (moyennes 24 h du résumé)
 
 # Seuils & motifs de détection (surchargeables par la conf)
 BAN_THRESHOLD=10     # Ban si le score dépasse ce seuil dans la fenêtre.
@@ -380,6 +381,12 @@ T_FR[help.resolve]="  --resolve        Afficher le reverse DNS (PTR) des IP dans
 T_DE[help.resolve]="  --resolve        Reverse-DNS (PTR) der IPs in list/stats/summary anzeigen (opt-in)."
 T_ES[help.resolve]="  --resolve        Mostrar el DNS inverso (PTR) de las IP en list/stats/summary (opt-in)."
 T_IT[help.resolve]="  --resolve        Mostrare il reverse DNS (PTR) degli IP in list/stats/summary (opt-in)."
+
+T_EN[help.avg]="  --avg            With stats/diag: add the 24h averages (load, I/O, network, memory)."
+T_FR[help.avg]="  --avg            Avec stats/diag : ajouter les moyennes 24 h (load, IO, réseau, mémoire)."
+T_DE[help.avg]="  --avg            Mit stats/diag: die 24-h-Durchschnitte hinzufügen (Last, I/O, Netzwerk, Speicher)."
+T_ES[help.avg]="  --avg            Con stats/diag: añadir los promedios 24 h (carga, E/S, red, memoria)."
+T_IT[help.avg]="  --avg            Con stats/diag: aggiungere le medie 24 h (carico, I/O, rete, memoria)."
 
 T_EN[help.stats]="  stats            Show ban statistics."
 T_FR[help.stats]="  stats            Afficher les statistiques de ban."
@@ -1116,6 +1123,48 @@ T_DE[stats.health_ok]="Zustand: keine Anomalie erkannt."
 T_ES[stats.health_ok]="Estado: ninguna anomalía detectada."
 T_IT[stats.health_ok]="Stato: nessuna anomalia rilevata."
 
+T_EN[stats.avg24_header]="24h averages"
+T_FR[stats.avg24_header]="Moyennes 24 h"
+T_DE[stats.avg24_header]="24-h-Durchschnitte"
+T_ES[stats.avg24_header]="Promedios 24 h"
+T_IT[stats.avg24_header]="Medie 24 h"
+
+T_EN[stats.avg24_load]="Load (15 min): avg %s (peak %s)"
+T_FR[stats.avg24_load]="Charge (load 15 min) : moy %s (pic %s)"
+T_DE[stats.avg24_load]="Last (15 min): Ø %s (Spitze %s)"
+T_ES[stats.avg24_load]="Carga (load 15 min): med %s (pico %s)"
+T_IT[stats.avg24_load]="Carico (load 15 min): media %s (picco %s)"
+
+T_EN[stats.avg24_io]="I/O pressure (PSI): avg %s%% (peak %s%%)"
+T_FR[stats.avg24_io]="Pression IO (PSI) : moy %s %% (pic %s %%)"
+T_DE[stats.avg24_io]="I/O-Druck (PSI): Ø %s %% (Spitze %s %%)"
+T_ES[stats.avg24_io]="Presión de E/S (PSI): med %s %% (pico %s %%)"
+T_IT[stats.avg24_io]="Pressione I/O (PSI): media %s %% (picco %s %%)"
+
+T_EN[stats.avg24_net]="Network %s: RX avg %s/s (peak %s/s) · TX avg %s/s (peak %s/s)"
+T_FR[stats.avg24_net]="Réseau %s : RX moy %s/s (pic %s/s) · TX moy %s/s (pic %s/s)"
+T_DE[stats.avg24_net]="Netzwerk %s: RX Ø %s/s (Spitze %s/s) · TX Ø %s/s (Spitze %s/s)"
+T_ES[stats.avg24_net]="Red %s: RX med %s/s (pico %s/s) · TX med %s/s (pico %s/s)"
+T_IT[stats.avg24_net]="Rete %s: RX media %s/s (picco %s/s) · TX media %s/s (picco %s/s)"
+
+T_EN[stats.avg24_mem]="Available memory: avg %s%% (min %s%%)"
+T_FR[stats.avg24_mem]="Mémoire dispo : moy %s %% (min %s %%)"
+T_DE[stats.avg24_mem]="Verfügbarer Speicher: Ø %s %% (min %s %%)"
+T_ES[stats.avg24_mem]="Memoria disponible: med %s %% (mín %s %%)"
+T_IT[stats.avg24_mem]="Memoria disponibile: media %s %% (min %s %%)"
+
+T_EN[stats.avg24_window]="(actual window: %s)"
+T_FR[stats.avg24_window]="(fenêtre réelle : %s)"
+T_DE[stats.avg24_window]="(tatsächliches Fenster: %s)"
+T_ES[stats.avg24_window]="(ventana real: %s)"
+T_IT[stats.avg24_window]="(finestra reale: %s)"
+
+T_EN[stats.avg24_insufficient]="24h averages: insufficient data (window %s)"
+T_FR[stats.avg24_insufficient]="Moyennes 24 h : données insuffisantes (fenêtre %s)"
+T_DE[stats.avg24_insufficient]="24-h-Durchschnitte: unzureichende Daten (Fenster %s)"
+T_ES[stats.avg24_insufficient]="Promedios 24 h: datos insuficientes (ventana %s)"
+T_IT[stats.avg24_insufficient]="Medie 24 h: dati insufficienti (finestra %s)"
+
 T_EN[stats.sec_stats]="Statistics (24h)"
 T_FR[stats.sec_stats]="Statistiques (24h)"
 T_DE[stats.sec_stats]="Statistiken (24h)"
@@ -1352,6 +1401,7 @@ DO_STATS=false
 DO_DIAG=false
 DO_HEALTH=false
 LIST_BY_TIMEOUT=false
+SHOW_AVG24=false     # --avg : ajoute le sous-bloc « Moyennes 24 h » à diag/stats (toujours dans le résumé)
 LOG_EVENTS=true      # écriture des événements dans LOG_FILE (--no-log ou dry-run => false)
 
 show_help() {
@@ -1379,6 +1429,7 @@ show_help() {
     t help.nolog
     t help.bytimeout
     t help.resolve
+    t help.avg
     t help.nohealth
     echo ""
     t help.conf_header "$CONF_FILE"
@@ -1580,6 +1631,61 @@ reverse_dns() {  # $1 = IP
 # Vrai si le reverse doit être résolu (conf RESOLVE_PTR, ou flag --resolve qui force RESOLVE_PTR=true).
 resolve_ptr_on() { case "${RESOLVE_PTR:-}" in true|1|yes|on) return 0 ;; *) return 1 ;; esac; }
 
+# Durée en secondes => forme humaine courte (« 7h 12m », « 3h », « 45m »), pour la note de fenêtre.
+metrics_fmt_span() { awk -v s="${1:-0}" 'BEGIN{ s=int(s); h=int(s/3600); m=int((s%3600)/60); if(h>0){ if(m>0) printf "%dh %dm", h, m; else printf "%dh", h } else printf "%dm", m }'; }
+
+# Sous-bloc « Moyennes 24 h » (load, IO, réseau, mémoire), calculé depuis METRICS_FILE (échantillons
+# horaires posés par metrics_sample). Auto-portant : calcule ET imprime. Appelé par build_stats_text
+# (résumé + stats --avg) et do_diag (diag --avg). IO/réseau = delta de compteurs cumulatifs par
+# intervalle (les intervalles en baisse — reboot/wrap — sont SAUTÉS) ; load/mémoire = relevés
+# discrets moyennés. Pic pour load/IO/réseau, minimum (pire dispo) pour la mémoire. Historique
+# insuffisant (< 2 échantillons) ou fenêtre < 23 h => message / note dédiés (pas de valeur trompeuse).
+build_metrics_averages() {
+    local now cut out n span la lmx ioa iomx rxa txa rxm txm ma mmn iface
+    now=$(date +%s); cut=$((now - 86400))
+    if [ ! -r "$METRICS_FILE" ]; then
+        t stats.avg24_insufficient "$(metrics_fmt_span 0)"
+        return 0
+    fi
+    out=$(awk -v cut="$cut" '
+        $1 ~ /^[0-9]+$/ && ($1+0) >= cut {
+            n++; if (first=="") first=$1; last=$1
+            if ($2 ~ /^[0-9.]+$/) { lsum+=$2; lcnt++; if (lmax=="" || $2+0>lmax) lmax=$2+0 }
+            if ($6 ~ /^[0-9]+$/)  { msum+=$6; mcnt++; if (mmin=="" || $6+0<mmin) mmin=$6+0 }
+            if ($3 ~ /^[0-9]+$/) {
+                if (pio!="") { dt=$1-pt; if (dt>0 && $3+0>=pio) { d=$3-pio; iosum+=d; iodt+=dt; r=d/(dt*10000); if (iomax=="" || r>iomax) iomax=r } }
+                pio=$3; pt=$1
+            }
+            if ($4 ~ /^[0-9]+$/ && $5 ~ /^[0-9]+$/) {
+                if (prx!="") { dn=$1-ptn; if (dn>0 && $4+0>=prx && $5+0>=ptx) { rxs+=$4-prx; txs+=$5-ptx; ndt+=dn; rr=($4-prx)/dn; tr=($5-ptx)/dn; if (rxmax=="" || rr>rxmax) rxmax=rr; if (txmax=="" || tr>txmax) txmax=tr } }
+                prx=$4; ptx=$5; ptn=$1
+            }
+        }
+        END {
+            span=(first!="" ? last-first : 0)
+            la =(lcnt>0 ? sprintf("%.2f", lsum/lcnt) : "na"); lmx=(lcnt>0 ? sprintf("%.2f", lmax) : "na")
+            ioa=(iodt>0 ? sprintf("%.1f", iosum/(iodt*10000)) : "na"); iomx=(iodt>0 ? sprintf("%.1f", iomax) : "na")
+            rxa=(ndt>0 ? sprintf("%.0f", rxs/ndt) : "na"); txa=(ndt>0 ? sprintf("%.0f", txs/ndt) : "na")
+            rxm=(ndt>0 ? sprintf("%.0f", rxmax) : "na"); txm=(ndt>0 ? sprintf("%.0f", txmax) : "na")
+            ma =(mcnt>0 ? sprintf("%d", int(msum/mcnt+0.5)) : "na"); mmn=(mcnt>0 ? sprintf("%d", mmin) : "na")
+            printf "%d %d %s %s %s %s %s %s %s %s %s %s\n", n+0, span, la, lmx, ioa, iomx, rxa, txa, rxm, txm, ma, mmn
+        }' "$METRICS_FILE" 2>/dev/null)
+    read -r n span la lmx ioa iomx rxa txa rxm txm ma mmn <<< "$out"
+    if [ -z "$n" ] || [ "$n" -lt 2 ] 2>/dev/null; then
+        t stats.avg24_insufficient "$(metrics_fmt_span "${span:-0}")"
+        return 0
+    fi
+    printf '\n── %s ──\n' "$(t stats.avg24_header)"
+    [ "$la" != na ] && t stats.avg24_load "$la" "$lmx"
+    [ "$ioa" != na ] && t stats.avg24_io "$ioa" "$iomx"
+    if [ "$rxa" != na ]; then
+        iface=$(ip route show default 2>/dev/null | awk '{for(i=1;i<NF;i++) if($i=="dev"){print $(i+1); exit}}')
+        t stats.avg24_net "${iface:-?}" "$(health_rate "$rxa")" "$(health_rate "$rxm")" "$(health_rate "$txa")" "$(health_rate "$txm")"
+    fi
+    [ "$ma" != na ] && t stats.avg24_mem "$ma" "$mmn"
+    [ "$span" -lt 82800 ] 2>/dev/null && printf '   %s\n' "$(t stats.avg24_window "$(metrics_fmt_span "$span")")"
+    return 0
+}
 build_stats_text() {
     local banned bans unbans cutoff24 cnt ip rdns updater upd_ver issue div kind sc top_raw top404 tophp
     printf -v div '─%.0s' {1..30}        # filet sous le titre (largeur fixe)
@@ -1619,6 +1725,9 @@ build_stats_text() {
         printf '\n── %s ──\n' "$(t stats.health_vitals)"
         printf '%s\n' "${HEALTH_LINES[@]}"
     fi
+    # --- Moyennes 24 h (opt-in --avg ; forcé dans le résumé via do_summary) : reflète l'activité
+    # RÉELLE des dernières 24 h, là où les signes vitaux ci-dessus ne montrent que l'instant. ---
+    [ "$SHOW_AVG24" = true ] && build_metrics_averages
     # --- Statistiques (24h) ---
     printf '\n── %s ──\n' "$(t stats.sec_stats)"
     t stats.banned_now "$banned"
@@ -1711,6 +1820,9 @@ do_summary() {
     # (lignes verbose de run_diag_checks, rejoué par build_stats_text) ne soit PAS injecté dans
     # le corps notifié. L'affichage direct de --stats (sans cette neutralisation) le conserve.
     VERBOSE=false
+    # Moyennes 24 h affichées PAR DÉFAUT dans le résumé (sauf santé désactivée : cohérent avec le
+    # bloc « Signes vitaux »). En interactif, stats/diag exigent --avg ; ici on force le flag.
+    diag_is_on "${HEALTH_CHECKS:-true}" && SHOW_AVG24=true
     notify "$(t summary.subject "$host")" "$(build_stats_text)"
     exit 0
 }
@@ -2116,6 +2228,8 @@ run_health_checks() {
 do_diag() {
     t diag.header
     run_diag_checks
+    # Moyennes 24 h uniquement sur demande explicite (--avg) : diag reste l'état COURANT par défaut.
+    [ "$SHOW_AVG24" = true ] && build_metrics_averages
     # Bilan
     echo ""
     if [ "$DIAG_PROBLEMS" -eq 0 ]; then t diag.tally_clean; exit 0; fi
@@ -2172,6 +2286,7 @@ while [[ $# -gt 0 ]]; do
         --lang=*) change_lang "${1#*=}" ;;
         --by-timeout) LIST_BY_TIMEOUT=true; shift ;;
         --resolve) RESOLVE_PTR=true; shift ;;
+        --avg) SHOW_AVG24=true; shift ;;
         list|--list) DO_LIST=true; shift ;;
         stats|--stats) DO_STATS=true; shift ;;
         summary|--summary) do_summary ;;
@@ -2351,6 +2466,46 @@ self_heal_update_trigger() {
     return 0
 }
 
+# --- Échantillon horaire des métriques (pour les moyennes 24 h du résumé) -----------------
+# Appelé uniquement depuis finish_run (donc sous la garde DRY_RUN=false + root, comme le stamp).
+# AUCUN sleep : on relève des compteurs BRUTS (cumulatifs pour IO/réseau, instantanés pour
+# load/mémoire), le débit/la pression moyens se déduisent par delta au moment du résumé. Une
+# ligne = 6 colonnes « epoch load15 io_total_µs rx tx mem_avail_pct » ; « - » si non mesurable
+# (le calcul awk saute ce champ). Purge-on-write : on ne garde que les lignes < 48 h et bien
+# formées, réécriture atomique (mktemp + mv). Toujours return 0 : ne fait jamais échouer le run.
+metrics_sample() {
+    local now load15 io_total iface rx tx mem_avail mem_total mem_pct dir tmp
+    now=$(date +%s)
+    load15='-'; [ -r /proc/loadavg ] && read -r _ _ load15 _ < /proc/loadavg
+    [ -n "$load15" ] || load15='-'
+    io_total='-'
+    if [ -r /proc/pressure/io ]; then
+        io_total=$(awk '/^some/{for(i=2;i<=NF;i++) if($i ~ /^total=/){sub(/^total=/,"",$i); print $i; exit}}' /proc/pressure/io 2>/dev/null)
+        [ -n "$io_total" ] || io_total='-'
+    fi
+    rx='-'; tx='-'
+    iface=$(ip route show default 2>/dev/null | awk '{for(i=1;i<NF;i++) if($i=="dev"){print $(i+1); exit}}')
+    if [ -n "$iface" ] && [ -r /proc/net/dev ]; then
+        read -r rx tx <<< "$(awk -v d="$iface" '{gsub(/^[ \t]+/,""); if (index($0, d ":") == 1) {sub(/^[^:]+:/,""); print $1, $9; exit}}' /proc/net/dev)"
+        { [ -n "$rx" ] && [ -n "$tx" ]; } || { rx='-'; tx='-'; }
+    fi
+    mem_pct='-'
+    if [ -r /proc/meminfo ]; then
+        mem_avail=$(awk '/^MemAvailable:/{print $2; exit}' /proc/meminfo 2>/dev/null)
+        mem_total=$(awk '/^MemTotal:/{print $2; exit}' /proc/meminfo 2>/dev/null)
+        [ -n "$mem_avail" ] && [ -n "$mem_total" ] && [ "$mem_total" -gt 0 ] 2>/dev/null && mem_pct=$(( mem_avail * 100 / mem_total ))
+    fi
+    dir=$(dirname "$METRICS_FILE"); mkdir -p "$dir" 2>/dev/null
+    tmp=$(mktemp "$dir/.metrics.XXXXXX" 2>/dev/null) || return 0
+    {
+        [ -f "$METRICS_FILE" ] && awk -v cut=$((now - 172800)) 'NF>=6 && $1 ~ /^[0-9]+$/ && $1+0>=cut' "$METRICS_FILE" 2>/dev/null
+        printf '%s %s %s %s %s %s\n' "$now" "$load15" "$io_total" "$rx" "$tx" "$mem_pct"
+    } > "$tmp" 2>/dev/null
+    chmod 644 "$tmp" 2>/dev/null
+    mv -f "$tmp" "$METRICS_FILE" 2>/dev/null || rm -f "$tmp" 2>/dev/null
+    return 0
+}
+
 # --- Fin de run commune : repère de fraîcheur + filet MAJ --------------------------------
 # Appelée sur TOUTES les fins de run réelles, y compris les sorties anticipées SAINES (aucun
 # log valide, aucun suspect dans la fenêtre) : un run « rien à faire » est un run COMPLET.
@@ -2364,6 +2519,7 @@ finish_run() {
     if [ "$DRY_RUN" = false ] && [ "$(id -u)" -eq 0 ]; then
         mkdir -p "$(dirname "$RUN_STAMP_FILE")" 2>/dev/null
         touch "$RUN_STAMP_FILE" 2>/dev/null
+        metrics_sample                      # échantillon horaire (moyennes 24 h) ; même garde DRY_RUN+root
     fi
     self_heal_update_trigger
     return 0

@@ -8,7 +8,7 @@
 # SOURCÉ par bash-completion, jamais exécuté. Ne pas le retirer.
 #
 # Complétion CONTEXTUELLE : on ne propose que ce qui est pertinent selon ce qui est déjà
-# sur la ligne (ex. après diag, seuls --verbose/--no-health ; après une action terminale,
+# sur la ligne (ex. après diag, --verbose/--no-health/--avg ; après une action terminale,
 # rien), et on masque ce qui est déjà tapé. Depuis 1.5.0 la forme canonique est la
 # SOUS-COMMANDE NUE (list, stats, diag, health...) — seule proposée ici — mais les formes
 # historiques --list/--stats/... restent acceptées par le parseur : une ligne tapée à
@@ -47,14 +47,14 @@ _ban_404() {
     #    « seen » (tokens littéraux : « --list » tapé ne masquerait pas « list ») : on construit
     #    la liste conditionnellement via has_list/has_stats.
     local opts
-    if   [ -n "$has_terminal" ]; then opts=""                       # action terminale : plus rien
-    elif [ -n "$has_diag" ];     then opts="--verbose --no-health"  # modificateurs de diag
+    if   [ -n "$has_terminal" ]; then opts=""                            # action terminale : plus rien
+    elif [ -n "$has_diag" ];     then opts="--verbose --no-health --avg" # modificateurs de diag (--avg = moyennes 24 h)
     elif [ -n "$has_report" ];   then
         opts="--resolve"                                           # PTR : pertinent pour list et stats
         [ -z "$has_list" ]  && opts="$opts list"                   # rapports cumulables
         [ -z "$has_stats" ] && opts="$opts stats"
         [ -n "$has_list" ]  && opts="$opts --by-timeout"           # tri : pertinent pour list seul
-        [ -n "$has_stats" ] && opts="$opts --verbose --no-health"  # stats rejoue le diag (santé incluse)
+        [ -n "$has_stats" ] && opts="$opts --verbose --no-health --avg"  # stats rejoue le diag (santé incluse) ; --avg = moyennes 24 h
     else opts="list stats diag health summary unban lang check-notification version help --dry-run --show-blocked --verbose --no-log --no-health"
     fi
 

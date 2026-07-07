@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="1.4.33"
+BAN404_VERSION="1.5.0"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -55,6 +55,18 @@ SERVER_NICKNAME=""    # nom convivial ajouté au hostname dans les notifs (vide 
 RESOLVE_PTR=false     # true => résoudre le PTR des IP ; borné par PTR_TIMEOUT pour ne pas bloquer
 PTR_TIMEOUT=2         # délai max par lookup getent (s), borne le coût du reverse
 
+# Signes vitaux du serveur (load, mémoire, disque, MTA, IO) dans diag et le résumé quotidien.
+# Les valeurs s'affichent toujours (bloc « Signes vitaux ») ; un seuil franchi remonte en [WARN]
+# (service postfix arrêté => [FAIL] : du courrier se perd activement). --no-health saute ces
+# contrôles pour un run ; HEALTH_CHECKS=false les désactive durablement (la sous-commande
+# « health » force toujours).
+HEALTH_CHECKS=true    # false => aucun contrôle de signes vitaux (diag et résumé)
+HEALTH_LOAD_WARN=2    # [WARN] si load 15 min > N x cœurs
+HEALTH_MEM_WARN=10    # [WARN] si MemAvailable < N % de MemTotal
+HEALTH_DISK_WARN=90   # [WARN] si espace OU inodes > N % (sur / et /var si partition distincte)
+HEALTH_MAILQ_WARN=50  # [WARN] si file postfix > N messages
+HEALTH_IO_WARN=25     # [WARN] si pression IO (PSI some avg60) > N %
+
 # ============================================================================
 #  i18n — messages multilingues (en, fr, de, es, it). Le code/les commentaires
 #  restent en français ; SEULS les messages affichés sont traduisibles.
@@ -75,11 +87,23 @@ T_DE[version.author]="Autor: Francis Spiesser - Pixels Ingénierie"
 T_ES[version.author]="Autor: Francis Spiesser - Pixels Ingénierie"
 T_IT[version.author]="Autore: Francis Spiesser - Pixels Ingénierie"
 
-T_EN[help.usage]="Usage: %s [OPTIONS]"
-T_FR[help.usage]="Usage : %s [OPTIONS]"
-T_DE[help.usage]="Aufruf: %s [OPTIONEN]"
-T_ES[help.usage]="Uso: %s [OPCIONES]"
-T_IT[help.usage]="Uso: %s [OPZIONI]"
+T_EN[help.usage]="Usage: %s [SUBCOMMAND] [OPTIONS]"
+T_FR[help.usage]="Usage : %s [SOUS-COMMANDE] [OPTIONS]"
+T_DE[help.usage]="Aufruf: %s [UNTERBEFEHL] [OPTIONEN]"
+T_ES[help.usage]="Uso: %s [SUBCOMANDO] [OPCIONES]"
+T_IT[help.usage]="Uso: %s [SOTTOCOMANDO] [OPZIONI]"
+
+T_EN[help.subcommands_header]="Subcommands:"
+T_FR[help.subcommands_header]="Sous-commandes :"
+T_DE[help.subcommands_header]="Unterbefehle:"
+T_ES[help.subcommands_header]="Subcomandos:"
+T_IT[help.subcommands_header]="Sottocomandi:"
+
+T_EN[help.compat]="  (Legacy forms --list, --stats, --diag... remain accepted.)"
+T_FR[help.compat]="  (Les formes historiques --list, --stats, --diag... restent acceptées.)"
+T_DE[help.compat]="  (Die historischen Formen --list, --stats, --diag... werden weiterhin akzeptiert.)"
+T_ES[help.compat]="  (Las formas históricas --list, --stats, --diag... siguen aceptándose.)"
+T_IT[help.compat]="  (Le forme storiche --list, --stats, --diag... restano accettate.)"
 
 T_EN[help.options_header]="Available options:"
 T_FR[help.options_header]="Options disponibles :"
@@ -99,11 +123,11 @@ T_DE[help.showblocked]="  --show-blocked   Auch IPs anzeigen, die bereits im ips
 T_ES[help.showblocked]="  --show-blocked   Mostrar también las IP que ya están en el ipset."
 T_IT[help.showblocked]="  --show-blocked   Mostrare anche gli IP già presenti nell'ipset."
 
-T_EN[help.verbose]="  --verbose        Detail the run (log search), or per-folder causes with --diag/--stats."
-T_FR[help.verbose]="  --verbose        Détailler le run (recherche des logs), ou les dossiers avec --diag/--stats."
-T_DE[help.verbose]="  --verbose        Den Lauf (Log-Suche) oder die Verzeichnisse mit --diag/--stats detaillieren."
-T_ES[help.verbose]="  --verbose        Detallar el run (búsqueda de registros), o las carpetas con --diag/--stats."
-T_IT[help.verbose]="  --verbose        Dettagliare il run (ricerca dei log), o le cartelle con --diag/--stats."
+T_EN[help.verbose]="  --verbose        Detail the run (log search), or per-folder causes with diag/stats."
+T_FR[help.verbose]="  --verbose        Détailler le run (recherche des logs), ou les dossiers avec diag/stats."
+T_DE[help.verbose]="  --verbose        Den Lauf (Log-Suche) oder die Verzeichnisse mit diag/stats detaillieren."
+T_ES[help.verbose]="  --verbose        Detallar el run (búsqueda de registros), o las carpetas con diag/stats."
+T_IT[help.verbose]="  --verbose        Dettagliare il run (ricerca dei log), o le cartelle con diag/stats."
 
 T_EN[help.nolog]="  --no-log         Do not write this run's events ([+]/[-]) to the log file."
 T_FR[help.nolog]="  --no-log         Ne pas écrire les événements de ce run ([+]/[-]) dans le journal."
@@ -111,29 +135,29 @@ T_DE[help.nolog]="  --no-log         Die Ereignisse dieses Laufs ([+]/[-]) nicht
 T_ES[help.nolog]="  --no-log         No escribir los eventos de esta ejecución ([+]/[-]) en el registro."
 T_IT[help.nolog]="  --no-log         Non scrivere gli eventi di questa esecuzione ([+]/[-]) nel registro."
 
-T_EN[help.lang]="  --lang <code>    Set the language (en, fr, de, es, it) in the config and exit."
-T_FR[help.lang]="  --lang <code>    Définir la langue (en, fr, de, es, it) dans la config et quitter."
-T_DE[help.lang]="  --lang <code>    Sprache (en, fr, de, es, it) in der Konfiguration setzen und beenden."
-T_ES[help.lang]="  --lang <code>    Definir el idioma (en, fr, de, es, it) en la configuración y salir."
-T_IT[help.lang]="  --lang <code>    Impostare la lingua (en, fr, de, es, it) nella configurazione e uscire."
+T_EN[help.lang]="  lang <code>      Set the language (en, fr, de, es, it) in the config and exit."
+T_FR[help.lang]="  lang <code>      Définir la langue (en, fr, de, es, it) dans la config et quitter."
+T_DE[help.lang]="  lang <code>      Sprache (en, fr, de, es, it) in der Konfiguration setzen und beenden."
+T_ES[help.lang]="  lang <code>      Definir el idioma (en, fr, de, es, it) en la configuración y salir."
+T_IT[help.lang]="  lang <code>      Impostare la lingua (en, fr, de, es, it) nella configurazione e uscire."
 
-T_EN[help.version]="  --version        Show the version and exit."
-T_FR[help.version]="  --version        Afficher la version et quitter."
-T_DE[help.version]="  --version        Version anzeigen und beenden."
-T_ES[help.version]="  --version        Mostrar la versión y salir."
-T_IT[help.version]="  --version        Mostrare la versione e uscire."
+T_EN[help.version]="  version          Show the version and exit."
+T_FR[help.version]="  version          Afficher la version et quitter."
+T_DE[help.version]="  version          Version anzeigen und beenden."
+T_ES[help.version]="  version          Mostrar la versión y salir."
+T_IT[help.version]="  version          Mostrare la versione e uscire."
 
-T_EN[help.help]="  --help, -h       Show this help message."
-T_FR[help.help]="  --help, -h       Afficher ce message d'aide."
-T_DE[help.help]="  --help, -h       Diese Hilfemeldung anzeigen."
-T_ES[help.help]="  --help, -h       Mostrar este mensaje de ayuda."
-T_IT[help.help]="  --help, -h       Mostrare questo messaggio di aiuto."
+T_EN[help.help]="  help             Show this help message."
+T_FR[help.help]="  help             Afficher ce message d'aide."
+T_DE[help.help]="  help             Diese Hilfemeldung anzeigen."
+T_ES[help.help]="  help             Mostrar este mensaje de ayuda."
+T_IT[help.help]="  help             Mostrare questo messaggio di aiuto."
 
-T_EN[err.unknown_opt]="Unknown option: %s. Use --help."
-T_FR[err.unknown_opt]="Option inconnue : %s. Utilisez --help."
-T_DE[err.unknown_opt]="Unbekannte Option: %s. Verwenden Sie --help."
-T_ES[err.unknown_opt]="Opción desconocida: %s. Use --help."
-T_IT[err.unknown_opt]="Opzione sconosciuta: %s. Usare --help."
+T_EN[err.unknown_opt]="Unknown option or subcommand: %s. Use 'help'."
+T_FR[err.unknown_opt]="Option ou sous-commande inconnue : %s. Utilisez « help »."
+T_DE[err.unknown_opt]="Unbekannte Option oder unbekannter Unterbefehl: %s. Verwenden Sie 'help'."
+T_ES[err.unknown_opt]="Opción o subcomando desconocido: %s. Use 'help'."
+T_IT[err.unknown_opt]="Opzione o sottocomando sconosciuto: %s. Usare 'help'."
 
 T_EN[lang.missing]="--lang requires a code: en, fr, de, es, it."
 T_FR[lang.missing]="--lang requiert un code : en, fr, de, es, it."
@@ -218,6 +242,12 @@ T_FR[heal.summary_cron]="[*] Cron de résumé quotidien manquant réinstallé : 
 T_DE[heal.summary_cron]="[*] Fehlender Tageszusammenfassungs-Cron neu installiert: %s"
 T_ES[heal.summary_cron]="[*] Cron de resumen diario faltante reinstalado: %s"
 T_IT[heal.summary_cron]="[*] Cron del riepilogo giornaliero mancante reinstallato: %s"
+
+T_EN[heal.summary_cron_syntax]="[*] Daily-summary cron rewritten (new syntax): %s"
+T_FR[heal.summary_cron_syntax]="[*] Cron de résumé quotidien réécrit (nouvelle syntaxe) : %s"
+T_DE[heal.summary_cron_syntax]="[*] Tageszusammenfassungs-Cron neu geschrieben (neue Syntax): %s"
+T_ES[heal.summary_cron_syntax]="[*] Cron de resumen diario reescrito (nueva sintaxis): %s"
+T_IT[heal.summary_cron_syntax]="[*] Cron del riepilogo giornaliero riscritto (nuova sintassi): %s"
 
 T_EN[heal.summary_cron_removed]="[*] Daily-summary cron removed (DAILY_SUMMARY disabled): %s"
 T_FR[heal.summary_cron_removed]="[*] Cron de résumé quotidien retiré (DAILY_SUMMARY désactivé) : %s"
@@ -333,53 +363,65 @@ T_DE[verbose.no_change]="=> Keine Änderung im ipset erforderlich."
 T_ES[verbose.no_change]="=> No se requiere ningún cambio en el ipset."
 T_IT[verbose.no_change]="=> Nessuna modifica richiesta nell'ipset."
 
-T_EN[help.list]="  --list           List banned IPs (timeout left), sorted by IP family."
-T_FR[help.list]="  --list           Lister les IP bannies (timeout restant), triées par famille d'IP."
-T_DE[help.list]="  --list           Gesperrte IPs auflisten (Rest-Timeout), nach IP-Familie sortiert."
-T_ES[help.list]="  --list           Listar las IP bloqueadas (timeout restante), ordenadas por familia de IP."
-T_IT[help.list]="  --list           Elencare gli IP bloccati (timeout residuo), ordinati per famiglia di IP."
+T_EN[help.list]="  list             List banned IPs (timeout left), sorted by IP family."
+T_FR[help.list]="  list             Lister les IP bannies (timeout restant), triées par famille d'IP."
+T_DE[help.list]="  list             Gesperrte IPs auflisten (Rest-Timeout), nach IP-Familie sortiert."
+T_ES[help.list]="  list             Listar las IP bloqueadas (timeout restante), ordenadas por familia de IP."
+T_IT[help.list]="  list             Elencare gli IP bloccati (timeout residuo), ordinati per famiglia di IP."
 
-T_EN[help.bytimeout]="  --by-timeout     With --list: sort by remaining timeout (ascending)."
-T_FR[help.bytimeout]="  --by-timeout     Avec --list : trier par timeout restant (croissant)."
-T_DE[help.bytimeout]="  --by-timeout     Mit --list: nach verbleibendem Timeout sortieren (aufsteigend)."
-T_ES[help.bytimeout]="  --by-timeout     Con --list: ordenar por timeout restante (ascendente)."
-T_IT[help.bytimeout]="  --by-timeout     Con --list: ordinare per timeout residuo (crescente)."
+T_EN[help.bytimeout]="  --by-timeout     With list: sort by remaining timeout (ascending)."
+T_FR[help.bytimeout]="  --by-timeout     Avec list : trier par timeout restant (croissant)."
+T_DE[help.bytimeout]="  --by-timeout     Mit list: nach verbleibendem Timeout sortieren (aufsteigend)."
+T_ES[help.bytimeout]="  --by-timeout     Con list: ordenar por timeout restante (ascendente)."
+T_IT[help.bytimeout]="  --by-timeout     Con list: ordinare per timeout residuo (crescente)."
 
-T_EN[help.resolve]="  --resolve        Show reverse DNS (PTR) of IPs in --list/--stats/--summary (opt-in)."
-T_FR[help.resolve]="  --resolve        Afficher le reverse DNS (PTR) des IP dans --list/--stats/--summary (opt-in)."
-T_DE[help.resolve]="  --resolve        Reverse-DNS (PTR) der IPs in --list/--stats/--summary anzeigen (opt-in)."
-T_ES[help.resolve]="  --resolve        Mostrar el DNS inverso (PTR) de las IP en --list/--stats/--summary (opt-in)."
-T_IT[help.resolve]="  --resolve        Mostrare il reverse DNS (PTR) degli IP in --list/--stats/--summary (opt-in)."
+T_EN[help.resolve]="  --resolve        Show reverse DNS (PTR) of IPs in list/stats/summary (opt-in)."
+T_FR[help.resolve]="  --resolve        Afficher le reverse DNS (PTR) des IP dans list/stats/summary (opt-in)."
+T_DE[help.resolve]="  --resolve        Reverse-DNS (PTR) der IPs in list/stats/summary anzeigen (opt-in)."
+T_ES[help.resolve]="  --resolve        Mostrar el DNS inverso (PTR) de las IP en list/stats/summary (opt-in)."
+T_IT[help.resolve]="  --resolve        Mostrare il reverse DNS (PTR) degli IP in list/stats/summary (opt-in)."
 
-T_EN[help.stats]="  --stats          Show ban statistics."
-T_FR[help.stats]="  --stats          Afficher les statistiques de ban."
-T_DE[help.stats]="  --stats          Sperr-Statistiken anzeigen."
-T_ES[help.stats]="  --stats          Mostrar las estadísticas de bloqueo."
-T_IT[help.stats]="  --stats          Mostrare le statistiche di blocco."
+T_EN[help.stats]="  stats            Show ban statistics."
+T_FR[help.stats]="  stats            Afficher les statistiques de ban."
+T_DE[help.stats]="  stats            Sperr-Statistiken anzeigen."
+T_ES[help.stats]="  stats            Mostrar las estadísticas de bloqueo."
+T_IT[help.stats]="  stats            Mostrare le statistiche di blocco."
 
-T_EN[help.unban]="  --unban <IP|all> Remove an IP (or all) from the ban list and exit."
-T_FR[help.unban]="  --unban <IP|all> Retirer une IP (ou toutes) de la liste de bannissement et quitter."
-T_DE[help.unban]="  --unban <IP|all> Eine IP (oder alle) aus der Sperrliste entfernen und beenden."
-T_ES[help.unban]="  --unban <IP|all> Eliminar una IP (o todas) de la lista de bloqueo y salir."
-T_IT[help.unban]="  --unban <IP|all> Rimuovere un IP (o tutti) dalla lista di blocco e uscire."
+T_EN[help.unban]="  unban <IP|all>   Remove an IP (or all) from the ban list and exit."
+T_FR[help.unban]="  unban <IP|all>   Retirer une IP (ou toutes) de la liste de bannissement et quitter."
+T_DE[help.unban]="  unban <IP|all>   Eine IP (oder alle) aus der Sperrliste entfernen und beenden."
+T_ES[help.unban]="  unban <IP|all>   Eliminar una IP (o todas) de la lista de bloqueo y salir."
+T_IT[help.unban]="  unban <IP|all>   Rimuovere un IP (o tutti) dalla lista di blocco e uscire."
 
-T_EN[help.summary]="  --summary        Send the daily summary via the configured channel (opt-in)."
-T_FR[help.summary]="  --summary        Envoyer le résumé quotidien via le canal configuré (opt-in)."
-T_DE[help.summary]="  --summary        Tägliche Zusammenfassung über den konfigurierten Kanal senden (opt-in)."
-T_ES[help.summary]="  --summary        Enviar el resumen diario por el canal configurado (opt-in)."
-T_IT[help.summary]="  --summary        Inviare il riepilogo giornaliero tramite il canale configurato (opt-in)."
+T_EN[help.summary]="  summary          Send the daily summary via the configured channel (opt-in)."
+T_FR[help.summary]="  summary          Envoyer le résumé quotidien via le canal configuré (opt-in)."
+T_DE[help.summary]="  summary          Tägliche Zusammenfassung über den konfigurierten Kanal senden (opt-in)."
+T_ES[help.summary]="  summary          Enviar el resumen diario por el canal configurado (opt-in)."
+T_IT[help.summary]="  summary          Inviare il riepilogo giornaliero tramite il canale configurato (opt-in)."
 
-T_EN[help.checknotif]="  --check-notification [email|webhook|all]  Send a test notification and report the result (default: all)."
-T_FR[help.checknotif]="  --check-notification [email|webhook|all]  Envoyer une notification de test et afficher le résultat (défaut : all)."
-T_DE[help.checknotif]="  --check-notification [email|webhook|all]  Eine Testbenachrichtigung senden und das Ergebnis anzeigen (Standard: all)."
-T_ES[help.checknotif]="  --check-notification [email|webhook|all]  Enviar una notificación de prueba y mostrar el resultado (por defecto: all)."
-T_IT[help.checknotif]="  --check-notification [email|webhook|all]  Inviare una notifica di prova e mostrare il risultato (predefinito: all)."
+T_EN[help.checknotif]="  check-notification [email|webhook|all]  Send a test notification and report the result (default: all)."
+T_FR[help.checknotif]="  check-notification [email|webhook|all]  Envoyer une notification de test et afficher le résultat (défaut : all)."
+T_DE[help.checknotif]="  check-notification [email|webhook|all]  Eine Testbenachrichtigung senden und das Ergebnis anzeigen (Standard: all)."
+T_ES[help.checknotif]="  check-notification [email|webhook|all]  Enviar una notificación de prueba y mostrar el resultado (por defecto: all)."
+T_IT[help.checknotif]="  check-notification [email|webhook|all]  Inviare una notifica di prova e mostrare il risultato (predefinito: all)."
 
-T_EN[help.diag]="  --diag           Run a read-only self-diagnostic and list any anomalies."
-T_FR[help.diag]="  --diag           Lancer un auto-diagnostic en lecture seule et lister les anomalies."
-T_DE[help.diag]="  --diag           Eine schreibgeschützte Selbstdiagnose ausführen und Anomalien auflisten."
-T_ES[help.diag]="  --diag           Ejecutar un autodiagnóstico de solo lectura y listar las anomalías."
-T_IT[help.diag]="  --diag           Eseguire un'autodiagnostica in sola lettura ed elencare le anomalie."
+T_EN[help.diag]="  diag             Run a read-only self-diagnostic and list any anomalies."
+T_FR[help.diag]="  diag             Lancer un auto-diagnostic en lecture seule et lister les anomalies."
+T_DE[help.diag]="  diag             Eine schreibgeschützte Selbstdiagnose ausführen und Anomalien auflisten."
+T_ES[help.diag]="  diag             Ejecutar un autodiagnóstico de solo lectura y listar las anomalías."
+T_IT[help.diag]="  diag             Eseguire un'autodiagnostica in sola lettura ed elencare le anomalie."
+
+T_EN[help.health]="  health           Show the server's vital signs (load, memory, disk, MTA, I/O) and exit."
+T_FR[help.health]="  health           Afficher les signes vitaux du serveur (load, mémoire, disque, MTA, IO) et quitter."
+T_DE[help.health]="  health           Vitalwerte des Servers anzeigen (Last, Speicher, Festplatte, MTA, I/O) und beenden."
+T_ES[help.health]="  health           Mostrar las constantes vitales del servidor (carga, memoria, disco, MTA, E/S) y salir."
+T_IT[help.health]="  health           Mostrare i segni vitali del server (carico, memoria, disco, MTA, I/O) e uscire."
+
+T_EN[help.nohealth]="  --no-health      Skip the vital-sign checks (with diag and the daily summary)."
+T_FR[help.nohealth]="  --no-health      Sauter les contrôles de signes vitaux (avec diag et le résumé quotidien)."
+T_DE[help.nohealth]="  --no-health      Die Vitalwert-Prüfungen überspringen (bei diag und der täglichen Zusammenfassung)."
+T_ES[help.nohealth]="  --no-health      Omitir los controles de constantes vitales (con diag y el resumen diario)."
+T_IT[help.nohealth]="  --no-health      Saltare i controlli dei segni vitali (con diag e il riepilogo giornaliero)."
 
 T_EN[check.header]="=[ ban-404 notification test ]="
 T_FR[check.header]="=[ Test des notifications ban-404 ]="
@@ -760,6 +802,115 @@ T_DE[diag.tally_problems]="%s Anomalie(n) erkannt — siehe die [WARN]/[FAIL]-Ze
 T_ES[diag.tally_problems]="%s anomalía(s) detectada(s) — vea las líneas [WARN]/[FAIL] de arriba."
 T_IT[diag.tally_problems]="%s anomalia(e) rilevata(e) — vedere le righe [WARN]/[FAIL] qui sopra."
 
+# --- Signes vitaux du serveur (sous-commande health ; inclus dans diag et le résumé) ---
+T_EN[health.header]="=[ server vital signs ]="
+T_FR[health.header]="=[ Signes vitaux du serveur ]="
+T_DE[health.header]="=[ Vitalwerte des Servers ]="
+T_ES[health.header]="=[ Constantes vitales del servidor ]="
+T_IT[health.header]="=[ Segni vitali del server ]="
+
+T_EN[stats.health_vitals]="Vital signs"
+T_FR[stats.health_vitals]="Signes vitaux"
+T_DE[stats.health_vitals]="Vitalwerte"
+T_ES[stats.health_vitals]="Constantes vitales"
+T_IT[stats.health_vitals]="Segni vitali"
+
+T_EN[diag.health_load]="Load: %s %s %s (%s core(s)) · uptime %s"
+T_FR[diag.health_load]="Charge (load) : %s %s %s (%s cœur(s)) · uptime %s"
+T_DE[diag.health_load]="Last: %s %s %s (%s Kern(e)) · Uptime %s"
+T_ES[diag.health_load]="Carga (load): %s %s %s (%s núcleo(s)) · uptime %s"
+T_IT[diag.health_load]="Carico (load): %s %s %s (%s core) · uptime %s"
+
+T_EN[diag.health_load_high]="HIGH load: %s %s %s (%s core(s), threshold %s x cores) · uptime %s"
+T_FR[diag.health_load_high]="Charge ÉLEVÉE : %s %s %s (%s cœur(s), seuil %s x cœurs) · uptime %s"
+T_DE[diag.health_load_high]="HOHE Last: %s %s %s (%s Kern(e), Schwelle %s x Kerne) · Uptime %s"
+T_ES[diag.health_load_high]="Carga ALTA: %s %s %s (%s núcleo(s), umbral %s x núcleos) · uptime %s"
+T_IT[diag.health_load_high]="Carico ELEVATO: %s %s %s (%s core, soglia %s x core) · uptime %s"
+
+T_EN[diag.health_mem]="Memory: %s%% available (%s of %s MB) · swap used: %s%%"
+T_FR[diag.health_mem]="Mémoire : %s %% disponible (%s sur %s Mo) · swap utilisé : %s %%"
+T_DE[diag.health_mem]="Speicher: %s %% verfügbar (%s von %s MB) · Swap belegt: %s %%"
+T_ES[diag.health_mem]="Memoria: %s %% disponible (%s de %s MB) · swap usado: %s %%"
+T_IT[diag.health_mem]="Memoria: %s %% disponibile (%s di %s MB) · swap usato: %s %%"
+
+T_EN[diag.health_mem_low]="LOW memory: %s%% available (%s of %s MB, threshold %s%%) · swap used: %s%%"
+T_FR[diag.health_mem_low]="Mémoire BASSE : %s %% disponible (%s sur %s Mo, seuil %s %%) · swap utilisé : %s %%"
+T_DE[diag.health_mem_low]="WENIG Speicher: %s %% verfügbar (%s von %s MB, Schwelle %s %%) · Swap belegt: %s %%"
+T_ES[diag.health_mem_low]="Memoria BAJA: %s %% disponible (%s de %s MB, umbral %s %%) · swap usado: %s %%"
+T_IT[diag.health_mem_low]="Memoria BASSA: %s %% disponibile (%s di %s MB, soglia %s %%) · swap usato: %s %%"
+
+T_EN[diag.health_disk]="Disk %s: %s%% space used, %s%% inodes used"
+T_FR[diag.health_disk]="Disque %s : %s %% d'espace occupé, %s %% d'inodes"
+T_DE[diag.health_disk]="Festplatte %s: %s %% Platz belegt, %s %% Inodes"
+T_ES[diag.health_disk]="Disco %s: %s %% de espacio ocupado, %s %% de inodos"
+T_IT[diag.health_disk]="Disco %s: %s %% di spazio occupato, %s %% di inode"
+
+T_EN[diag.health_disk_full]="Disk %s NEARLY FULL: %s%% space, %s%% inodes (threshold %s%%)"
+T_FR[diag.health_disk_full]="Disque %s PRESQUE PLEIN : %s %% d'espace, %s %% d'inodes (seuil %s %%)"
+T_DE[diag.health_disk_full]="Festplatte %s FAST VOLL: %s %% Platz, %s %% Inodes (Schwelle %s %%)"
+T_ES[diag.health_disk_full]="Disco %s CASI LLENO: %s %% de espacio, %s %% de inodos (umbral %s %%)"
+T_IT[diag.health_disk_full]="Disco %s QUASI PIENO: %s %% di spazio, %s %% di inode (soglia %s %%)"
+
+T_EN[diag.health_mta]="Postfix running · mail queue: %s message(s)"
+T_FR[diag.health_mta]="Postfix actif · file d'attente : %s message(s)"
+T_DE[diag.health_mta]="Postfix läuft · Mail-Warteschlange: %s Nachricht(en)"
+T_ES[diag.health_mta]="Postfix activo · cola de correo: %s mensaje(s)"
+T_IT[diag.health_mta]="Postfix attivo · coda di posta: %s messaggio(i)"
+
+T_EN[diag.health_mta_queue]="Postfix running but mail queue is LARGE: %s messages (threshold %s) — check deliverability."
+T_FR[diag.health_mta_queue]="Postfix actif mais file d'attente ÉLEVÉE : %s messages (seuil %s) — vérifier la délivrabilité."
+T_DE[diag.health_mta_queue]="Postfix läuft, aber Mail-Warteschlange ist GROSS: %s Nachrichten (Schwelle %s) — Zustellbarkeit prüfen."
+T_ES[diag.health_mta_queue]="Postfix activo pero cola de correo ALTA: %s mensajes (umbral %s) — verifique la entregabilidad."
+T_IT[diag.health_mta_queue]="Postfix attivo ma coda di posta ELEVATA: %s messaggi (soglia %s) — verificare la recapitabilità."
+
+T_EN[diag.health_mta_down]="Postfix service STOPPED (queue: %s message(s)) — outgoing mail is piling up or being lost."
+T_FR[diag.health_mta_down]="Service postfix ARRÊTÉ (file : %s message(s)) — le courrier sortant s'accumule ou se perd."
+T_DE[diag.health_mta_down]="Postfix-Dienst GESTOPPT (Warteschlange: %s Nachricht(en)) — ausgehende Mails stauen sich oder gehen verloren."
+T_ES[diag.health_mta_down]="Servicio postfix DETENIDO (cola: %s mensaje(s)) — el correo saliente se acumula o se pierde."
+T_IT[diag.health_mta_down]="Servizio postfix FERMO (coda: %s messaggio(i)) — la posta in uscita si accumula o va persa."
+
+T_EN[diag.health_mta_none]="No MTA detected (postfix not installed) — mail check skipped."
+T_FR[diag.health_mta_none]="Aucun MTA détecté (postfix non installé) — contrôle du courrier sauté."
+T_DE[diag.health_mta_none]="Kein MTA erkannt (postfix nicht installiert) — Mail-Prüfung übersprungen."
+T_ES[diag.health_mta_none]="Ningún MTA detectado (postfix no instalado) — control de correo omitido."
+T_IT[diag.health_mta_none]="Nessun MTA rilevato (postfix non installato) — controllo della posta saltato."
+
+T_EN[diag.health_io]="I/O pressure (PSI some avg60): %s%%"
+T_FR[diag.health_io]="Pression IO (PSI some avg60) : %s %%"
+T_DE[diag.health_io]="I/O-Druck (PSI some avg60): %s %%"
+T_ES[diag.health_io]="Presión de E/S (PSI some avg60): %s %%"
+T_IT[diag.health_io]="Pressione I/O (PSI some avg60): %s %%"
+
+T_EN[diag.health_io_high]="HIGH I/O pressure (PSI some avg60): %s%% (threshold %s%%) — tasks are stalling on disk."
+T_FR[diag.health_io_high]="Pression IO ÉLEVÉE (PSI some avg60) : %s %% (seuil %s %%) — des tâches attendent le disque."
+T_DE[diag.health_io_high]="HOHER I/O-Druck (PSI some avg60): %s %% (Schwelle %s %%) — Prozesse warten auf die Festplatte."
+T_ES[diag.health_io_high]="Presión de E/S ALTA (PSI some avg60): %s %% (umbral %s %%) — hay tareas esperando el disco."
+T_IT[diag.health_io_high]="Pressione I/O ELEVATA (PSI some avg60): %s %% (soglia %s %%) — processi in attesa del disco."
+
+T_EN[diag.health_io_na]="I/O pressure not measurable (PSI unavailable on this kernel)."
+T_FR[diag.health_io_na]="Pression IO non mesurable (PSI indisponible sur ce noyau)."
+T_DE[diag.health_io_na]="I/O-Druck nicht messbar (PSI auf diesem Kernel nicht verfügbar)."
+T_ES[diag.health_io_na]="Presión de E/S no medible (PSI no disponible en este kernel)."
+T_IT[diag.health_io_na]="Pressione I/O non misurabile (PSI non disponibile su questo kernel)."
+
+T_EN[diag.health_net]="Network %s: RX %s/s · TX %s/s (1 s sample)"
+T_FR[diag.health_net]="Réseau %s : RX %s/s · TX %s/s (échantillon 1 s)"
+T_DE[diag.health_net]="Netzwerk %s: RX %s/s · TX %s/s (1-s-Messung)"
+T_ES[diag.health_net]="Red %s: RX %s/s · TX %s/s (muestra de 1 s)"
+T_IT[diag.health_net]="Rete %s: RX %s/s · TX %s/s (campione di 1 s)"
+
+T_EN[diag.health_units]="systemd: %s failed unit(s): %s"
+T_FR[diag.health_units]="systemd : %s unité(s) en échec : %s"
+T_DE[diag.health_units]="systemd: %s fehlgeschlagene Unit(s): %s"
+T_ES[diag.health_units]="systemd: %s unidad(es) en fallo: %s"
+T_IT[diag.health_units]="systemd: %s unità in errore: %s"
+
+T_EN[diag.health_reboot]="Reboot required (/var/run/reboot-required present — pending kernel/libc update)."
+T_FR[diag.health_reboot]="Redémarrage requis (/var/run/reboot-required présent — MAJ noyau/libc en attente)."
+T_DE[diag.health_reboot]="Neustart erforderlich (/var/run/reboot-required vorhanden — Kernel-/libc-Update ausstehend)."
+T_ES[diag.health_reboot]="Reinicio requerido (/var/run/reboot-required presente — actualización de kernel/libc pendiente)."
+T_IT[diag.health_reboot]="Riavvio richiesto (/var/run/reboot-required presente — aggiornamento kernel/libc in sospeso)."
+
 # --- Aide : section configuration (/etc/ban_404.conf) ---
 T_EN[help.conf_header]="Configuration: %s (overrides defaults; never overwritten by updates)"
 T_FR[help.conf_header]="Configuration : %s (surcharge les valeurs par défaut ; jamais écrasée par les MAJ)"
@@ -892,6 +1043,12 @@ T_FR[help.conf_postflood]="  POST_FLOOD_THRESHOLD  Ban au-delà de N POST survei
 T_DE[help.conf_postflood]="  POST_FLOOD_THRESHOLD  Sperre bei mehr als N überwachten POSTs im Zeitfenster (Standard 20)."
 T_ES[help.conf_postflood]="  POST_FLOOD_THRESHOLD  Bloqueo al superar N POST vigilados en la ventana (por defecto 20)."
 T_IT[help.conf_postflood]="  POST_FLOOD_THRESHOLD  Blocco oltre N POST sorvegliati nella finestra (predefinito 20)."
+
+T_EN[help.conf_health]="  HEALTH_*         Vital-sign thresholds: HEALTH_LOAD_WARN (x cores, 2), HEALTH_MEM_WARN (%% avail., 10), HEALTH_DISK_WARN (%%, 90), HEALTH_MAILQ_WARN (50), HEALTH_IO_WARN (PSI %%, 25); HEALTH_CHECKS=false disables."
+T_FR[help.conf_health]="  HEALTH_*         Seuils des signes vitaux : HEALTH_LOAD_WARN (x cœurs, 2), HEALTH_MEM_WARN (%% dispo, 10), HEALTH_DISK_WARN (%%, 90), HEALTH_MAILQ_WARN (50), HEALTH_IO_WARN (PSI %%, 25) ; HEALTH_CHECKS=false désactive."
+T_DE[help.conf_health]="  HEALTH_*         Vitalwert-Schwellen: HEALTH_LOAD_WARN (x Kerne, 2), HEALTH_MEM_WARN (%% verfügbar, 10), HEALTH_DISK_WARN (%%, 90), HEALTH_MAILQ_WARN (50), HEALTH_IO_WARN (PSI %%, 25); HEALTH_CHECKS=false deaktiviert."
+T_ES[help.conf_health]="  HEALTH_*         Umbrales de constantes vitales: HEALTH_LOAD_WARN (x núcleos, 2), HEALTH_MEM_WARN (%% disp., 10), HEALTH_DISK_WARN (%%, 90), HEALTH_MAILQ_WARN (50), HEALTH_IO_WARN (PSI %%, 25); HEALTH_CHECKS=false desactiva."
+T_IT[help.conf_health]="  HEALTH_*         Soglie dei segni vitali: HEALTH_LOAD_WARN (x core, 2), HEALTH_MEM_WARN (%% disp., 10), HEALTH_DISK_WARN (%%, 90), HEALTH_MAILQ_WARN (50), HEALTH_IO_WARN (PSI %%, 25); HEALTH_CHECKS=false disattiva."
 
 T_EN[help.conf_advanced]="  Advanced: HONEYPOT_PATTERN / NOISE_PATTERN / SECURITY_PATTERN / POST_FLOOD_PATTERN (awk regex) — override with care."
 T_FR[help.conf_advanced]="  Avancé : HONEYPOT_PATTERN / NOISE_PATTERN / SECURITY_PATTERN / POST_FLOOD_PATTERN (regex awk) — surcharger avec prudence."
@@ -1193,6 +1350,7 @@ VERBOSE=false
 DO_LIST=false
 DO_STATS=false
 DO_DIAG=false
+DO_HEALTH=false
 LIST_BY_TIMEOUT=false
 LOG_EVENTS=true      # écriture des événements dans LOG_FILE (--no-log ou dry-run => false)
 
@@ -1201,22 +1359,27 @@ show_help() {
     t version.author
     t help.usage "$0"
     echo ""
+    t help.subcommands_header
+    t help.list
+    t help.stats
+    t help.diag
+    t help.health
+    t help.summary
+    t help.unban
+    t help.checknotif
+    t help.lang
+    t help.version
+    t help.help
+    t help.compat
+    echo ""
     t help.options_header
     t help.dryrun
     t help.showblocked
     t help.verbose
     t help.nolog
-    t help.list
     t help.bytimeout
     t help.resolve
-    t help.stats
-    t help.unban
-    t help.summary
-    t help.checknotif
-    t help.diag
-    t help.lang
-    t help.version
-    t help.help
+    t help.nohealth
     echo ""
     t help.conf_header "$CONF_FILE"
     t help.conf_repo_raw
@@ -1240,6 +1403,7 @@ show_help() {
     t help.conf_resolve
     t help.conf_ptr_timeout
     t help.conf_postflood
+    t help.conf_health
     t help.conf_advanced
     t help.conf_example_pointer
     exit 0
@@ -1448,6 +1612,13 @@ build_stats_text() {
             printf '  %s\n' "$issue"             # déjà préfixé [WARN]/[FAIL] + déjà localisé (pas de re-format t)
         done
     fi
+    # --- Signes vitaux : TOUJOURS affichés (valeurs mesurées par run_diag_checks ci-dessus via
+    # run_health_checks ; aucune re-mesure — l'échantillon réseau 1 s n'a tourné qu'une fois).
+    # Vide (--no-health / HEALTH_CHECKS=false) => le bloc disparaît proprement. ---
+    if [ "${#HEALTH_LINES[@]}" -gt 0 ]; then
+        printf '\n── %s ──\n' "$(t stats.health_vitals)"
+        printf '%s\n' "${HEALTH_LINES[@]}"
+    fi
     # --- Statistiques (24h) ---
     printf '\n── %s ──\n' "$(t stats.sec_stats)"
     t stats.banned_now "$banned"
@@ -1601,6 +1772,8 @@ check_notification() {  # $1 = email|webhook|all (défaut all)
 DIAG_PROBLEMS=0
 DIAG_QUIET=false           # true => diag_line accumule sans imprimer (réutilisé par le résumé)
 declare -a DIAG_ISSUES=()  # lignes "[WARN]/[FAIL] message" accumulées (pour le résumé quotidien)
+declare -a HEALTH_LINES=() # signes vitaux localisés AVEC valeurs (bloc « Signes vitaux » du résumé)
+HEALTH_DONE=false          # garde anti-double-mesure (l'échantillon réseau ~1 s ne tourne qu'une fois)
 diag_line() {  # $1 = ok|warn|fail ; $2 = message déjà localisé
     local tag
     case "$1" in
@@ -1619,7 +1792,7 @@ diag_is_on() { case "${1:-}" in true|1|yes|on) return 0 ;; *) return 1 ;; esac; 
 run_diag_checks() {
     local engine="/usr/local/sbin/ban_404.sh" updater="/usr/local/sbin/update_ban_404.sh"
     local upd_ver="" repo_engine repo_upd up n chans
-    local active inactive excluded unreadable log_dir vhost f now mt age_d
+    local active inactive excluded unreadable log_dir vhost f now mt age_d age_h
 
     # 1. Composants & versions (local)
     if [ -f "$engine" ]; then diag_line ok "$(t diag.engine_ok "$BAN404_VERSION")"
@@ -1794,12 +1967,169 @@ run_diag_checks() {
     else diag_line ok "$(t diag.notify_none)"; fi
     if diag_is_on "$NOTIFY_BANS"   && [ -z "$WEBHOOK_URL" ] && [ -z "$NOTIFY_EMAIL" ]; then diag_line warn "$(t diag.notify_orphan_bans)"; fi
     if diag_is_on "$DAILY_SUMMARY" && [ -z "$WEBHOOK_URL" ] && [ -z "$NOTIFY_EMAIL" ]; then diag_line warn "$(t diag.notify_orphan_summary)"; fi
+
+    # 8. Signes vitaux du serveur (load, mémoire, disque, MTA, IO, réseau)
+    run_health_checks
+}
+
+# ---------- Signes vitaux du serveur (sous-commande health ; inclus dans diag et le résumé) ----------
+# health_line double diag_line : le message (valeurs comprises) part aussi dans HEALTH_LINES, que
+# build_stats_text imprime en bloc « Signes vitaux » TOUJOURS affiché dans le résumé — les seuils
+# franchis remontent, eux, via DIAG_ISSUES comme n'importe quel [WARN]/[FAIL] de diagnostic.
+# L'accumulation reste hors de diag_line pour ne pas embarquer les ~25 contrôles classiques.
+health_line() {  # $1 = ok|warn|fail ; $2 = message déjà localisé (avec valeurs)
+    HEALTH_LINES+=("$2")
+    diag_line "$1" "$2"
+}
+
+# Occupation espace + inodes d'un point de montage ($1). Inodes « - » (FS sans inodes) => 0.
+health_disk_check() {
+    local mnt="$1" pcent ipcent
+    pcent=$(df -P "$mnt" 2>/dev/null | awk 'NR==2{gsub(/%/,"",$5); print $5}')
+    case "$pcent" in ''|*[!0-9]*) return 0 ;; esac
+    ipcent=$(df -Pi "$mnt" 2>/dev/null | awk 'NR==2{gsub(/%/,"",$5); print $5}')
+    case "$ipcent" in ''|*[!0-9]*) ipcent=0 ;; esac
+    if [ "$pcent" -gt "$HEALTH_DISK_WARN" ] || [ "$ipcent" -gt "$HEALTH_DISK_WARN" ]; then
+        health_line warn "$(t diag.health_disk_full "$mnt" "$pcent" "$ipcent" "$HEALTH_DISK_WARN")"
+    else
+        health_line ok "$(t diag.health_disk "$mnt" "$pcent" "$ipcent")"
+    fi
+}
+
+# Débit octets/s => forme humaine (kB/MB), pour la ligne réseau. Borné à 0 (wrap de compteur).
+health_rate() { awk -v b="${1:-0}" 'BEGIN{ if (b < 0) b = 0; if (b >= 1048576) printf "%.1f MB", b/1048576; else printf "%.0f kB", b/1024 }'; }
+
+# run_health_checks : mesure les signes vitaux (lecture seule, aucune dépendance obligatoire :
+# chaque mesure se dégrade en silence ou en ligne « non mesurable » si l'outil/le /proc manque ;
+# tout passe non-root). Valeurs => health_line (diag + bloc du résumé) ; contrôles warn-only
+# (unités systemd en échec, reboot requis) => diag_line direct, muets quand tout va bien.
+run_health_checks() {
+    [ "$HEALTH_DONE" = true ] && return 0
+    diag_is_on "${HEALTH_CHECKS:-true}" || return 0
+    HEALTH_DONE=true
+    local l1 l5 l15 cores up mem_total mem_avail mem_pct swap_pct
+    local root_dev var_dev q_raw queue running io iface rx1 tx1 rx2 tx2 failed n_failed
+
+    # a. Charge (load average) + uptime — WARN si load 15 min > HEALTH_LOAD_WARN x cœurs
+    if [ -r /proc/loadavg ]; then
+        read -r l1 l5 l15 _ < /proc/loadavg
+        cores=$(nproc 2>/dev/null) || cores=$(grep -c ^processor /proc/cpuinfo 2>/dev/null)
+        [ -n "$cores" ] || cores=1
+        up=$(awk '{printf "%dd %dh", int($1/86400), int(($1%86400)/3600)}' /proc/uptime 2>/dev/null)
+        if awk -v l="$l15" -v c="$cores" -v m="$HEALTH_LOAD_WARN" 'BEGIN{exit !(l > c*m)}'; then
+            health_line warn "$(t diag.health_load_high "$l1" "$l5" "$l15" "$cores" "$HEALTH_LOAD_WARN" "${up:-?}")"
+        else
+            health_line ok "$(t diag.health_load "$l1" "$l5" "$l15" "$cores" "${up:-?}")"
+        fi
+    fi
+
+    # b. Mémoire (MemAvailable) + swap — WARN si dispo < HEALTH_MEM_WARN % ; swap informatif
+    if [ -r /proc/meminfo ]; then
+        # av : présence de MemAvailable (noyau >= 3.14) — absent => t=0 => mesure sautée (pas de faux WARN 0 %)
+        read -r mem_total mem_avail mem_pct swap_pct <<< "$(awk '
+            /^MemTotal:/{t=$2} /^MemAvailable:/{a=$2; av=1} /^SwapTotal:/{st=$2} /^SwapFree:/{sf=$2}
+            END{ if (!av) t=0; printf "%d %d %d %s", int(t/1024), int(a/1024), (t>0 ? int(a*100/t) : 0), (st>0 ? int((st-sf)*100/st) : "-") }
+        ' /proc/meminfo 2>/dev/null)"
+        if [ -n "$mem_total" ] && [ "$mem_total" -gt 0 ]; then
+            if [ "$mem_pct" -lt "$HEALTH_MEM_WARN" ]; then
+                health_line warn "$(t diag.health_mem_low "$mem_pct" "$mem_avail" "$mem_total" "$HEALTH_MEM_WARN" "$swap_pct")"
+            else
+                health_line ok "$(t diag.health_mem "$mem_pct" "$mem_avail" "$mem_total" "$swap_pct")"
+            fi
+        fi
+    fi
+
+    # c. Disque : / toujours, /var seulement si partition distincte (logs, spool mail)
+    health_disk_check /
+    root_dev=$(df -P / 2>/dev/null | awk 'NR==2{print $1}')
+    var_dev=$(df -P /var 2>/dev/null | awk 'NR==2{print $1}')
+    [ -n "$var_dev" ] && [ "$var_dev" != "$root_dev" ] && health_disk_check /var
+
+    # d. MTA postfix : service actif ? file d'attente ? (l'incident fondateur : postfix arrêté =>
+    # mailq énorme, mails perdus en silence). Arrêté => [FAIL] (du courrier se perd ACTIVEMENT).
+    # postqueue lit la file même moteur arrêté ; s'il échoue (absent, restriction) => « ? » sans WARN.
+    if command -v postfix >/dev/null 2>&1 || [ -x /usr/sbin/postfix ]; then
+        queue="?"
+        q_raw=$(postqueue -p 2>/dev/null | tail -n1)
+        case "$q_raw" in
+            *empty*) queue=0 ;;
+            *Requests*) queue=$(printf '%s' "$q_raw" | awk '{print $(NF-1)}'); case "$queue" in ''|*[!0-9]*) queue="?" ;; esac ;;
+        esac
+        # pgrep -x master : preuve directe que le démon tourne (l'unité systemd postfix.service,
+        # oneshot, peut rester « active » après un crash du master => pas fiable seule).
+        if pgrep -x master >/dev/null 2>&1; then
+            if [ "$queue" != "?" ] && [ "$queue" -gt "$HEALTH_MAILQ_WARN" ]; then
+                health_line warn "$(t diag.health_mta_queue "$queue" "$HEALTH_MAILQ_WARN")"
+            else
+                health_line ok "$(t diag.health_mta "$queue")"
+            fi
+        else
+            health_line fail "$(t diag.health_mta_down "$queue")"
+        fi
+    else
+        health_line ok "$(t diag.health_mta_none)"
+    fi
+
+    # e. Pression IO (PSI, noyau >= 4.20) — instantané, sans échantillonnage
+    if [ -r /proc/pressure/io ]; then
+        io=$(awk '/^some/{for(i=2;i<=NF;i++) if($i ~ /^avg60=/){sub(/^avg60=/,"",$i); print $i; exit}}' /proc/pressure/io 2>/dev/null)
+        if [ -n "$io" ]; then
+            if awk -v v="$io" -v s="$HEALTH_IO_WARN" 'BEGIN{exit !(v > s)}'; then
+                health_line warn "$(t diag.health_io_high "$io" "$HEALTH_IO_WARN")"
+            else
+                health_line ok "$(t diag.health_io "$io")"
+            fi
+        fi
+    else
+        health_line ok "$(t diag.health_io_na)"
+    fi
+
+    # f. Débit réseau de l'interface de la route par défaut (2 lectures espacées de 1 s).
+    # Purement informatif (aucun seuil universel de débit) ; skip silencieux si non mesurable.
+    iface=$(ip route show default 2>/dev/null | awk '{for(i=1;i<NF;i++) if($i=="dev"){print $(i+1); exit}}')
+    if [ -n "$iface" ] && [ -r /proc/net/dev ]; then
+        # Après retrait du préfixe « iface: », RX octets = champ 1 et TX octets = champ 9 (robuste
+        # aux vieux noyaux qui collent la première valeur au « : »).
+        read -r rx1 tx1 <<< "$(awk -v d="$iface" '{gsub(/^[ \t]+/,""); if (index($0, d ":") == 1) {sub(/^[^:]+:/,""); print $1, $9; exit}}' /proc/net/dev)"
+        if [ -n "$rx1" ]; then
+            sleep 1
+            read -r rx2 tx2 <<< "$(awk -v d="$iface" '{gsub(/^[ \t]+/,""); if (index($0, d ":") == 1) {sub(/^[^:]+:/,""); print $1, $9; exit}}' /proc/net/dev)"
+            health_line ok "$(t diag.health_net "$iface" "$(health_rate $((rx2 - rx1)))" "$(health_rate $((tx2 - tx1)))")"
+        fi
+    fi
+
+    # g. Unités systemd en échec — warn-only, muet quand tout va bien (modèle diag.lock_stuck)
+    if command -v systemctl >/dev/null 2>&1; then
+        failed=$(systemctl --failed --no-legend --plain 2>/dev/null | awk 'NF{print $1}')
+        if [ -n "$failed" ]; then
+            n_failed=$(printf '%s\n' "$failed" | wc -l)
+            diag_line warn "$(t diag.health_units "$n_failed" "$(printf '%s\n' "$failed" | head -n3 | paste -sd, -)")"
+        fi
+    fi
+
+    # h. Redémarrage requis (MAJ noyau/libc en attente) — warn-only, muet sinon
+    [ -f /var/run/reboot-required ] && diag_line warn "$(t diag.health_reboot)"
+
+    return 0
 }
 
 do_diag() {
     t diag.header
     run_diag_checks
     # Bilan
+    echo ""
+    if [ "$DIAG_PROBLEMS" -eq 0 ]; then t diag.tally_clean; exit 0; fi
+    t diag.tally_problems "$DIAG_PROBLEMS"; exit 1
+}
+
+# Sous-commande health : les signes vitaux seuls (sans les ~25 contrôles ban-404 de diag).
+# Demander explicitement les signes vitaux doit toujours répondre : on force HEALTH_CHECKS
+# (une conf HEALTH_CHECKS=false ne désactive que diag et le résumé).
+do_health() {
+    t health.header
+    HEALTH_CHECKS=true
+    run_health_checks
+    # Bilan (clés du diagnostic réutilisées)
     echo ""
     if [ "$DIAG_PROBLEMS" -eq 0 ]; then t diag.tally_clean; exit 0; fi
     t diag.tally_problems "$DIAG_PROBLEMS"; exit 1
@@ -1826,26 +2156,33 @@ do_unban() {  # $1 = IP | all  (valeur requise, pas de défaut)
     exit 0
 }
 
+# Sous-commandes nues (list, stats, diag, health...) : forme canonique depuis 1.5.0, « -- »
+# réservé aux options. Les formes historiques --list/--stats/... restent acceptées À VIE dans la
+# même branche du case (crons du parc, scripts, habitudes) ; la complétion ne propose que la
+# forme nue. La boucle pose des drapeaux quel que soit l'ordre => cumulables et mélangeables
+# (« list stats », « stats --verbose list », « --list stats »...).
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --dry-run) DRY_RUN=true; shift ;;
         --show-blocked) SHOW_BLOCKED=true; shift ;;
         --verbose) VERBOSE=true; shift ;;
         --no-log) LOG_EVENTS=false; shift ;;
-        --lang) change_lang "${2:-}" ;;
+        --no-health) HEALTH_CHECKS=false; shift ;;
+        lang|--lang) change_lang "${2:-}" ;;
         --lang=*) change_lang "${1#*=}" ;;
         --by-timeout) LIST_BY_TIMEOUT=true; shift ;;
         --resolve) RESOLVE_PTR=true; shift ;;
-        --list) DO_LIST=true; shift ;;
-        --stats) DO_STATS=true; shift ;;
-        --summary) do_summary ;;
-        --check-notification) check_notification "${2:-all}" ;;
+        list|--list) DO_LIST=true; shift ;;
+        stats|--stats) DO_STATS=true; shift ;;
+        summary|--summary) do_summary ;;
+        check-notification|--check-notification) check_notification "${2:-all}" ;;
         --check-notification=*) check_notification "${1#*=}" ;;
-        --diag) DO_DIAG=true; shift ;;
-        --unban) do_unban "${2:-}" ;;
+        diag|--diag) DO_DIAG=true; shift ;;
+        health) DO_HEALTH=true; shift ;;
+        unban|--unban) do_unban "${2:-}" ;;
         --unban=*) do_unban "${1#*=}" ;;
-        --version) t version.line "$BAN404_VERSION"; t version.author; exit 0 ;;
-        --help|-h) show_help ;;
+        version|--version) t version.line "$BAN404_VERSION"; t version.author; exit 0 ;;
+        help|--help|-h) show_help ;;
         *) t err.unknown_opt "$1"; exit 1 ;;
     esac
 done
@@ -1855,8 +2192,12 @@ done
 
 # --- Auto-diagnostic (lecture seule), exécuté APRÈS la boucle de parsing : ainsi --verbose est
 # déjà pris en compte par run_diag_checks (détail par dossier) quel que soit l'ordre sur la ligne
-# (--diag --verbose autant que --verbose --diag). do_diag sort. ---
+# (diag --verbose autant que --verbose diag). do_diag sort. ---
 [ "$DO_DIAG" = true ] && do_diag
+
+# --- Signes vitaux seuls (lecture seule). diag les inclut déjà : si les deux sont demandés,
+# diag (ci-dessus, qui sort) a la priorité. do_health sort. ---
+[ "$DO_HEALTH" = true ] && do_health
 
 # --- Actions de rapport (cumulables) : --stats et/ou --list, puis on sort. ---
 if [ "$DO_STATS" = true ] || [ "$DO_LIST" = true ]; then
@@ -1965,13 +2306,19 @@ self_heal_summary_cron() {
     if [ -f "$legacy" ]; then
         mv -f "$legacy" "$f" 2>/dev/null && t_log heal.summary_cron_renamed "$f"
     fi
+    # Contenu canonique (syntaxe sous-commande depuis 1.5.0 ; --summary reste accepté, mais on
+    # aligne le parc). Comparé au fichier en place : différent => réécrit (migre les anciens
+    # « --summary » et guérit un wrapper corrompu), identique => rien (idempotent).
+    local want
+    want=$(printf '%s\n%s\n' '#!/bin/sh' 'exec /usr/local/sbin/ban_404.sh summary')
     case "$DAILY_SUMMARY" in
         true|1|yes|on)
-            [ -f "$f" ] && return 0                   # déjà présent => rien à faire
-            cat > "$f" <<'EOF'
-#!/bin/sh
-exec /usr/local/sbin/ban_404.sh --summary
-EOF
+            if [ -f "$f" ]; then
+                [ "$(cat "$f" 2>/dev/null)" = "$want" ] && return 0   # déjà conforme => rien à faire
+                printf '%s\n' "$want" > "$f" && chmod 755 "$f" && t_log heal.summary_cron_syntax "$f"
+                return 0
+            fi
+            printf '%s\n' "$want" > "$f"
             chmod 755 "$f" && t heal.summary_cron "$f" ;;
         *)
             [ -f "$f" ] || return 0                   # déjà absent => rien à faire

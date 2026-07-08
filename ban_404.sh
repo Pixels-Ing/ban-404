@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="1.5.3"
+BAN404_VERSION="1.5.4"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -629,11 +629,11 @@ T_DE[diag.engine_never]="Kein vollständiger Engine-Lauf verzeichnet (normal < 1
 T_ES[diag.engine_never]="Ningún run completo del motor registrado (normal < 1 h tras instalar/actualizar; si no, revisar cron.hourly)."
 T_IT[diag.engine_never]="Nessuna esecuzione completa del motore registrata (normale < 1 h dopo installazione/aggiornamento; altrimenti verificare cron.hourly)."
 
-T_EN[diag.lock_stuck]="Lock %s held by another process — run in progress, or a stuck run blocking every hourly pass."
-T_FR[diag.lock_stuck]="Verrou %s tenu par un autre processus — run en cours, ou run bloqué qui neutralise chaque passage horaire."
-T_DE[diag.lock_stuck]="Sperre %s von einem anderen Prozess gehalten — laufender Lauf, oder ein hängender Lauf blockiert jeden stündlichen Durchgang."
-T_ES[diag.lock_stuck]="Candado %s retenido por otro proceso — ejecución en curso, o una ejecución colgada que bloquea cada pasada horaria."
-T_IT[diag.lock_stuck]="Lock %s detenuto da un altro processo — esecuzione in corso, o un'esecuzione bloccata che ferma ogni passaggio orario."
+T_EN[diag.lock_stuck]="Lock %s held with no recent completed run — a stuck run is blocking every hourly pass."
+T_FR[diag.lock_stuck]="Verrou %s tenu alors qu'aucun run récent n'a abouti — un run bloqué neutralise chaque passage horaire."
+T_DE[diag.lock_stuck]="Sperre %s gehalten, aber kein kürzlich abgeschlossener Lauf — ein hängender Lauf blockiert jeden stündlichen Durchgang."
+T_ES[diag.lock_stuck]="Candado %s retenido sin ninguna ejecución reciente completada — una ejecución colgada bloquea cada pasada horaria."
+T_IT[diag.lock_stuck]="Lock %s detenuto senza alcuna esecuzione recente completata — un'esecuzione bloccata ferma ogni passaggio orario."
 
 T_EN[diag.update_stale]="Updater not run for %s day(s) — cron.daily/anacron down?"
 T_FR[diag.update_stale]="Updater non exécuté depuis %s jour(s) — cron.daily/anacron en panne ?"
@@ -1538,17 +1538,39 @@ in_whitelist_ip() {  # $1=ip ; correspondance EXACTE dans WHITELIST_IP (séparé
 # ou WHITELIST_CIDR). Comble l'angle mort : une IP bannie PUIS whitelistée n'apparaît plus
 # dans les candidats (awk l'exclut côté IP exacte ; elle ne floode plus), donc elle n'était
 # jamais retirée et n'expirait qu'au BAN_TIMEOUT. Idempotent ; respecte --dry-run.
+# Perf : les IP EXACTES sont retirées par `ipset del` DIRECT (O(whitelist)), SANS énumérer le
+# set. On ne balaie les membres (O(membres)) QUE s'il existe au moins un CIDR whitelisté — seul
+# cas où l'appartenance ne se teste pas par simple égalité. Sur un gros set post-incident
+# (ex. BL PARIS : ~106k entrées, WHITELIST_CIDR vide), l'ancien balayage systématique coûtait
+# ~30 min À CHAQUE passage horaire ; désormais il ne tourne plus du tout dans ce cas.
 enforce_whitelist_unban() {
-    local ip removed=false
-    while read -r ip; do
-        [ -z "$ip" ] && continue
-        in_whitelist_ip "$ip" || in_whitelist_cidr "$ip" || continue
-        if [ "$DRY_RUN" = true ]; then
-            t wl.sim_unban "$ip"
-        elif ipset del "$IPSET_NAME" "$ip" 2>/dev/null; then
-            t_log wl.unban "$ip"; removed=true
-        fi
-    done < <(ipset list "$IPSET_NAME" 2>/dev/null | awk '/^Members:/{m=1;next} m&&NF{print $1}')
+    local ip removed=false w
+    # 1) IP exactes : retrait DIRECT (ipset del est un no-op silencieux si l'IP n'est pas bannie).
+    if [ -n "$WHITELIST_IP" ]; then
+        local -a wips=()
+        IFS='|' read -r -a wips <<< "$WHITELIST_IP"
+        for w in "${wips[@]}"; do
+            [ -z "$w" ] && continue
+            if [ "$DRY_RUN" = true ]; then
+                ipset test "$IPSET_NAME" "$w" 2>/dev/null && t wl.sim_unban "$w"
+            elif ipset del "$IPSET_NAME" "$w" 2>/dev/null; then
+                t_log wl.unban "$w"; removed=true
+            fi
+        done
+    fi
+    # 2) CIDR : l'appartenance à une plage impose d'énumérer les membres. Balayage réservé au cas
+    #    où au moins un CIDR est whitelisté (sinon tout a été traité en 1) sans le moindre parcours).
+    if [ -n "$WHITELIST_CIDR" ]; then
+        while read -r ip; do
+            [ -z "$ip" ] && continue
+            in_whitelist_cidr "$ip" || continue
+            if [ "$DRY_RUN" = true ]; then
+                t wl.sim_unban "$ip"
+            elif ipset del "$IPSET_NAME" "$ip" 2>/dev/null; then
+                t_log wl.unban "$ip"; removed=true
+            fi
+        done < <(ipset list "$IPSET_NAME" 2>/dev/null | awk '/^Members:/{m=1;next} m&&NF{print $1}')
+    fi
     if [ "$removed" = true ]; then
         mkdir -p "$(dirname "$IPSET_SAVE_FILE")"
         ipset save > "$IPSET_SAVE_FILE"
@@ -1928,7 +1950,7 @@ diag_is_on() { case "${1:-}" in true|1|yes|on) return 0 ;; *) return 1 ;; esac; 
 run_diag_checks() {
     local engine="/usr/local/sbin/ban_404.sh" updater="/usr/local/sbin/update_ban_404.sh"
     local upd_ver="" repo_engine repo_upd up n chans
-    local active inactive excluded unreadable log_dir vhost f now mt age_d age_h
+    local active inactive excluded unreadable log_dir vhost f now mt age_d age_h engine_stale
 
     # 1. Composants & versions (local)
     if [ -f "$engine" ]; then diag_line ok "$(t diag.engine_ok "$BAN404_VERSION")"
@@ -2008,18 +2030,23 @@ run_diag_checks() {
     # crontab mutilé) fige bans ET self-heals en silence — l'updater daily, lui, peut continuer à
     # rafraîchir le moteur, masquant la panne. Le moteur touche RUN_STAMP_FILE en FIN de run réel :
     # >= 3 h sans trace = au moins 2 passages horaires manqués.
+    engine_stale=false
     if [ -f "$RUN_STAMP_FILE" ]; then
         now=$(date +%s); mt=$(stat -c %Y "$RUN_STAMP_FILE" 2>/dev/null || echo 0)
         age_h=$(( (now - mt) / 3600 ))
-        if [ "$age_h" -ge 3 ]; then diag_line warn "$(t diag.engine_stale "$age_h")"
+        if [ "$age_h" -ge 3 ]; then diag_line warn "$(t diag.engine_stale "$age_h")"; engine_stale=true
         else diag_line ok "$(t diag.engine_fresh)"; fi
     else
         diag_line warn "$(t diag.engine_never)"
     fi
-    # Verrou anti-chevauchement : s'il est tenu ALORS QUE --diag tourne (donc hors run — le diag
-    # sort avant la prise de verrou), c'est soit un run en cours (bénin), soit un run bloqué qui
-    # fait échouer chaque passage horaire. Test non bloquant en LECTURE seule ; muet si libre/absent.
-    if [ -e "$LOCK_FILE" ] && ! ( flock -n 9 ) 9<"$LOCK_FILE" 2>/dev/null; then
+    # Verrou anti-chevauchement. Le run cron.hourly tient le verrou EXCLUSIF pendant TOUT son passage ;
+    # s'il chevauche le résumé (cron.daily ~06:25) ou un --diag interactif, le test le verrait « tenu »
+    # sans anomalie réelle — faux positif (le motif du diag.lock_stuck vu sur le parc). On ne signale
+    # donc le verrou QUE si le moteur paraît AUSSI figé (RUN_STAMP_FILE périmé ci-dessus, engine_stale) :
+    # un vrai verrou zombie fait échouer chaque passage horaire au flock, donc plus aucun run ne se
+    # stampe => last_run vieillit. Stamp frais = simple chevauchement bénin => on reste muet. Test non
+    # bloquant en LECTURE seule ; le sous-shell relâche le fd 9 en sortant (ne laisse aucun verrou).
+    if [ "$engine_stale" = true ] && [ -e "$LOCK_FILE" ] && ! ( flock -n 9 ) 9<"$LOCK_FILE" 2>/dev/null; then
         diag_line warn "$(t diag.lock_stuck "$LOCK_FILE")"
     fi
     if diag_is_on "$DAILY_SUMMARY"; then
@@ -2700,7 +2727,7 @@ BEGIN {
     p = tolower($7)
 
     # --- S. Signature sécurité (tout statut) : +HONEYPOT_SCORE (ban immédiat) ---
-    if (security_re != "" && p ~ security_re) { count[$1] += hp; next }
+    if (security_re != "" && p ~ security_re) { count[$1] += hp; flag[$1]=1; next }
 
     # --- P. Flood POST (tout statut) : compté ici, seuil appliqué en END ---
     if (postflood_re != "" && $6 ~ /POST/ && p ~ postflood_re) { post[$1]++; next }
@@ -2712,15 +2739,17 @@ BEGIN {
 
     # --- B. Honeypots : +HONEYPOT_SCORE (ban quasi immédiat) ---
     if (p ~ honeypot_re) {
-        count[$1] += hp
+        count[$1] += hp; flag[$1]=1
     } else {
         count[$1]++
     }
 }
 END {
-    for (x in post) if (post[x] > pf_thr) count[x] += hp
-    for (ip in count) if (count[ip] > thr) print count[ip], ip
-}' | sort -k1,1rn -k2,2V)
+    for (x in post) if (post[x] > pf_thr) { count[x] += hp; flag[x]=1 }
+    # 3e champ = drapeau honeypot/sécurité/POST-flood : consommé par la boucle pour SAUTER le
+    # FCrDNS (un crawler légitime ne déclenche jamais ces motifs) — voir is_legit_crawler.
+    for (ip in count) if (count[ip] > thr) print count[ip], (flag[ip] ? 1 : 0), ip
+}' | sort -k1,1rn -k3,3V)
 
 if [ -z "$ips_data" ]; then
     [ "$VERBOSE" = true ] && t no_suspect
@@ -2734,11 +2763,20 @@ new_bans=()   # accumulés pour la notification (format : "ip|score|honeypot")
 [ "$VERBOSE" = true ] && t verbose.processing
 
 # 4. Boucle de traitement
-while read -r count ip; do
+while read -r count hpflag ip; do
     [ -z "$ip" ] && continue
 
-    crawler_domain=$(is_legit_crawler "$ip")
-    if [ $? -eq 0 ]; then
+    # FCrDNS (épargne des crawlers légitimes) réservé aux bans « volume 404 » : le lookup PTR
+    # (borné à PTR_TIMEOUT) est coûteux, et un vrai crawler n'atteint JAMAIS un honeypot, une
+    # signature sécurité ou un POST-flood (hpflag=1) — inutile de payer le lookup pour ces bans.
+    # Sur un ex-serveur botnet (des centaines d'IP sans PTR à 2 s chacune), ça fait passer un
+    # run de ~30 min à quelques secondes.
+    if [ "$hpflag" = 1 ]; then
+        crawler_domain=""; is_crawler=1
+    else
+        crawler_domain=$(is_legit_crawler "$ip"); is_crawler=$?
+    fi
+    if [ "$is_crawler" -eq 0 ]; then
         if [ "$DRY_RUN" = false ] && ipset test "$IPSET_NAME" "$ip" &>/dev/null; then
             t_log unban.crawler "$ip" "$crawler_domain" "$count"
             ipset del "$IPSET_NAME" "$ip"

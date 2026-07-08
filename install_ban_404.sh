@@ -39,11 +39,53 @@ T_DE[inst.need_root]="muss als root (sudo) ausgeführt werden."
 T_ES[inst.need_root]="debe ejecutarse como root (sudo)."
 T_IT[inst.need_root]="da eseguire come root (sudo)."
 
-T_EN[inst.pkg_install]="==> Installing required packages..."
-T_FR[inst.pkg_install]="==> Installation des paquets requis..."
-T_DE[inst.pkg_install]="==> Erforderliche Pakete werden installiert..."
-T_ES[inst.pkg_install]="==> Instalando los paquetes necesarios..."
-T_IT[inst.pkg_install]="==> Installazione dei pacchetti richiesti..."
+T_EN[inst.pkg_install]="==> Checking required packages..."
+T_FR[inst.pkg_install]="==> Vérification des paquets requis..."
+T_DE[inst.pkg_install]="==> Erforderliche Pakete werden geprüft..."
+T_ES[inst.pkg_install]="==> Verificando los paquetes necesarios..."
+T_IT[inst.pkg_install]="==> Verifica dei pacchetti richiesti..."
+
+T_EN[inst.incompatible]="unsupported system: this installer targets Debian/Ubuntu with apt (detected: %s). Aborting."
+T_FR[inst.incompatible]="système non pris en charge : cet installeur cible Debian/Ubuntu avec apt (détecté : %s). Arrêt."
+T_DE[inst.incompatible]="nicht unterstütztes System: dieser Installer ist für Debian/Ubuntu mit apt gedacht (erkannt: %s). Abbruch."
+T_ES[inst.incompatible]="sistema no compatible: este instalador es para Debian/Ubuntu con apt (detectado: %s). Cancelando."
+T_IT[inst.incompatible]="sistema non supportato: questo installer è per Debian/Ubuntu con apt (rilevato: %s). Interruzione."
+
+T_EN[inst.deps_missing]="   Missing required packages: %s"
+T_FR[inst.deps_missing]="   Paquets requis manquants : %s"
+T_DE[inst.deps_missing]="   Fehlende erforderliche Pakete: %s"
+T_ES[inst.deps_missing]="   Paquetes requeridos que faltan: %s"
+T_IT[inst.deps_missing]="   Pacchetti richiesti mancanti: %s"
+
+T_EN[inst.deps_prompt]="   Install them now? [y/N] "
+T_FR[inst.deps_prompt]="   Les installer maintenant ? [o/N] "
+T_DE[inst.deps_prompt]="   Jetzt installieren? [j/N] "
+T_ES[inst.deps_prompt]="   ¿Instalarlos ahora? [s/N] "
+T_IT[inst.deps_prompt]="   Installarli ora? [s/N] "
+
+T_EN[inst.deps_proceeding]="   Installing the missing packages..."
+T_FR[inst.deps_proceeding]="   Installation des paquets manquants..."
+T_DE[inst.deps_proceeding]="   Fehlende Pakete werden installiert..."
+T_ES[inst.deps_proceeding]="   Instalando los paquetes que faltan..."
+T_IT[inst.deps_proceeding]="   Installazione dei pacchetti mancanti..."
+
+T_EN[inst.deps_all_present]="   all required packages are already present."
+T_FR[inst.deps_all_present]="   tous les paquets requis sont déjà présents."
+T_DE[inst.deps_all_present]="   alle erforderlichen Pakete sind bereits vorhanden."
+T_ES[inst.deps_all_present]="   todos los paquetes necesarios ya están presentes."
+T_IT[inst.deps_all_present]="   tutti i pacchetti richiesti sono già presenti."
+
+T_EN[inst.deps_aborted]="aborted at your request: required packages not installed (nothing was changed)."
+T_FR[inst.deps_aborted]="arrêt à ta demande : paquets requis non installés (rien n'a été modifié)."
+T_DE[inst.deps_aborted]="auf deinen Wunsch abgebrochen: erforderliche Pakete nicht installiert (nichts wurde geändert)."
+T_ES[inst.deps_aborted]="cancelado a petición tuya: paquetes requeridos no instalados (no se cambió nada)."
+T_IT[inst.deps_aborted]="interrotto su tua richiesta: pacchetti richiesti non installati (nulla è stato modificato)."
+
+T_EN[inst.deps_noninteractive]="required packages missing but no TTY to confirm. Re-run with BAN404_ASSUME_YES=1 to allow, or install manually: %s"
+T_FR[inst.deps_noninteractive]="paquets requis manquants mais pas de TTY pour confirmer. Relance avec BAN404_ASSUME_YES=1 pour autoriser, ou installe-les à la main : %s"
+T_DE[inst.deps_noninteractive]="erforderliche Pakete fehlen, aber kein TTY zum Bestätigen. Mit BAN404_ASSUME_YES=1 erneut starten, um es zu erlauben, oder manuell installieren: %s"
+T_ES[inst.deps_noninteractive]="faltan paquetes requeridos pero no hay TTY para confirmar. Reejecuta con BAN404_ASSUME_YES=1 para permitirlo, o instálalos manualmente: %s"
+T_IT[inst.deps_noninteractive]="pacchetti richiesti mancanti ma nessun TTY per confermare. Riesegui con BAN404_ASSUME_YES=1 per consentirlo, oppure installali manualmente: %s"
 
 T_EN[inst.apt_update_warn]="   (apt-get update failed — continuing with the local cache)"
 T_FR[inst.apt_update_warn]="   (apt-get update en erreur — on poursuit avec le cache local)"
@@ -318,6 +360,16 @@ t() {
 die(){ printf -- '%s%s\n' "$(t inst.error_prefix)" "$*" >&2; exit 1; }
 [ "$(id -u)" -eq 0 ] || die "$(t inst.need_root)"
 
+# --- 0) Cadre compatible : famille Debian/Ubuntu + apt. Sinon message clair et ARRÊT : on
+#     n'installe rien à l'aveugle sur un système qu'on ne sait pas gérer (gestionnaire de paquets
+#     différent, pas d'iptables-persistent, etc.). Un /etc/os-release absent => non compatible.
+_osid=""; . /etc/os-release 2>/dev/null && _osid="${PRETTY_NAME:-${ID:-}}"
+case " ${ID:-} ${ID_LIKE:-} " in
+    *debian*|*ubuntu*) : ;;
+    *) die "$(t inst.incompatible "${_osid:-inconnu}")" ;;
+esac
+command -v apt-get >/dev/null 2>&1 || die "$(t inst.incompatible "${_osid:-apt absent}")"
+
 # --- ufw : sur les versions récentes (Debian 12+, Ubuntu récentes) ufw déclare
 # « Breaks: iptables-persistent, netfilter-persistent » ; installer iptables-persistent
 # le fait donc RETIRER par apt — silencieusement avec -y. On prévient AVANT et on
@@ -350,20 +402,48 @@ if dpkg-query -W -f='${Status}' ufw 2>/dev/null | grep -q 'ok installed'; then
 fi
 
 t inst.pkg_install
-export DEBIAN_FRONTEND=noninteractive
-echo "iptables-persistent iptables-persistent/autosave_v4 boolean true" | debconf-set-selections
-echo "iptables-persistent iptables-persistent/autosave_v6 boolean true" | debconf-set-selections
-apt-get update || t inst.apt_update_warn
-# curl : requis pour la récupération initiale du moteur via l'updater (l'install dépend du réseau).
-# anacron : sur Debian/Ubuntu, /etc/crontab délègue cron.daily à anacron ; sans lui, le cron.daily
-# de l'updater peut ne jamais se déclencher et le serveur fige ses versions (cf. --diag, pilote cron.daily).
-# bash-completion : fournit le chargement à la demande pour la complétion Tab de ban_404.sh (le fichier
-# lui-même est déposé par l'updater, appelé plus bas, dans /usr/share/bash-completion/completions/).
-install_pkgs(){ apt-get install -y ipset iptables-persistent ipset-persistent cron anacron curl bash-completion; }
-if ! install_pkgs; then
-    t inst.universe_try
-    command -v add-apt-repository >/dev/null 2>&1 && { add-apt-repository -y universe && apt-get update || true; }
-    install_pkgs || die "$(t inst.pkg_fail)"
+# 1) Lister les paquets REQUIS (moteur + updater) qui MANQUENT. awk (via mawk) : central au parsing,
+#    quasi toujours présent mais on vérifie. curl : récupération initiale du moteur par l'updater.
+#    anacron : /etc/crontab délègue cron.daily à anacron ; sans lui, le cron.daily de l'updater peut
+#    ne jamais partir et le serveur fige ses versions (cf. --diag, pilote cron.daily). bash-completion :
+#    chargement à la demande de la complétion Tab (le fichier est déposé par l'updater, plus bas).
+_req_pkgs="ipset iptables-persistent ipset-persistent cron anacron curl bash-completion"
+command -v awk >/dev/null 2>&1 || _req_pkgs="mawk $_req_pkgs"
+_missing=""
+for _p in $_req_pkgs; do
+    dpkg-query -W -f='${Status}' "$_p" 2>/dev/null | grep -q 'ok installed' || _missing="$_missing $_p"
+done
+_missing="${_missing# }"
+
+if [ -n "$_missing" ]; then
+    # 2) Lister + DEMANDER l'autorisation. 3) Refus => ARRÊT. Sans TTY : refus par défaut, sauf
+    #    override explicite BAN404_ASSUME_YES=1 (même logique que BAN404_REMOVE_UFW pour ufw).
+    t inst.deps_missing "$_missing"
+    if [ -t 0 ]; then
+        printf -- '%s' "$(t inst.deps_prompt)"
+        read -r _dep_ans || _dep_ans=""
+        case "$_dep_ans" in
+            [oOyYjJsS]*) t inst.deps_proceeding ;;
+            *) die "$(t inst.deps_aborted)" ;;
+        esac
+    elif [ "${BAN404_ASSUME_YES:-}" = "1" ]; then
+        t inst.deps_proceeding
+    else
+        die "$(t inst.deps_noninteractive "$_missing")"
+    fi
+
+    export DEBIAN_FRONTEND=noninteractive
+    echo "iptables-persistent iptables-persistent/autosave_v4 boolean true" | debconf-set-selections
+    echo "iptables-persistent iptables-persistent/autosave_v6 boolean true" | debconf-set-selections
+    apt-get update || t inst.apt_update_warn
+    install_pkgs(){ apt-get install -y $_missing; }
+    if ! install_pkgs; then
+        t inst.universe_try
+        command -v add-apt-repository >/dev/null 2>&1 && { add-apt-repository -y universe && apt-get update || true; }
+        install_pkgs || die "$(t inst.pkg_fail)"
+    fi
+else
+    t inst.deps_all_present
 fi
 
 systemctl enable --now netfilter-persistent >/dev/null 2>&1 || true

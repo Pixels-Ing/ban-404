@@ -87,6 +87,12 @@ T_DE[inst.deps_noninteractive]="erforderliche Pakete fehlen, aber kein TTY zum B
 T_ES[inst.deps_noninteractive]="faltan paquetes requeridos pero no hay TTY para confirmar. Reejecuta con BAN404_ASSUME_YES=1 para permitirlo, o instálalos manualmente: %s"
 T_IT[inst.deps_noninteractive]="pacchetti richiesti mancanti ma nessun TTY per confermare. Riesegui con BAN404_ASSUME_YES=1 per consentirlo, oppure installali manualmente: %s"
 
+T_EN[inst.postcheck_fail]="post-install check failed: required command '%s' is still missing. Broken package or stale mirror?"
+T_FR[inst.postcheck_fail]="contrôle post-installation échoué : la commande requise « %s » reste introuvable. Paquet cassé ou miroir périmé ?"
+T_DE[inst.postcheck_fail]="Post-Installations-Prüfung fehlgeschlagen: erforderlicher Befehl „%s“ fehlt weiterhin. Defektes Paket oder veralteter Spiegel?"
+T_ES[inst.postcheck_fail]="comprobación posinstalación fallida: el comando requerido « %s » sigue sin encontrarse. ¿Paquete dañado o réplica obsoleta?"
+T_IT[inst.postcheck_fail]="controllo post-installazione fallito: il comando richiesto « %s » è ancora assente. Pacchetto danneggiato o mirror obsoleto?"
+
 T_EN[inst.apt_update_warn]="   (apt-get update failed — continuing with the local cache)"
 T_FR[inst.apt_update_warn]="   (apt-get update en erreur — on poursuit avec le cache local)"
 T_DE[inst.apt_update_warn]="   (apt-get update fehlgeschlagen — Fortsetzung mit dem lokalen Cache)"
@@ -445,6 +451,13 @@ if [ -n "$_missing" ]; then
 else
     t inst.deps_all_present
 fi
+
+# Contrôle POST-INSTALL : ne pas se fier au seul rc d'apt. On vérifie que les binaires ESSENTIELS
+# sont réellement là — un paquet « installé » mais binaire absent (miroir cassé, paquet transitionnel
+# vide) casserait ban-404 en SILENCE au premier run cron. netfilter-persistent = persistance reboot.
+for _bin in ipset iptables curl awk netfilter-persistent; do
+    command -v "$_bin" >/dev/null 2>&1 || die "$(t inst.postcheck_fail "$_bin")"
+done
 
 systemctl enable --now netfilter-persistent >/dev/null 2>&1 || true
 mkdir -p /etc/iptables

@@ -2,7 +2,8 @@
 # check.sh — garde-fou (local / pre-commit / CI). À lancer depuis la racine du dépôt.
 #   1) bash -n sur les 3 scripts (+ check.sh)
 #   2) synchro du heredoc UPD_EOF de l'installeur avec update_ban_404.sh (zéro divergence)
-#   3) shellcheck si disponible (bloque uniquement sur les erreurs, sévérité < error tolérée)
+#   3) synchro du fichier VERSIONS avec les versions des scripts (lu par le diag en 1 requête)
+#   4) shellcheck si disponible (bloque uniquement sur les erreurs, sévérité < error tolérée)
 # Sortie != 0 au moindre échec.
 #
 # Pre-commit : créer .git/hooks/pre-commit contenant :  #!/bin/sh \n exec bash check.sh
@@ -36,6 +37,18 @@ if diff --strip-trailing-cr <(extract_updeof) update_ban_404.sh >/dev/null; then
 else
     echo "  KO  le heredoc UPD_EOF diverge de update_ban_404.sh :"
     diff --strip-trailing-cr <(extract_updeof) update_ban_404.sh
+    fail=1
+fi
+
+echo "== synchro VERSIONS <-> scripts =="
+v_eng=$(grep -m1 '^BAN404_VERSION='  ban_404.sh        | cut -d'"' -f2)
+v_upd=$(grep -m1 '^UPDATER_VERSION=' update_ban_404.sh | cut -d'"' -f2)
+f_eng=$(grep -m1 '^BAN404_VERSION='  VERSIONS 2>/dev/null | cut -d'"' -f2)
+f_upd=$(grep -m1 '^UPDATER_VERSION=' VERSIONS 2>/dev/null | cut -d'"' -f2)
+if [ -n "$v_eng" ] && [ "$v_eng" = "$f_eng" ] && [ -n "$v_upd" ] && [ "$v_upd" = "$f_upd" ]; then
+    echo "  OK  VERSIONS (moteur $v_eng, updater $v_upd)"
+else
+    echo "  KO  VERSIONS diverge des scripts : moteur '$f_eng' vs '$v_eng', updater '$f_upd' vs '$v_upd'"
     fail=1
 fi
 

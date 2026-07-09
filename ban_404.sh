@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="1.5.4"
+BAN404_VERSION="1.5.5"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -1949,7 +1949,7 @@ diag_is_on() { case "${1:-}" in true|1|yes|on) return 0 ;; *) return 1 ;; esac; 
 # DIAG_QUIET (accumulation dans DIAG_ISSUES sans impression). do_diag l'enrobe (en-tête + bilan).
 run_diag_checks() {
     local engine="/usr/local/sbin/ban_404.sh" updater="/usr/local/sbin/update_ban_404.sh"
-    local upd_ver="" repo_engine repo_upd up n chans
+    local upd_ver="" repo_versions repo_engine repo_upd up n chans
     local active inactive excluded unreadable log_dir vhost f now mt age_d age_h engine_stale
 
     # 1. Composants & versions (local)
@@ -1969,8 +1969,21 @@ run_diag_checks() {
     elif ! command -v curl >/dev/null 2>&1; then
         diag_line warn "$(t diag.repo_unreachable "$REPO_RAW")"
     else
-        repo_engine=$(curl -fsSL --max-time 15 "$REPO_RAW/ban_404.sh"        2>/dev/null | grep -m1 '^BAN404_VERSION='   | cut -d'"' -f2)
-        repo_upd=$(   curl -fsSL --max-time 15 "$REPO_RAW/update_ban_404.sh" 2>/dev/null | grep -m1 '^UPDATER_VERSION=' | cut -d'"' -f2)
+        # UNE seule requête : le fichier VERSIONS du dépôt porte les deux versions publiées
+        # (synchro avec les scripts garantie par check.sh). Évite de télécharger les deux
+        # scripts entiers, et surtout de contribuer au rate-limiting par IP (HTTP 429) de
+        # raw.githubusercontent.com — que --retry absorbe s'il se produit quand même (curl
+        # >= 7.66 traite le 429 comme transitoire). Repli sur les téléchargements complets
+        # historiques si VERSIONS manque (fork/miroir sans ce fichier).
+        repo_versions=$(curl -fsSL --retry 3 --retry-delay 2 --max-time 15 "$REPO_RAW/VERSIONS" 2>/dev/null)
+        repo_engine=$(printf '%s\n' "$repo_versions" | grep -m1 '^BAN404_VERSION='   | cut -d'"' -f2)
+        repo_upd=$(   printf '%s\n' "$repo_versions" | grep -m1 '^UPDATER_VERSION=' | cut -d'"' -f2)
+        if [ -z "$repo_engine" ]; then
+            repo_engine=$(curl -fsSL --max-time 15 "$REPO_RAW/ban_404.sh"        2>/dev/null | grep -m1 '^BAN404_VERSION='   | cut -d'"' -f2)
+        fi
+        if [ -z "$repo_upd" ]; then
+            repo_upd=$(   curl -fsSL --max-time 15 "$REPO_RAW/update_ban_404.sh" 2>/dev/null | grep -m1 '^UPDATER_VERSION=' | cut -d'"' -f2)
+        fi
         if [ -z "$repo_engine" ] && [ -z "$repo_upd" ]; then
             diag_line warn "$(t diag.repo_unreachable "$REPO_RAW")"
         else

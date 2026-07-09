@@ -6,7 +6,7 @@
 # à la conf si elle est absente (langue héritée du shell/système, sinon en).
 set -u
 
-UPDATER_VERSION="1.2.14"
+UPDATER_VERSION="1.2.15"
 CONF_FILE="/etc/ban_404.conf"
 TARGET="/usr/local/sbin/ban_404.sh"
 SELF="/usr/local/sbin/update_ban_404.sh"
@@ -391,11 +391,15 @@ fi
 
 # Télécharge $1 dans un fichier temporaire dont le chemin est émis sur stdout.
 # Retourne != 0 (et n'émet rien) en cas d'échec.
+# --retry : réessaie les erreurs transitoires, dont HTTP 429 (rate-limiting par IP de
+# raw.githubusercontent.com sous rafale de requêtes ; traité comme transitoire par curl >= 7.66).
+# Pas d'équivalent côté wget : --retry-on-http-error est inconnu des vieux wget (option fatale),
+# le repli reste donc inchangé.
 download(){
     local url="$1" tmp
     tmp=$(mktemp /tmp/ban_404.XXXXXX) || return 1
     if command -v curl >/dev/null 2>&1; then
-        curl -fsSL --max-time 30 "$url" -o "$tmp" || { rm -f "$tmp"; return 1; }
+        curl -fsSL --retry 3 --retry-delay 2 --max-time 30 "$url" -o "$tmp" || { rm -f "$tmp"; return 1; }
     elif command -v wget >/dev/null 2>&1; then
         wget -q -T 30 -O "$tmp" "$url" || { rm -f "$tmp"; return 1; }
     else

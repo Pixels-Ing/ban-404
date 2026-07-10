@@ -86,6 +86,13 @@ WHITELIST_IP="127.0.0.1"
 # --- Pattern di rilevamento (regex awk) — AVANZATO: sovrascrivere solo con cognizione di causa ---
 #HONEYPOT_PATTERN='\.env|wp-config\.php|phpmyadmin|config\.json|setup\.php|actuator|xmlrpc\.php'
 #NOISE_PATTERN='\.(jpg|jpeg|png|gif|webp|ico|css|js|svg|woff2?|map)$|apple-touch-icon|favicon|browserconfig\.xml|mstile|autodiscover\.xml|sitemap\.xml|robots\.txt|ads\.txt|\.well-known/(security\.txt|pki-validation)'
+# --- Monitoring/health-check host: a fixed endpoint (e.g. Uptime Kuma push /api/push/<token>) can 404 with no client fault — append it so its 404s never count as a flood; also whitelist the senders (WHITELIST_IP). ---
+# --- Hôte de monitoring/health-check : un endpoint fixe (ex. push Uptime Kuma /api/push/<token>) peut renvoyer 404 sans faute du client — l'ajouter pour que ses 404 ne comptent jamais ; whitelister aussi les émetteurs (WHITELIST_IP). ---
+# --- Monitoring-/Health-Check-Host: ein fester Endpunkt (z. B. Uptime-Kuma-Push /api/push/<token>) kann ohne Client-Fehler 404 liefern — anhängen, damit seine 404 nie zählen; zusätzlich die Absender per WHITELIST_IP absichern. ---
+# --- Host de monitorización/health-check: un endpoint fijo (p. ej. push de Uptime Kuma /api/push/<token>) puede dar 404 sin culpa del cliente — añadirlo para que sus 404 nunca cuenten; y whitelist de los emisores (WHITELIST_IP). ---
+# --- Host di monitoraggio/health-check: un endpoint fisso (es. push di Uptime Kuma /api/push/<token>) può dare 404 senza colpa del client — aggiungerlo perché i suoi 404 non contino mai; e whitelist dei mittenti (WHITELIST_IP). ---
+# The conf is sourced AFTER the default, so this appends to it:
+#NOISE_PATTERN="${NOISE_PATTERN}|^/api/push/"
 # SECURITY_PATTERN: tested on the request for ANY HTTP status (not only 404); match = immediate ban.
 # SECURITY_PATTERN : testé sur la requête QUEL QUE SOIT le statut HTTP (pas seulement 404) ; match = ban immédiat.
 # SECURITY_PATTERN: auf die Anfrage bei JEDEM HTTP-Status geprüft (nicht nur 404); Treffer = sofortige Sperre.

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="1.5.5"
+BAN404_VERSION="1.5.6"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -1944,6 +1944,25 @@ diag_line() {  # $1 = ok|warn|fail ; $2 = message déjà localisé
 }
 diag_is_on() { case "${1:-}" in true|1|yes|on) return 0 ;; *) return 1 ;; esac; }
 
+# Options réseau curl robustes (contrôle de version, MAJ). --retry seul NE réessaie PAS l'exit 7
+# « Couldn't connect » (ni timeout ni code HTTP) ; --retry-all-errors (curl >= 7.71) le couvre —
+# mais c'est une option FATALE sur curl plus ancien, donc ajoutée seulement si la version la
+# supporte (détection fail-safe : tout échec => on retombe sur --retry nu). Mémoïsé (un seul
+# `curl --version` par exécution). --max-time reste au site d'appel (spécifique).
+NET_OPTS=()
+NET_OPTS_DONE=false
+net_opts_init() {
+    [ "${NET_OPTS_DONE:-false}" = true ] && return 0
+    NET_OPTS_DONE=true
+    NET_OPTS=(--retry 3 --retry-delay 2 --connect-timeout 8)
+    local cv lo
+    cv=$(curl --version 2>/dev/null | awk 'NR==1{print $2}')
+    [ -n "$cv" ] || return 0
+    lo=$(printf '%s\n%s\n' "$cv" "7.71.0" | sort -V 2>/dev/null | head -n1)
+    [ "$lo" = "7.71.0" ] && NET_OPTS+=(--retry-all-errors)
+    return 0
+}
+
 # run_diag_checks : exécute les ~25 contrôles (appels diag_line), SANS en-tête ni bilan ni exit.
 # Extrait de do_diag pour être réutilisable par le résumé quotidien (build_stats_text) en mode
 # DIAG_QUIET (accumulation dans DIAG_ISSUES sans impression). do_diag l'enrobe (en-tête + bilan).
@@ -1972,10 +1991,13 @@ run_diag_checks() {
         # UNE seule requête : le fichier VERSIONS du dépôt porte les deux versions publiées
         # (synchro avec les scripts garantie par check.sh). Évite de télécharger les deux
         # scripts entiers, et surtout de contribuer au rate-limiting par IP (HTTP 429) de
-        # raw.githubusercontent.com — que --retry absorbe s'il se produit quand même (curl
-        # >= 7.66 traite le 429 comme transitoire). Repli sur les téléchargements complets
-        # historiques si VERSIONS manque (fork/miroir sans ce fichier).
-        repo_versions=$(curl -fsSL --retry 3 --retry-delay 2 --max-time 15 "$REPO_RAW/VERSIONS" 2>/dev/null)
+        # raw.githubusercontent.com. net_opts_init compose les options de robustesse : --retry
+        # absorbe le 429 (curl >= 7.66) mais PAS l'exit 7 « Couldn't connect » (blip d'egress) —
+        # --retry-all-errors (curl >= 7.71, si supporté) l'y ajoute ; --connect-timeout borne un
+        # connect qui traîne. Repli sur les téléchargements complets historiques si VERSIONS
+        # manque (fork/miroir sans ce fichier).
+        net_opts_init
+        repo_versions=$(curl -fsSL "${NET_OPTS[@]}" --max-time 15 "$REPO_RAW/VERSIONS" 2>/dev/null)
         repo_engine=$(printf '%s\n' "$repo_versions" | grep -m1 '^BAN404_VERSION='   | cut -d'"' -f2)
         repo_upd=$(   printf '%s\n' "$repo_versions" | grep -m1 '^UPDATER_VERSION=' | cut -d'"' -f2)
         if [ -z "$repo_engine" ]; then

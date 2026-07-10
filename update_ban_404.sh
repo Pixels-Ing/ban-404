@@ -6,7 +6,7 @@
 # à la conf si elle est absente (langue héritée du shell/système, sinon en).
 set -u
 
-UPDATER_VERSION="1.2.15"
+UPDATER_VERSION="1.2.16"
 CONF_FILE="/etc/ban_404.conf"
 TARGET="/usr/local/sbin/ban_404.sh"
 SELF="/usr/local/sbin/update_ban_404.sh"
@@ -389,17 +389,37 @@ if [ -f "$CONF_FILE" ]; then
 fi
 # >>> RECONCILE_BLOCK_END ---------------------------------------------------------------------
 
+# Options réseau curl robustes. --retry seul NE réessaie PAS l'exit 7 « Couldn't connect »
+# (ni timeout ni code HTTP) ; --retry-all-errors (curl >= 7.71) le couvre — mais c'est une
+# option FATALE sur curl plus ancien, donc ajoutée seulement si la version la supporte
+# (détection fail-safe : tout échec => on retombe sur --retry nu). Mémoïsé (un seul
+# `curl --version` par exécution). --max-time reste au site d'appel (spécifique).
+NET_OPTS=()
+NET_OPTS_DONE=false
+net_opts_init() {
+    [ "${NET_OPTS_DONE:-false}" = true ] && return 0
+    NET_OPTS_DONE=true
+    NET_OPTS=(--retry 3 --retry-delay 2 --connect-timeout 8)
+    local cv lo
+    cv=$(curl --version 2>/dev/null | awk 'NR==1{print $2}')
+    [ -n "$cv" ] || return 0
+    lo=$(printf '%s\n%s\n' "$cv" "7.71.0" | sort -V 2>/dev/null | head -n1)
+    [ "$lo" = "7.71.0" ] && NET_OPTS+=(--retry-all-errors)
+    return 0
+}
+
 # Télécharge $1 dans un fichier temporaire dont le chemin est émis sur stdout.
 # Retourne != 0 (et n'émet rien) en cas d'échec.
-# --retry : réessaie les erreurs transitoires, dont HTTP 429 (rate-limiting par IP de
-# raw.githubusercontent.com sous rafale de requêtes ; traité comme transitoire par curl >= 7.66).
-# Pas d'équivalent côté wget : --retry-on-http-error est inconnu des vieux wget (option fatale),
-# le repli reste donc inchangé.
+# --retry absorbe les erreurs transitoires (dont HTTP 429, curl >= 7.66) ; net_opts_init y
+# ajoute --retry-all-errors (couvre l'exit 7 « Couldn't connect ») quand curl le supporte, et
+# --connect-timeout. Pas d'équivalent côté wget : --retry-on-http-error est inconnu des vieux
+# wget (option fatale), le repli reste donc inchangé.
 download(){
     local url="$1" tmp
     tmp=$(mktemp /tmp/ban_404.XXXXXX) || return 1
     if command -v curl >/dev/null 2>&1; then
-        curl -fsSL --retry 3 --retry-delay 2 --max-time 30 "$url" -o "$tmp" || { rm -f "$tmp"; return 1; }
+        net_opts_init
+        curl -fsSL "${NET_OPTS[@]}" --max-time 30 "$url" -o "$tmp" || { rm -f "$tmp"; return 1; }
     elif command -v wget >/dev/null 2>&1; then
         wget -q -T 30 -O "$tmp" "$url" || { rm -f "$tmp"; return 1; }
     else

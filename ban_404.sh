@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="1.5.7"
+BAN404_VERSION="1.5.8"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -68,6 +68,20 @@ HEALTH_MEM_WARN=10    # [WARN] si MemAvailable < N % de MemTotal
 HEALTH_DISK_WARN=90   # [WARN] si espace OU inodes > N % (sur / et /var si partition distincte)
 HEALTH_MAILQ_WARN=50  # [WARN] si file postfix > N messages
 HEALTH_IO_WARN=25     # [WARN] si pression IO (PSI some avg60) > N %
+
+# Graduation des glyphes de tendance du bloc « Comptage ipset » (forme = intensité |%| sur la valeur,
+# couleur = direction : baisse=vert, hausse=rouge, plat=neutre). Constantes internes (non
+# auto-documentées dans la conf, mais surchargeables par une conf avancée car définies avant le
+# sourcing) ; promotion en réglages documentés = suivi trivial si besoin.
+TREND_FLAT_PCT=5        # |Δ 24 h| < N %  => glyphe horizontal (plat, neutre)
+TREND_STRONG_PCT=40     # |Δ 24 h| >= N % => glyphe vertical (fort)
+TREND_RECENT_WINDOW=10800  # fenêtre « tendance récente » (s) = 3 h (pente des dernières heures)
+TREND_RECENT_FLAT_PCT=1    # seuils plus serrés que 24 h (fenêtre courte => petits mouvements)
+TREND_RECENT_STRONG_PCT=8
+# Mode de rendu des glyphes colorés : 'plain' (défaut, texte nu) / 'ansi' (posé au terminal par
+# build_stats_text via [ -t 1 ]) / 'html' (réservé au lot 2, e-mail HTML). Le résumé sort en 'plain'
+# (redirection fichier => non-TTY) : aucun code couleur dans le mail/webhook.
+OUTPUT_MODE=plain
 
 # ============================================================================
 #  i18n — messages multilingues (en, fr, de, es, it). Le code/les commentaires
@@ -1774,6 +1788,53 @@ sparkline() {
     printf '%s' "$out"
 }
 
+# paint <glyphe> <up|down|flat> : colore le glyphe selon OUTPUT_MODE. baisse=vert, hausse=rouge,
+# plat=neutre. 'ansi' (terminal) seulement ; 'plain' (résumé/webhook) => glyphe nu, aucun code
+# couleur parasite dans le mail. Les codes ANSI ne contiennent aucun % (traversent printf '%s').
+paint() {
+    if [ "$OUTPUT_MODE" = ansi ]; then
+        case "$2" in
+            up)   printf '\033[31m%s\033[0m' "$1" ;;   # hausse => rouge
+            down) printf '\033[32m%s\033[0m' "$1" ;;   # baisse => vert
+            *)    printf '%s' "$1" ;;                    # plat => neutre
+        esac
+    else
+        printf '%s' "$1"
+    fi
+}
+
+# trend_glyph <cur> <base> <flat_pct> <strong_pct> : glyphe de tendance gradué + coloré, ou VIDE si
+# base absente/non exploitable. Forme = intensité (|cur-base|/base en %) : → plat (< flat_pct) / ↗↘
+# oblique (< strong_pct) / ↑↓ vertical (>=). Couleur (via paint) = direction. Réutilisé pour le solde
+# 24 h ET la tendance récente (seuils propres). base<=0 avec cur>0 => ↑ (apparition => forte hausse).
+trend_glyph() {
+    local cur=$1 base=$2 flat=$3 strong=$4 pct ap dir glyph
+    [ -z "$base" ] && return 0
+    if [ "$base" -le 0 ] 2>/dev/null; then
+        [ "$cur" -gt 0 ] 2>/dev/null && paint "↑" up
+        return 0
+    fi
+    pct=$(( (cur - base) * 100 / base )); ap=${pct#-}
+    if   [ "$cur" -gt "$base" ]; then dir=up
+    elif [ "$cur" -lt "$base" ]; then dir=down
+    else dir=flat; fi
+    if   [ "$ap" -lt "$flat" ];   then glyph="→"; dir=flat
+    elif [ "$ap" -lt "$strong" ]; then [ "$dir" = up ] && glyph="↗" || glyph="↘"
+    else                               [ "$dir" = up ] && glyph="↑" || glyph="↓"
+    fi
+    paint "$glyph" "$dir"
+}
+
+# Assemble le slot tendance affiché après le compte : « ␣␣<sparkline>␣<glyphe_récent> » (chaque partie
+# omise si vide ; slot vide => rien). Réutilisé par chaque set ET le total de build_ipset_counts.
+trend_slot() {
+    local slot=""
+    [ -n "$1" ] && slot="$1"
+    [ -n "$2" ] && slot="${slot:+$slot }$2"
+    [ -n "$slot" ] && slot="  $slot"
+    printf '%s' "$slot"
+}
+
 # Sous-bloc « Comptage ipset (évol. + tendance 24 h) » : pour CHAQUE ipset de la machine + un total,
 # le nb d'entrées COURANT (mesuré live), son évolution sur 24 h (+X/-Y) et une sparkline de tendance.
 # Historique horaire dans IPSET_COUNTS_FILE (posé par ipset_counts_sample, comme les métriques). La
@@ -1782,11 +1843,11 @@ sparkline() {
 # de delta trompeur ; total en clair seulement si toutes les listes ont une base. Vide (non-root /
 # aucune ipset) => bloc absent. Le set transitoire ${IPSET_NAME}_grow (redimensionnement) est écarté.
 build_ipset_counts() {
-    local sets now cut base_epoch name cur base delta deltastr span spark sparkstr
+    local sets now cut recent_cut base_epoch name cur base base_recent delta deltastr g24 grec span spark sparkbars sparkstr
     local tot_cur=0 tot_base=0 have_all_base=1
     sets=$(ipset list -n 2>/dev/null | grep -vxF "${IPSET_NAME}_grow")
     [ -z "$sets" ] && return 0
-    now=$(date +%s); cut=$((now - 86400)); base_epoch=""
+    now=$(date +%s); cut=$((now - 86400)); recent_cut=$((now - TREND_RECENT_WINDOW)); base_epoch=""
     [ -r "$IPSET_COUNTS_FILE" ] && base_epoch=$(awk -v cut="$cut" '$1 ~ /^[0-9]+$/ && ($1+0)>=cut {print $1; exit}' "$IPSET_COUNTS_FILE" 2>/dev/null)
     printf '\n── %s ──\n' "$(t stats.ipset_header)"
     while IFS= read -r name; do
@@ -1794,25 +1855,41 @@ build_ipset_counts() {
         cur=$(ipset_count_members "$name"); tot_cur=$((tot_cur + cur))
         base=""
         [ -n "$base_epoch" ] && base=$(awk -v e="$base_epoch" -v s="$name" '$1==e && $2==s {print $3; exit}' "$IPSET_COUNTS_FILE" 2>/dev/null)
+        # Base « récente » (~3 h) pour la tendance affichée après la sparkline : 1er échantillon du set dans la fenêtre courte.
+        base_recent=""
+        [ -r "$IPSET_COUNTS_FILE" ] && base_recent=$(awk -v cut="$recent_cut" -v s="$name" '$1 ~ /^[0-9]+$/ && ($1+0)>=cut && $2==s {print $3; exit}' "$IPSET_COUNTS_FILE" 2>/dev/null)
         if [ -n "$base" ]; then
-            delta=$((cur - base)); tot_base=$((tot_base + base)); deltastr=$(fmt_signed "$delta")
+            delta=$((cur - base)); tot_base=$((tot_base + base))
+            g24=$(trend_glyph "$cur" "$base" "$TREND_FLAT_PCT" "$TREND_STRONG_PCT")   # tendance solde 24 h
+            deltastr="${g24:+$g24 }$(fmt_signed "$delta")"                            # « ↘ -2222 » => rendu « (↘ -2222) »
         else
             deltastr=$(t stats.ipset_new); have_all_base=0
         fi
         # Tendance : counts historiques de ce set dans la fenêtre (ordre chronologique du fichier) + valeur live.
         spark=""
         [ -r "$IPSET_COUNTS_FILE" ] && spark=$(awk -v cut="$cut" -v s="$name" '$1 ~ /^[0-9]+$/ && ($1+0)>=cut && $2==s {printf "%s ", $3}' "$IPSET_COUNTS_FILE" 2>/dev/null)
-        sparkstr=$(sparkline "$spark$cur"); [ -n "$sparkstr" ] && sparkstr="  $sparkstr"
+        sparkbars=$(sparkline "$spark$cur")
+        grec=$(trend_glyph "$cur" "$base_recent" "$TREND_RECENT_FLAT_PCT" "$TREND_RECENT_STRONG_PCT")   # tendance récente (~3 h)
+        sparkstr=$(trend_slot "$sparkbars" "$grec")
         t stats.ipset_item "$name" "$cur" "$deltastr" "$sparkstr"
     done <<< "$sets"
     # Total : delta en clair seulement si toutes les listes avaient une base 24 h.
-    if [ "$have_all_base" -eq 1 ] && [ -n "$base_epoch" ]; then deltastr=$(fmt_signed $((tot_cur - tot_base))); else deltastr=$(t stats.ipset_new); fi
+    if [ "$have_all_base" -eq 1 ] && [ -n "$base_epoch" ]; then
+        g24=$(trend_glyph "$tot_cur" "$tot_base" "$TREND_FLAT_PCT" "$TREND_STRONG_PCT")
+        deltastr="${g24:+$g24 }$(fmt_signed $((tot_cur - tot_base)))"
+    else deltastr=$(t stats.ipset_new); fi
     # Tendance du total : somme par epoch (lignes d'un même échantillon contiguës → pas de tri) + total live.
     spark=""
     [ -r "$IPSET_COUNTS_FILE" ] && spark=$(awk -v cut="$cut" '
         $1 ~ /^[0-9]+$/ && ($1+0)>=cut { if ($1 != e) { if (e!="") printf "%s ", s; e=$1; s=0 } s+=$3 }
         END { if (e!="") printf "%s ", s }' "$IPSET_COUNTS_FILE" 2>/dev/null)
-    sparkstr=$(sparkline "$spark$tot_cur"); [ -n "$sparkstr" ] && sparkstr="  $sparkstr"
+    # Base récente du total : somme des comptes au 1er epoch de la fenêtre courte ($1==e => lignes de cet échantillon, contiguës).
+    base_recent=""
+    [ -r "$IPSET_COUNTS_FILE" ] && base_recent=$(awk -v cut="$recent_cut" '
+        $1 ~ /^[0-9]+$/ && ($1+0)>=cut { if (e=="") e=$1; if ($1==e) s+=$3 } END { if (e!="") print s }' "$IPSET_COUNTS_FILE" 2>/dev/null)
+    sparkbars=$(sparkline "$spark$tot_cur")
+    grec=$(trend_glyph "$tot_cur" "$base_recent" "$TREND_RECENT_FLAT_PCT" "$TREND_RECENT_STRONG_PCT")
+    sparkstr=$(trend_slot "$sparkbars" "$grec")
     t stats.ipset_total "$tot_cur" "$deltastr" "$sparkstr"
     # Note de fenêtre réelle si l'historique couvre < ~23 h (pas de fausse impression de 24 h pleines).
     if [ -n "$base_epoch" ]; then
@@ -1823,6 +1900,9 @@ build_ipset_counts() {
 }
 build_stats_text() {
     local banned bans unbans cutoff24 cnt ip rdns updater upd_ver issue div kind sc top_raw top404 tophp
+    # Couleur des glyphes de tendance : ANSI seulement si la sortie est un terminal ([ -t 1 ]). Le
+    # résumé passe par une redirection fichier (do_summary) => non-TTY => 'plain' (mail/webhook propres).
+    if [ -t 1 ]; then OUTPUT_MODE=ansi; else OUTPUT_MODE=plain; fi
     printf -v div '─%.0s' {1..30}        # filet sous le titre (largeur fixe)
     banned=$(ipset list "$IPSET_NAME" 2>/dev/null | awk '/^Members:/{m=1;next} m&&NF{c++} END{print c+0}')
     cutoff24=$(date -d '24 hours ago' '+%Y-%m-%d %H:%M:%S' 2>/dev/null)

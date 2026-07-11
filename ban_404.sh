@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="1.5.6"
+BAN404_VERSION="1.5.7"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -15,6 +15,7 @@ LOG_FILE="/var/log/ban_404.log"   # journal des événements (écrit par le mote
 UPDATE_STAMP_FILE="/var/lib/ban_404/last_update"   # repère « l'updater a tourné » (écrit par update_ban_404.sh)
 RUN_STAMP_FILE="/var/lib/ban_404/last_run"         # repère « le moteur a fini un run réel » (lu par --diag/--summary)
 METRICS_FILE="/var/lib/ban_404/metrics"            # historique horaire load/IO/réseau/mémoire (moyennes 24 h du résumé)
+IPSET_COUNTS_FILE="/var/lib/ban_404/ipset_counts"  # historique horaire du nb d'entrées par ipset (évol. + tendance 24 h du résumé)
 
 # Seuils & motifs de détection (surchargeables par la conf)
 BAN_THRESHOLD=10     # Ban si le score dépasse ce seuil dans la fenêtre.
@@ -1165,6 +1166,30 @@ T_DE[stats.avg24_insufficient]="24-h-Durchschnitte: unzureichende Daten (Fenster
 T_ES[stats.avg24_insufficient]="Promedios 24 h: datos insuficientes (ventana %s)"
 T_IT[stats.avg24_insufficient]="Medie 24 h: dati insufficienti (finestra %s)"
 
+T_EN[stats.ipset_header]="ipset counts (24h trend)"
+T_FR[stats.ipset_header]="Comptage ipset (évol. 24 h)"
+T_DE[stats.ipset_header]="ipset-Zählung (24-h-Trend)"
+T_ES[stats.ipset_header]="Recuento ipset (tendencia 24 h)"
+T_IT[stats.ipset_header]="Conteggio ipset (andamento 24 h)"
+
+T_EN[stats.ipset_item]="  %s: %s  (%s)%s"
+T_FR[stats.ipset_item]="  %s : %s  (%s)%s"
+T_DE[stats.ipset_item]="  %s: %s  (%s)%s"
+T_ES[stats.ipset_item]="  %s: %s  (%s)%s"
+T_IT[stats.ipset_item]="  %s: %s  (%s)%s"
+
+T_EN[stats.ipset_total]="  Total: %s  (%s)%s"
+T_FR[stats.ipset_total]="  Total : %s  (%s)%s"
+T_DE[stats.ipset_total]="  Gesamt: %s  (%s)%s"
+T_ES[stats.ipset_total]="  Total: %s  (%s)%s"
+T_IT[stats.ipset_total]="  Totale: %s  (%s)%s"
+
+T_EN[stats.ipset_new]="new"
+T_FR[stats.ipset_new]="nouveau"
+T_DE[stats.ipset_new]="neu"
+T_ES[stats.ipset_new]="nuevo"
+T_IT[stats.ipset_new]="nuovo"
+
 T_EN[stats.sec_stats]="Statistics (24h)"
 T_FR[stats.sec_stats]="Statistiques (24h)"
 T_DE[stats.sec_stats]="Statistiken (24h)"
@@ -1716,6 +1741,86 @@ build_metrics_averages() {
     [ "$span" -lt 82800 ] 2>/dev/null && printf '   %s\n' "$(t stats.avg24_window "$(metrics_fmt_span "$span")")"
     return 0
 }
+# Compte les entrées d'un ipset SANS dumper les membres : `ipset list -t` (terse = en-tête seul,
+# déjà utilisé pour lire maxelem) donne « Number of entries: N ». Crucial pour un set saturé
+# (des dizaines de milliers d'IP) relevé à chaque passage horaire. Repli sur l'idiome « Members: »
+# du projet si le terse ne fournit pas le champ (vieux ipset). Écho l'entier (0 par défaut).
+ipset_count_members() {
+    local c
+    c=$(ipset list -t "$1" 2>/dev/null | awk -F': ' '/^Number of entries:/{gsub(/[^0-9]/,"",$2); print $2; exit}')
+    [ -z "$c" ] && c=$(ipset list "$1" 2>/dev/null | awk '/^Members:/{m=1;next} m&&NF{c++} END{print c+0}')
+    printf '%s' "${c:-0}"
+}
+
+# Formate un delta signé : « +15 » si positif, sinon la valeur telle quelle (« -4 », « 0 »).
+fmt_signed() { if [ "$1" -gt 0 ] 2>/dev/null; then printf '+%s' "$1"; else printf '%s' "$1"; fi; }
+
+# Sparkline (tendance) d'une série d'entiers séparés par des espaces → ▁▂▃▄▅▆▇█. Pur Bash (aucune
+# dépendance awk multi-octets). Vide si < 2 points (rien à tracer) ; série plate → niveau médian.
+sparkline() {
+    local glyphs=(▁ ▂ ▃ ▄ ▅ ▆ ▇ █) out="" v mn mx range lvl
+    set -- $1
+    [ "$#" -lt 2 ] && return 0
+    mn=$1; mx=$1
+    for v in "$@"; do
+        [ "$v" -lt "$mn" ] 2>/dev/null && mn=$v
+        [ "$v" -gt "$mx" ] 2>/dev/null && mx=$v
+    done
+    range=$((mx - mn))
+    for v in "$@"; do
+        if [ "$range" -le 0 ]; then lvl=3; else lvl=$(( (v - mn) * 7 / range )); fi
+        out="$out${glyphs[$lvl]}"
+    done
+    printf '%s' "$out"
+}
+
+# Sous-bloc « Comptage ipset (évol. + tendance 24 h) » : pour CHAQUE ipset de la machine + un total,
+# le nb d'entrées COURANT (mesuré live), son évolution sur 24 h (+X/-Y) et une sparkline de tendance.
+# Historique horaire dans IPSET_COUNTS_FILE (posé par ipset_counts_sample, comme les métriques). La
+# base 24 h = plus ancien échantillon dans la fenêtre now-86400 (fichier chronologique → 1er epoch
+# >= cut, partagé par toutes les listes). Set neuf (absent de la base) => marqueur « nouveau », pas
+# de delta trompeur ; total en clair seulement si toutes les listes ont une base. Vide (non-root /
+# aucune ipset) => bloc absent. Le set transitoire ${IPSET_NAME}_grow (redimensionnement) est écarté.
+build_ipset_counts() {
+    local sets now cut base_epoch name cur base delta deltastr span spark sparkstr
+    local tot_cur=0 tot_base=0 have_all_base=1
+    sets=$(ipset list -n 2>/dev/null | grep -vxF "${IPSET_NAME}_grow")
+    [ -z "$sets" ] && return 0
+    now=$(date +%s); cut=$((now - 86400)); base_epoch=""
+    [ -r "$IPSET_COUNTS_FILE" ] && base_epoch=$(awk -v cut="$cut" '$1 ~ /^[0-9]+$/ && ($1+0)>=cut {print $1; exit}' "$IPSET_COUNTS_FILE" 2>/dev/null)
+    printf '\n── %s ──\n' "$(t stats.ipset_header)"
+    while IFS= read -r name; do
+        [ -n "$name" ] || continue
+        cur=$(ipset_count_members "$name"); tot_cur=$((tot_cur + cur))
+        base=""
+        [ -n "$base_epoch" ] && base=$(awk -v e="$base_epoch" -v s="$name" '$1==e && $2==s {print $3; exit}' "$IPSET_COUNTS_FILE" 2>/dev/null)
+        if [ -n "$base" ]; then
+            delta=$((cur - base)); tot_base=$((tot_base + base)); deltastr=$(fmt_signed "$delta")
+        else
+            deltastr=$(t stats.ipset_new); have_all_base=0
+        fi
+        # Tendance : counts historiques de ce set dans la fenêtre (ordre chronologique du fichier) + valeur live.
+        spark=""
+        [ -r "$IPSET_COUNTS_FILE" ] && spark=$(awk -v cut="$cut" -v s="$name" '$1 ~ /^[0-9]+$/ && ($1+0)>=cut && $2==s {printf "%s ", $3}' "$IPSET_COUNTS_FILE" 2>/dev/null)
+        sparkstr=$(sparkline "$spark$cur"); [ -n "$sparkstr" ] && sparkstr="  $sparkstr"
+        t stats.ipset_item "$name" "$cur" "$deltastr" "$sparkstr"
+    done <<< "$sets"
+    # Total : delta en clair seulement si toutes les listes avaient une base 24 h.
+    if [ "$have_all_base" -eq 1 ] && [ -n "$base_epoch" ]; then deltastr=$(fmt_signed $((tot_cur - tot_base))); else deltastr=$(t stats.ipset_new); fi
+    # Tendance du total : somme par epoch (lignes d'un même échantillon contiguës → pas de tri) + total live.
+    spark=""
+    [ -r "$IPSET_COUNTS_FILE" ] && spark=$(awk -v cut="$cut" '
+        $1 ~ /^[0-9]+$/ && ($1+0)>=cut { if ($1 != e) { if (e!="") printf "%s ", s; e=$1; s=0 } s+=$3 }
+        END { if (e!="") printf "%s ", s }' "$IPSET_COUNTS_FILE" 2>/dev/null)
+    sparkstr=$(sparkline "$spark$tot_cur"); [ -n "$sparkstr" ] && sparkstr="  $sparkstr"
+    t stats.ipset_total "$tot_cur" "$deltastr" "$sparkstr"
+    # Note de fenêtre réelle si l'historique couvre < ~23 h (pas de fausse impression de 24 h pleines).
+    if [ -n "$base_epoch" ]; then
+        span=$((now - base_epoch))
+        [ "$span" -lt 82800 ] 2>/dev/null && printf '   %s\n' "$(t stats.avg24_window "$(metrics_fmt_span "$span")")"
+    fi
+    return 0
+}
 build_stats_text() {
     local banned bans unbans cutoff24 cnt ip rdns updater upd_ver issue div kind sc top_raw top404 tophp
     printf -v div '─%.0s' {1..30}        # filet sous le titre (largeur fixe)
@@ -1758,6 +1863,8 @@ build_stats_text() {
     # --- Moyennes 24 h (opt-in --avg ; forcé dans le résumé via do_summary) : reflète l'activité
     # RÉELLE des dernières 24 h, là où les signes vitaux ci-dessus ne montrent que l'instant. ---
     [ "$SHOW_AVG24" = true ] && build_metrics_averages
+    # --- Comptage ipset (évol. + tendance 24 h) : toutes les listes + total, TOUJOURS affiché ---
+    build_ipset_counts
     # --- Statistiques (24h) ---
     printf '\n── %s ──\n' "$(t stats.sec_stats)"
     t stats.banned_now "$banned"
@@ -2592,6 +2699,31 @@ metrics_sample() {
     return 0
 }
 
+# --- Échantillon horaire du nb d'entrées par ipset (pour l'évol. + tendance 24 h du résumé) ----
+# Même style que metrics_sample : appelé depuis finish_run (garde DRY_RUN=false + root), AUCUN sleep
+# (on relève les compteurs bruts), écriture atomique mktemp + mv, purge-on-write des lignes < 48 h.
+# Une ligne = 3 colonnes « epoch setname count » ; toutes les listes d'un passage partagent l'epoch
+# (base 24 h commune). Énumère via `ipset list -n`, saute le set transitoire ${IPSET_NAME}_grow
+# (redimensionnement). Comptage sans dump via ipset_count_members (-t). Toujours return 0.
+ipset_counts_sample() {
+    local now dir tmp name count
+    now=$(date +%s)
+    dir=$(dirname "$IPSET_COUNTS_FILE"); mkdir -p "$dir" 2>/dev/null
+    tmp=$(mktemp "$dir/.ipsetcnt.XXXXXX" 2>/dev/null) || return 0
+    {
+        [ -f "$IPSET_COUNTS_FILE" ] && awk -v cut=$((now - 172800)) 'NF==3 && $1 ~ /^[0-9]+$/ && $1+0>=cut' "$IPSET_COUNTS_FILE" 2>/dev/null
+        while IFS= read -r name; do
+            [ -n "$name" ] || continue
+            [ "$name" = "${IPSET_NAME}_grow" ] && continue
+            count=$(ipset_count_members "$name")
+            printf '%s %s %s\n' "$now" "$name" "$count"
+        done < <(ipset list -n 2>/dev/null)
+    } > "$tmp" 2>/dev/null
+    chmod 644 "$tmp" 2>/dev/null
+    mv -f "$tmp" "$IPSET_COUNTS_FILE" 2>/dev/null || rm -f "$tmp" 2>/dev/null
+    return 0
+}
+
 # --- Fin de run commune : repère de fraîcheur + filet MAJ --------------------------------
 # Appelée sur TOUTES les fins de run réelles, y compris les sorties anticipées SAINES (aucun
 # log valide, aucun suspect dans la fenêtre) : un run « rien à faire » est un run COMPLET.
@@ -2606,6 +2738,7 @@ finish_run() {
         mkdir -p "$(dirname "$RUN_STAMP_FILE")" 2>/dev/null
         touch "$RUN_STAMP_FILE" 2>/dev/null
         metrics_sample                      # échantillon horaire (moyennes 24 h) ; même garde DRY_RUN+root
+        ipset_counts_sample                 # échantillon horaire du nb d'entrées par ipset (évol. + tendance 24 h)
     fi
     self_heal_update_trigger
     return 0

@@ -6,7 +6,7 @@
 # à la conf si elle est absente (langue héritée du shell/système, sinon en).
 set -u
 
-UPDATER_VERSION="1.2.16"
+UPDATER_VERSION="1.2.17"
 CONF_FILE="/etc/ban_404.conf"
 TARGET="/usr/local/sbin/ban_404.sh"
 SELF="/usr/local/sbin/update_ban_404.sh"
@@ -179,7 +179,14 @@ detect_lang() {
 
 log(){ printf '%s [update] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$LOG" 2>/dev/null; }
 
+# Sourcing sous set +u : une conf locale peut ÉTENDRE une variable du moteur que
+# l'updater ne prédéfinit pas (pattern d'append recommandé, ex.
+# NOISE_PATTERN="${NOISE_PATTERN}|^/api/push/" pour un serveur de monitoring) ; sous
+# set -u, ce ${NOISE_PATTERN} non défini serait un « unbound variable » FATAL qui tue
+# l'updater avant tout contrôle réseau — or il ne se sert d'aucun de ces réglages.
+set +u
 [ -f "$CONF_FILE" ] && . "$CONF_FILE"
+set -u
 
 # Résolution de la langue : conf > locale du shell > en. Puis validation.
 : "${BAN404_LANG:=$(detect_lang)}"

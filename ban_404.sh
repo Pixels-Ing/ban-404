@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="1.5.14"
+BAN404_VERSION="1.5.15"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -1651,20 +1651,9 @@ json_escape() {
     s="${s//\\/\\\\}"; s="${s//\"/\\\"}"; s="${s//$'\n'/\\n}"; s="${s//$'\t'/\\t}"
     printf '%s' "$s"
 }
-# Sentinelles du mode paint « html » : \001U…\002 (hausse) / \001D…\002 (baisse) autour des triangles.
-# On construit le corps du résumé UNE fois en mode html, puis on dérive le texte brut (webhook +
-# partie text/plain) par strip_sentinels, et le HTML coloré (partie text/html, aligné car dans <pre>)
-# par sentinel_to_html. Aucun caractère de contrôle \001/\002 n'existe dans le texte normal.
-strip_sentinels() {  # sentinelles -> texte brut (glyphe nu)
-    local s="$1"; s="${s//$'\001'U/}"; s="${s//$'\001'D/}"; s="${s//$'\002'/}"; printf '%s' "$s"
-}
-sentinel_to_html() {  # sentinelles -> fragment HTML : échappe &<>, injecte les spans colorés, enveloppe dans <pre>
-    local s="$1"
-    s="${s//&/&amp;}"; s="${s//</&lt;}"; s="${s//>/&gt;}"          # échappement AVANT l'injection des vrais tags
-    s="${s//$'\001'U/<span style=\"color:#cc3333\">}"             # hausse => rouge
-    s="${s//$'\001'D/<span style=\"color:#2e9e44\">}"             # baisse => vert
-    s="${s//$'\002'/</span>}"
-    printf '<!DOCTYPE html><html><body style="margin:0"><pre style="font-family:Menlo,Consolas,\047DejaVu Sans Mono\047,monospace;font-size:13px;line-height:1.35;white-space:pre;background:#ffffff;color:#1a1a1a;padding:8px">%s</pre></body></html>' "$s"
+# Échappe &<> pour insérer du texte dans du HTML (mail HTML du résumé). & en premier.
+html_escape() {
+    local s="$1"; s="${s//&/&amp;}"; s="${s//</&lt;}"; s="${s//>/&gt;}"; printf '%s' "$s"
 }
 # Construit le corps JSON du webhook selon le service (logique centralisée).
 build_webhook_payload() {  # $1 = texte brut -> imprime le JSON
@@ -1717,15 +1706,11 @@ server_label() {
     if [ -n "${SERVER_NICKNAME:-}" ]; then printf '%s [%s]' "$SERVER_NICKNAME" "$host"
     else printf '%s' "$host"; fi
 }
-notify() {  # $1 = sujet, $2 = corps texte, $3 = "mono" (optionnel), $4 = corps HTML (optionnel, mail)
-    # $3=mono => corps webhook enveloppé dans un bloc de code ``` : Slack/Discord/Google Chat le
-    # rendent alors en CHASSE FIXE, sinon la police proportionnelle casse l'alignement des tables
-    # (bloc ipset, moyennes 24 h...). $4 => e-mail HTML (<pre> monospace + triangles colorés) en
-    # multipart/alternative (repli texte brut). Le sujet reste hors du bloc (en-tête).
-    local wbody="$2"
-    [ "${3:-}" = mono ] && wbody='```'$'\n'"$2"$'\n''```'
-    send_webhook "$1"$'\n'"$wbody"
-    send_email "$1" "$2" "${4:-}"
+notify() {  # $1 = sujet, $2 = corps texte (webhook + text/plain mail), $3 = corps HTML (optionnel, mail)
+    # Webhook = texte brut SANS bloc de code (les tables du résumé sont rendues en PROSE pour le chat,
+    # donc pas besoin de chasse fixe). Mail = multipart texte + HTML (tableau) quand $3 est fourni.
+    send_webhook "$1"$'\n'"$2"
+    send_email "$1" "$2" "${3:-}"
 }
 maybe_notify_new_bans() {
     [ -z "$WEBHOOK_URL" ] && [ -z "$NOTIFY_EMAIL" ] && return 0
@@ -1848,22 +1833,16 @@ sparkline() {
 # paint <glyphe> <up|down|flat> : colore le glyphe selon OUTPUT_MODE. baisse=vert, hausse=rouge,
 # plat=neutre. 'ansi' (terminal) seulement ; 'plain' (résumé/webhook) => glyphe nu, aucun code
 # couleur parasite dans le mail. Les codes ANSI ne contiennent aucun % (traversent printf '%s').
-paint() {
-    case "$OUTPUT_MODE" in
-        ansi)                                           # terminal : couleur ANSI
-            case "$2" in
-                up)   printf '\033[31m%s\033[0m' "$1" ;;   # hausse => rouge
-                down) printf '\033[32m%s\033[0m' "$1" ;;   # baisse => vert
-                *)    printf '%s' "$1" ;;                    # plat => neutre
-            esac ;;
-        html)                                           # e-mail HTML : SENTINELLES (spans injectés après échappement)
-            case "$2" in
-                up)   printf '\001U%s\002' "$1" ;;
-                down) printf '\001D%s\002' "$1" ;;
-                *)    printf '%s' "$1" ;;
-            esac ;;
-        *) printf '%s' "$1" ;;                          # plain : glyphe nu
-    esac
+paint() {  # colore un glyphe au terminal (ANSI). Mail/chat n'utilisent PAS paint (tableau HTML / prose).
+    if [ "$OUTPUT_MODE" = ansi ]; then
+        case "$2" in
+            up)   printf '\033[31m%s\033[0m' "$1" ;;   # hausse => rouge
+            down) printf '\033[32m%s\033[0m' "$1" ;;   # baisse => vert
+            *)    printf '%s' "$1" ;;                    # plat => neutre
+        esac
+    else
+        printf '%s' "$1"
+    fi
 }
 
 # fmt_pct <pour-mille signé> : évolution en % à une décimale, virgule française (« -0,8 % », « +12,5 % »).
@@ -1910,6 +1889,47 @@ series_recent_pm() {
     printf '%s' "$(( (l - b) * 1000 / b ))"
 }
 
+# Représentations du bloc ipset POUR LES NOTIFICATIONS (dérivées des tableaux N/C/D/P/M de
+# build_ipset_counts — visibles ici par PORTÉE DYNAMIQUE bash, l'appelant est build_ipset_counts).
+# La sparkline (jolie au terminal, grossière en mail/chat) est OMISE. PROSE = chat (aucune chasse
+# fixe) + partie text/plain du mail ; HTML = tableau stylé pour la partie text/html du mail
+# (couleur : baisse=vert, hausse=rouge). Triangle 24 h en clair, pas de slot d'alignement.
+ipset_summary_prose() {
+    local i tri pr
+    IPSET_PROSE=$'── '"$(t stats.ipset_header)"' ──'
+    for ((i=0; i<${#N[@]}; i++)); do
+        if [ -n "${M[i]}" ]; then
+            tri=$(tri_slot "${M[i]}" "$TREND_FLAT_PCT" "$TREND_STRONG_PCT"); tri="${tri// /}"
+            pr="${D[i]} (${P[i]})${tri:+ $tri}"
+        else pr=$(t stats.ipset_new); fi
+        IPSET_PROSE+=$'\n'"• ${N[i]} : ${C[i]}  ·  $pr"
+    done
+    if [ -n "$base_epoch" ]; then local sp=$((now - base_epoch)); [ "$sp" -lt 82800 ] 2>/dev/null && IPSET_PROSE+=$'\n'"  $(t stats.avg24_window "$(metrics_fmt_span "$sp")")"; fi
+}
+ipset_summary_html() {
+    local i tri col vr nm rows="" hc hv
+    hc=$(t stats.ipset_hdr_count); hv=$(t stats.ipset_hdr_var)
+    for ((i=0; i<${#N[@]}; i++)); do
+        if [ -n "${M[i]}" ]; then
+            case "$(dir_of "${M[i]}" "$TREND_FLAT_PCT")" in
+                up)   col="color:#cc3333" ;;   # hausse => rouge
+                down) col="color:#2e9e44" ;;   # baisse => vert
+                *)    col="" ;;
+            esac
+            tri=$(tri_slot "${M[i]}" "$TREND_FLAT_PCT" "$TREND_STRONG_PCT"); tri="${tri// /}"
+            vr="${D[i]} (${P[i]})${tri:+ $tri}"
+        else col=""; vr=$(t stats.ipset_new); fi
+        nm=$(html_escape "${N[i]}")
+        rows+="<tr><td style=\"padding:3px 12px;border-bottom:1px solid #eee\">$nm</td><td style=\"padding:3px 12px;text-align:right;border-bottom:1px solid #eee\">${C[i]}</td><td style=\"padding:3px 12px;text-align:right;border-bottom:1px solid #eee;$col\">$(html_escape "$vr")</td></tr>"
+    done
+    IPSET_HTML="<div style=\"margin:12px 0 4px;font-weight:bold\">$(html_escape "$(t stats.ipset_header)")</div>"
+    IPSET_HTML+="<table style=\"border-collapse:collapse;font-family:sans-serif;font-size:13px;color:#1a1a1a\">"
+    IPSET_HTML+="<tr><th style=\"text-align:left;padding:3px 12px;border-bottom:2px solid #ccc\"></th>"
+    IPSET_HTML+="<th style=\"text-align:right;padding:3px 12px;border-bottom:2px solid #ccc\">$(html_escape "$hc")</th>"
+    IPSET_HTML+="<th style=\"text-align:right;padding:3px 12px;border-bottom:2px solid #ccc\">$(html_escape "$hv")</th></tr>$rows</table>"
+    if [ -n "$base_epoch" ]; then local sp=$((now - base_epoch)); [ "$sp" -lt 82800 ] 2>/dev/null && IPSET_HTML+="<div style=\"font-size:12px;color:#888;margin-top:3px\">$(html_escape "$(t stats.avg24_window "$(metrics_fmt_span "$sp")")")</div>"; fi
+}
+
 # Sous-bloc « Comptage ipset (évol. + tendance 24 h) » : pour CHAQUE ipset de la machine + un total,
 # le nb d'entrées COURANT (mesuré live), son évolution sur 24 h (+X/-Y) et une sparkline de tendance.
 # Historique horaire dans IPSET_COUNTS_FILE (posé par ipset_counts_sample, comme les métriques). La
@@ -1948,6 +1968,13 @@ build_ipset_counts() {
         pm=$(( (tot_cur - tot_base) * 1000 / tot_base ))
         D+=("$(fmt_signed $((tot_cur - tot_base)))"); P+=("$(fmt_pct "$pm")"); M+=("$pm")
     else D+=("$(t stats.ipset_new)"); P+=(""); M+=(""); fi
+    # ---- Mode NOTIFICATION : on ne rend pas le tableau texte ; on produit prose + HTML (via les
+    #      tableaux ci-dessus) et on n'imprime qu'un JETON, remplacé par do_summary selon le canal. ----
+    if [ "${SUMMARY_NOTIFY:-}" = 1 ]; then
+        ipset_summary_prose; ipset_summary_html
+        printf '\001IPSETBLOCK\002\n'
+        return 0
+    fi
     # ---- Largeurs de colonnes (nom/compte/delta/% = ASCII => ${#} fiable) ----
     for ((i=0; i<${#N[@]}; i++)); do
         [ "${#N[i]}" -gt "$wN" ] && wN=${#N[i]}; [ "${#C[i]}" -gt "$wC" ] && wC=${#C[i]}
@@ -1981,11 +2008,9 @@ build_ipset_counts() {
 }
 build_stats_text() {
     local bans unbans cutoff24 cnt ip rdns updater upd_ver issue div kind sc top_raw top404 tophp
-    # Mode de rendu des triangles : FORCE_OUTPUT_MODE l'emporte (do_summary pose 'html' pour dériver le
-    # mail HTML) ; sinon ANSI au terminal ([ -t 1 ]) et 'plain' pour une redirection (résumé webhook/
-    # partie text/plain) => aucun code parasite.
-    if [ -n "${FORCE_OUTPUT_MODE:-}" ]; then OUTPUT_MODE=$FORCE_OUTPUT_MODE
-    elif [ -t 1 ]; then OUTPUT_MODE=ansi; else OUTPUT_MODE=plain; fi
+    # Couleur ANSI des triangles seulement au terminal ([ -t 1 ]) ; sinon 'plain'. Le résumé notifié
+    # ne colore pas via le terminal : le mail a son propre HTML coloré, le chat sort en prose neutre.
+    if [ -t 1 ]; then OUTPUT_MODE=ansi; else OUTPUT_MODE=plain; fi
     printf -v div '─%.0s' {1..30}        # filet sous le titre (largeur fixe)
     cutoff24=$(date -d '24 hours ago' '+%Y-%m-%d %H:%M:%S' 2>/dev/null)
     bans=0; unbans=0
@@ -2116,7 +2141,7 @@ do_list() {
 do_summary() {
     case "$DAILY_SUMMARY" in true|1|yes|on) ;; *) exit 0 ;; esac
     [ -z "$WEBHOOK_URL" ] && [ -z "$NOTIFY_EMAIL" ] && exit 0
-    local host tmp body body_plain body_html subj; host=$(server_label)
+    local host tmp body body_plain body_html subj tok before after; host=$(server_label)
     # Résumé DESTINÉ À L'ENVOI : on neutralise --verbose afin que le détail par dossier
     # (lignes verbose de run_diag_checks, rejoué par build_stats_text) ne soit PAS injecté dans
     # le corps notifié. L'affichage direct de --stats (sans cette neutralisation) le conserve.
@@ -2129,22 +2154,32 @@ do_summary() {
     # perdrait dans son sous-shell). On peut ainsi FLAGGER le sujet — mail ET webhook, ce dernier
     # recevant « sujet\ncorps » (cf. notify) — quand le résumé contient au moins un [WARN]/[FAIL].
     DIAG_PROBLEMS=0
-    FORCE_OUTPUT_MODE=html            # paint pose des sentinelles => on dérive texte brut + HTML d'UN seul run
+    SUMMARY_NOTIFY=1; IPSET_PROSE=""; IPSET_HTML=""   # build_ipset_counts => jeton + IPSET_PROSE/IPSET_HTML
     tmp=$(mktemp 2>/dev/null) || tmp=""
     if [ -n "$tmp" ]; then
         build_stats_text > "$tmp"; body=$(cat "$tmp"); rm -f "$tmp"
     else
-        body=$(build_stats_text)          # repli : sous-shell => sujet non flaggé (dégradation propre)
+        body=$(build_stats_text)          # repli : sous-shell => sujet non flaggé ET IPSET_PROSE/HTML perdus (dégradation propre)
     fi
-    FORCE_OUTPUT_MODE=
-    body_plain=$(strip_sentinels "$body")     # webhook (bloc de code) + partie text/plain du mail
-    body_html=$(sentinel_to_html "$body")     # partie text/html du mail : <pre> monospace + triangles colorés
+    SUMMARY_NOTIFY=
+    tok=$'\001IPSETBLOCK\002'
+    if [ -n "$IPSET_PROSE" ] && [[ "$body" == *"$tok"* ]]; then
+        body_plain="${body/$tok/$IPSET_PROSE}"                     # chat + partie text/plain : bloc ipset en PROSE (pas de chasse fixe)
+        before="${body%%"$tok"*}"; after="${body#*"$tok"}"        # partie text/html : <pre> autour + TABLEAU HTML au milieu
+        body_html="<!DOCTYPE html><html><body style=\"font-family:sans-serif;font-size:13px;color:#1a1a1a;margin:8px\">"
+        body_html+="<pre style=\"font-family:Menlo,Consolas,monospace;white-space:pre-wrap;margin:0\">$(html_escape "$before")</pre>"
+        body_html+="$IPSET_HTML"
+        body_html+="<pre style=\"font-family:Menlo,Consolas,monospace;white-space:pre-wrap;margin:0\">$(html_escape "$after")</pre></body></html>"
+    else
+        body_plain="${body//$tok/}"                               # repli : jeton retiré (bloc ipset absent, dégradation propre)
+        body_html="<!DOCTYPE html><html><body style=\"margin:8px\"><pre style=\"font-family:Menlo,Consolas,monospace;white-space:pre-wrap;margin:0\">$(html_escape "$body_plain")</pre></body></html>"
+    fi
     if [ "${DIAG_PROBLEMS:-0}" -gt 0 ]; then
         subj=$(t summary.subject_warn "$host" "$DIAG_PROBLEMS")
     else
         subj=$(t summary.subject "$host")
     fi
-    notify "$subj" "$body_plain" mono "$body_html"   # chat = bloc de code (chasse fixe) ; mail = HTML aligné + couleur
+    notify "$subj" "$body_plain" "$body_html"   # chat = prose (pas de chasse fixe) ; mail = multipart texte + tableau HTML
     exit 0
 }
 

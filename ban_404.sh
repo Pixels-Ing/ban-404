@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="1.5.11"
+BAN404_VERSION="1.5.12"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -1876,7 +1876,7 @@ series_recent_pm() {
 # de delta trompeur ; total en clair seulement si toutes les listes ont une base. Vide (non-root /
 # aucune ipset) => bloc absent. Le set transitoire ${IPSET_NAME}_grow (redimensionnement) est écarté.
 build_ipset_counts() {
-    local sets now cut base_epoch name cur base series pm i wN=0 wC=0 wD=0 wP=0 wV vplain vpad numf trec dir span hc hv he
+    local sets now cut base_epoch name cur base series pm i wN=0 wC=0 wD=0 wP=0 wV vplain vpad psp numf trec dir span hc hv he
     local tot_cur=0 tot_base=0 have_all_base=1
     local -a N=() C=() D=() P=() M=() R=() S=()   # colonnes : nom, compte, delta, %, pm 24h, pm récent, sparkline
     sets=$(ipset list -n 2>/dev/null | grep -vxF "${IPSET_NAME}_grow")
@@ -1913,7 +1913,7 @@ build_ipset_counts() {
     done
     hc=$(t stats.ipset_hdr_count); hv=$(t stats.ipset_hdr_var); he=$(t stats.ipset_hdr_evo)
     [ "${#hc}" -gt "$wC" ] && wC=${#hc}                 # la colonne compte doit contenir son en-tête
-    wV=$(( wD + 1 + wP + 1 + 2 ))                       # largeur visuelle de « delta ␣ % ␣ tri24 »
+    wV=$(( wD + wP + 6 ))                               # largeur visuelle de « delta (%) tri24 » (delta ␣( pct )␣pad␣ tri)
     [ "${#hv}" -gt "$wV" ] && wV=${#hv}
     # ---- Rendu : en-tête de colonnes, puis une ligne par liste avec une LIGNE VIDE entre chaque
     #      graphe (évite la fusion verticale des sparklines). Triangle 24 h COLLÉ à la variation. ----
@@ -1921,11 +1921,12 @@ build_ipset_counts() {
     printf '  %-*s  %*s   %-*s  %s\n' "$wN" "" "$wC" "$hc" "$wV" "$hv" "$he"
     for ((i=0; i<${#N[@]}; i++)); do
         [ "$i" -gt 0 ] && printf '\n'
-        if [ -n "${M[i]}" ]; then                       # variation 24 h : « delta  %  tri24 » colorée, paddée à wV
+        if [ -n "${M[i]}" ]; then                       # variation 24 h : « delta (%) tri24 » colorée, paddée à wV
             dir=$(dir_of "${M[i]}" "$TREND_FLAT_PCT")
-            vplain="$(printf '%*s %*s ' "$wD" "${D[i]}" "$wP" "${P[i]}")$(tri_slot "${M[i]}" "$TREND_FLAT_PCT" "$TREND_STRONG_PCT")"
+            psp=""; [ "$(( wP - ${#P[i]} ))" -gt 0 ] && psp=$(printf '%*s' "$(( wP - ${#P[i]} ))" "")   # aligne le tri24 (le % entre () colle au nombre)
+            vplain="$(printf '%*s' "$wD" "${D[i]}") (${P[i]})$psp $(tri_slot "${M[i]}" "$TREND_FLAT_PCT" "$TREND_STRONG_PCT")"
             numf=$(paint "$vplain" "$dir")
-            vpad=$(( wV - (wD + 1 + wP + 1 + 2) )); [ "$vpad" -gt 0 ] && numf="$numf$(printf '%*s' "$vpad" "")"
+            vpad=$(( wV - (wD + wP + 6) )); [ "$vpad" -gt 0 ] && numf="$numf$(printf '%*s' "$vpad" "")"
         else numf=$(printf '%-*s' "$wV" "${D[i]}"); fi   # « nouveau », neutre
         if [ -n "${R[i]}" ]; then trec=$(paint "$(tri_slot "${R[i]}" "$TREND_RECENT_FLAT_PCT" "$TREND_RECENT_STRONG_PCT")" "$(dir_of "${R[i]}" "$TREND_RECENT_FLAT_PCT")"); else trec='  '; fi
         printf '  %-*s  %*s   %s  %s %s\n' "$wN" "${N[i]}" "$wC" "${C[i]}" "$numf" "${S[i]}" "$trec"

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="1.5.15"
+BAN404_VERSION="1.5.16"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -1651,9 +1651,17 @@ json_escape() {
     s="${s//\\/\\\\}"; s="${s//\"/\\\"}"; s="${s//$'\n'/\\n}"; s="${s//$'\t'/\\t}"
     printf '%s' "$s"
 }
-# Échappe &<> pour insérer du texte dans du HTML (mail HTML du résumé). & en premier.
+# Échappe &<> pour insérer du texte dans du HTML (mail HTML du résumé). Via sed : la substitution
+# bash ${var//x/&...} traite le & comme le texte CAPTURÉ depuis bash 5.2 (≠ 5.1) => non portable ;
+# sed a un comportement constant (& = capture, \& = & littéral) sur toutes les versions.
 html_escape() {
-    local s="$1"; s="${s//&/&amp;}"; s="${s//</&lt;}"; s="${s//>/&gt;}"; printf '%s' "$s"
+    printf '%s' "$1" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g'
+}
+# Texte brut -> HTML PROPORTIONNEL (pas de <pre>) : échappe &<> puis \n -> <br>. Les alignements par
+# espaces multiples sont perdus (police proportionnelle assumée), mais les sections du résumé hors
+# bloc ipset sont du label:valeur / des listes -> se lisent bien ainsi.
+html_text() {
+    local s; s=$(html_escape "$1"); s="${s//$'\n'/<br>}"; printf '%s' "$s"
 }
 # Construit le corps JSON du webhook selon le service (logique centralisée).
 build_webhook_payload() {  # $1 = texte brut -> imprime le JSON
@@ -1896,7 +1904,7 @@ series_recent_pm() {
 # (couleur : baisse=vert, hausse=rouge). Triangle 24 h en clair, pas de slot d'alignement.
 ipset_summary_prose() {
     local i tri pr
-    IPSET_PROSE=$'── '"$(t stats.ipset_header)"' ──'
+    IPSET_PROSE=$'\n── '"$(t stats.ipset_header)"' ──'   # \n initial => ligne vide avant le titre (comme les autres sections)
     for ((i=0; i<${#N[@]}; i++)); do
         if [ -n "${M[i]}" ]; then
             tri=$(tri_slot "${M[i]}" "$TREND_FLAT_PCT" "$TREND_STRONG_PCT"); tri="${tri// /}"
@@ -2165,14 +2173,14 @@ do_summary() {
     tok=$'\001IPSETBLOCK\002'
     if [ -n "$IPSET_PROSE" ] && [[ "$body" == *"$tok"* ]]; then
         body_plain="${body/$tok/$IPSET_PROSE}"                     # chat + partie text/plain : bloc ipset en PROSE (pas de chasse fixe)
-        before="${body%%"$tok"*}"; after="${body#*"$tok"}"        # partie text/html : <pre> autour + TABLEAU HTML au milieu
+        before="${body%%"$tok"*}"; after="${body#*"$tok"}"        # partie text/html : sections proportionnelles + TABLEAU au milieu
         body_html="<!DOCTYPE html><html><body style=\"font-family:sans-serif;font-size:13px;color:#1a1a1a;margin:8px\">"
-        body_html+="<pre style=\"font-family:Menlo,Consolas,monospace;white-space:pre-wrap;margin:0\">$(html_escape "$before")</pre>"
+        body_html+="<div>$(html_text "$before")</div>"
         body_html+="$IPSET_HTML"
-        body_html+="<pre style=\"font-family:Menlo,Consolas,monospace;white-space:pre-wrap;margin:0\">$(html_escape "$after")</pre></body></html>"
+        body_html+="<div>$(html_text "$after")</div></body></html>"
     else
         body_plain="${body//$tok/}"                               # repli : jeton retiré (bloc ipset absent, dégradation propre)
-        body_html="<!DOCTYPE html><html><body style=\"margin:8px\"><pre style=\"font-family:Menlo,Consolas,monospace;white-space:pre-wrap;margin:0\">$(html_escape "$body_plain")</pre></body></html>"
+        body_html="<!DOCTYPE html><html><body style=\"font-family:sans-serif;font-size:13px;color:#1a1a1a;margin:8px\"><div>$(html_text "$body_plain")</div></body></html>"
     fi
     if [ "${DIAG_PROBLEMS:-0}" -gt 0 ]; then
         subj=$(t summary.subject_warn "$host" "$DIAG_PROBLEMS")

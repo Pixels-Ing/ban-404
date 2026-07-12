@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="1.5.12"
+BAN404_VERSION="1.5.13"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -1687,8 +1687,14 @@ server_label() {
     if [ -n "${SERVER_NICKNAME:-}" ]; then printf '%s [%s]' "$SERVER_NICKNAME" "$host"
     else printf '%s' "$host"; fi
 }
-notify() {  # $1 = sujet, $2 = corps
-    send_webhook "$1"$'\n'"$2"
+notify() {  # $1 = sujet, $2 = corps, $3 = "mono" (optionnel)
+    # $3=mono => corps webhook enveloppé dans un bloc de code ``` : Slack/Discord/Google Chat le
+    # rendent alors en CHASSE FIXE, sinon la police proportionnelle casse l'alignement des tables
+    # (bloc ipset, moyennes 24 h...). Le mail garde le texte brut (les ``` littéraux y seraient laids ;
+    # l'alignement mail garanti = e-mail HTML, cf. lot différé). Le sujet reste hors du bloc (en-tête).
+    local wbody="$2"
+    [ "${3:-}" = mono ] && wbody='```'$'\n'"$2"$'\n''```'
+    send_webhook "$1"$'\n'"$wbody"
     send_email "$1" "$2"
 }
 maybe_notify_new_bans() {
@@ -1876,7 +1882,7 @@ series_recent_pm() {
 # de delta trompeur ; total en clair seulement si toutes les listes ont une base. Vide (non-root /
 # aucune ipset) => bloc absent. Le set transitoire ${IPSET_NAME}_grow (redimensionnement) est écarté.
 build_ipset_counts() {
-    local sets now cut base_epoch name cur base series pm i wN=0 wC=0 wD=0 wP=0 wV vplain vpad psp numf trec dir span hc hv he
+    local sets now cut base_epoch name cur base series pm i wN=0 wC=0 wD=0 wP=0 wV vplain vpad numf trec dir span hc hv he
     local tot_cur=0 tot_base=0 have_all_base=1
     local -a N=() C=() D=() P=() M=() R=() S=()   # colonnes : nom, compte, delta, %, pm 24h, pm récent, sparkline
     sets=$(ipset list -n 2>/dev/null | grep -vxF "${IPSET_NAME}_grow")
@@ -1923,8 +1929,7 @@ build_ipset_counts() {
         [ "$i" -gt 0 ] && printf '\n'
         if [ -n "${M[i]}" ]; then                       # variation 24 h : « delta (%) tri24 » colorée, paddée à wV
             dir=$(dir_of "${M[i]}" "$TREND_FLAT_PCT")
-            psp=""; [ "$(( wP - ${#P[i]} ))" -gt 0 ] && psp=$(printf '%*s' "$(( wP - ${#P[i]} ))" "")   # aligne le tri24 (le % entre () colle au nombre)
-            vplain="$(printf '%*s' "$wD" "${D[i]}") (${P[i]})$psp $(tri_slot "${M[i]}" "$TREND_FLAT_PCT" "$TREND_STRONG_PCT")"
+            vplain="$(printf '%*s (%*s) ' "$wD" "${D[i]}" "$wP" "${P[i]}")$(tri_slot "${M[i]}" "$TREND_FLAT_PCT" "$TREND_STRONG_PCT")"   # delta + (% aligné à droite) + tri24
             numf=$(paint "$vplain" "$dir")
             vpad=$(( wV - (wD + wP + 6) )); [ "$vpad" -gt 0 ] && numf="$numf$(printf '%*s' "$vpad" "")"
         else numf=$(printf '%-*s' "$wV" "${D[i]}"); fi   # « nouveau », neutre
@@ -2097,7 +2102,7 @@ do_summary() {
     else
         subj=$(t summary.subject "$host")
     fi
-    notify "$subj" "$body"
+    notify "$subj" "$body" mono   # corps riche (tables alignées) => bloc de code en chat pour la chasse fixe
     exit 0
 }
 

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="1.5.10"
+BAN404_VERSION="1.5.11"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -1193,6 +1193,24 @@ T_DE[stats.ipset_total_label]="Gesamt"
 T_ES[stats.ipset_total_label]="Total"
 T_IT[stats.ipset_total_label]="Totale"
 
+T_EN[stats.ipset_hdr_count]="Entries"
+T_FR[stats.ipset_hdr_count]="Entrées"
+T_DE[stats.ipset_hdr_count]="Einträge"
+T_ES[stats.ipset_hdr_count]="Entradas"
+T_IT[stats.ipset_hdr_count]="Voci"
+
+T_EN[stats.ipset_hdr_var]="24h change"
+T_FR[stats.ipset_hdr_var]="Variation 24 h"
+T_DE[stats.ipset_hdr_var]="Änderung 24 h"
+T_ES[stats.ipset_hdr_var]="Variación 24 h"
+T_IT[stats.ipset_hdr_var]="Variazione 24 h"
+
+T_EN[stats.ipset_hdr_evo]="Trend 8h"
+T_FR[stats.ipset_hdr_evo]="Évolution 8 h"
+T_DE[stats.ipset_hdr_evo]="Verlauf 8 h"
+T_ES[stats.ipset_hdr_evo]="Evolución 8 h"
+T_IT[stats.ipset_hdr_evo]="Andamento 8 h"
+
 T_EN[stats.ipset_new]="new"
 T_FR[stats.ipset_new]="nouveau"
 T_DE[stats.ipset_new]="neu"
@@ -1776,13 +1794,10 @@ sparkline() {
     # Largeur FIXE = TREND_SPARK_MAX (graphe COURT : sous-échantillonnage régulier au-delà, padding
     # gauche en deçà => bord droit / récent aligné). < 2 points => colonne de largeur max en espaces.
     # La fusion verticale entre lignes est évitée par un saut de ligne au rendu (pas par un plafond de hauteur).
-    local glyphs=(▁ ▂ ▃ ▄ ▅ ▆ ▇ █) out="" v mn mx range lvl n i idx max=${TREND_SPARK_MAX:-8} pad
+    local glyphs=(▁ ▂ ▃ ▄ ▅ ▆ ▇ █) out="" v mn mx range lvl n max=${TREND_SPARK_MAX:-8} pad
     set -- $1; n=$#
     if [ "$n" -lt 2 ]; then printf '%*s' "$max" ""; return 0; fi
-    if [ "$n" -gt "$max" ]; then                       # sous-échantillonne (garde 1er et dernier)
-        local kept=(); for ((i=0;i<max;i++)); do idx=$(( i*(n-1)/(max-1) + 1 )); kept+=("${!idx}"); done
-        set -- "${kept[@]}"; n=$max
-    fi
+    [ "$n" -gt "$max" ] && { shift "$(( n - max ))"; n=$max; }   # garde les max DERNIERS points (fenêtre récente)
     mn=$1; mx=$1
     for v in "$@"; do [ "$v" -lt "$mn" ] 2>/dev/null && mn=$v; [ "$v" -gt "$mx" ] 2>/dev/null && mx=$v; done
     range=$((mx - mn))
@@ -1841,6 +1856,18 @@ dir_of() {
     [ "$pm" -gt 0 ] 2>/dev/null && printf 'up' || printf 'down'
 }
 
+# series_recent_pm <série d'entiers séparés par espaces> : évolution en pour-mille sur les
+# TREND_SPARK_MAX DERNIERS points (1er vs dernier de la même fenêtre que la sparkline). Vide si < 2
+# points ou base <= 0. Sert au triangle « récent » posé après la sparkline (même fenêtre => cohérent).
+series_recent_pm() {
+    set -- $1; local n=$# si b l
+    [ "$n" -lt 2 ] && return 0
+    si=$(( n > TREND_SPARK_MAX ? n - TREND_SPARK_MAX + 1 : 1 ))
+    b=${!si}; l=${!n}
+    [ "$b" -gt 0 ] 2>/dev/null || return 0
+    printf '%s' "$(( (l - b) * 1000 / b ))"
+}
+
 # Sous-bloc « Comptage ipset (évol. + tendance 24 h) » : pour CHAQUE ipset de la machine + un total,
 # le nb d'entrées COURANT (mesuré live), son évolution sur 24 h (+X/-Y) et une sparkline de tendance.
 # Historique horaire dans IPSET_COUNTS_FILE (posé par ipset_counts_sample, comme les métriques). La
@@ -1849,52 +1876,59 @@ dir_of() {
 # de delta trompeur ; total en clair seulement si toutes les listes ont une base. Vide (non-root /
 # aucune ipset) => bloc absent. Le set transitoire ${IPSET_NAME}_grow (redimensionnement) est écarté.
 build_ipset_counts() {
-    local sets now cut recent_cut base_epoch name cur base base_recent spk pm i wN=0 wC=0 wD=0 wP=0 numf t24 trec dir span
+    local sets now cut base_epoch name cur base series pm i wN=0 wC=0 wD=0 wP=0 wV vplain vpad numf trec dir span hc hv he
     local tot_cur=0 tot_base=0 have_all_base=1
     local -a N=() C=() D=() P=() M=() R=() S=()   # colonnes : nom, compte, delta, %, pm 24h, pm récent, sparkline
     sets=$(ipset list -n 2>/dev/null | grep -vxF "${IPSET_NAME}_grow")
     [ -z "$sets" ] && return 0
-    now=$(date +%s); cut=$((now - 86400)); recent_cut=$((now - TREND_RECENT_WINDOW)); base_epoch=""
+    now=$(date +%s); cut=$((now - 86400)); base_epoch=""
     [ -r "$IPSET_COUNTS_FILE" ] && base_epoch=$(awk -v cut="$cut" '$1 ~ /^[0-9]+$/ && ($1+0)>=cut {print $1; exit}' "$IPSET_COUNTS_FILE" 2>/dev/null)
-    # ---- Passe 1 : valeurs par set (+ accumulation du total) ----
+    # ---- Passe 1 : valeurs par set (+ accumulation du total). La « série » = échantillons 24 h + live ;
+    #      elle sert À LA FOIS à la sparkline (qui garde ses TREND_SPARK_MAX derniers points) et au
+    #      triangle récent (series_recent_pm sur la même fenêtre => cohérent). ----
     while IFS= read -r name; do
         [ -n "$name" ] || continue
         cur=$(ipset_count_members "$name"); tot_cur=$((tot_cur + cur))
         base=""; [ -n "$base_epoch" ] && base=$(awk -v e="$base_epoch" -v s="$name" '$1==e && $2==s {print $3; exit}' "$IPSET_COUNTS_FILE" 2>/dev/null)
-        base_recent=""; [ -r "$IPSET_COUNTS_FILE" ] && base_recent=$(awk -v cut="$recent_cut" -v s="$name" '$1 ~ /^[0-9]+$/ && ($1+0)>=cut && $2==s {print $3; exit}' "$IPSET_COUNTS_FILE" 2>/dev/null)
-        spk=""; [ -r "$IPSET_COUNTS_FILE" ] && spk=$(awk -v cut="$cut" -v s="$name" '$1 ~ /^[0-9]+$/ && ($1+0)>=cut && $2==s {printf "%s ", $3}' "$IPSET_COUNTS_FILE" 2>/dev/null)
-        N+=("$name"); C+=("$cur"); S+=("$(sparkline "$spk$cur")")
+        series=""; [ -r "$IPSET_COUNTS_FILE" ] && series=$(awk -v cut="$cut" -v s="$name" '$1 ~ /^[0-9]+$/ && ($1+0)>=cut && $2==s {printf "%s ", $3}' "$IPSET_COUNTS_FILE" 2>/dev/null)
+        series="$series$cur"
+        N+=("$name"); C+=("$cur"); S+=("$(sparkline "$series")"); R+=("$(series_recent_pm "$series")")
         if [ -n "$base" ] && [ "$base" -gt 0 ] 2>/dev/null; then
             tot_base=$((tot_base + base)); pm=$(( (cur - base) * 1000 / base ))
             D+=("$(fmt_signed $((cur - base)))"); P+=("$(fmt_pct "$pm")"); M+=("$pm")
         else D+=("$(t stats.ipset_new)"); P+=(""); M+=(""); have_all_base=0; fi
-        if [ -n "$base_recent" ] && [ "$base_recent" -gt 0 ] 2>/dev/null; then R+=("$(( (cur - base_recent) * 1000 / base_recent ))"); else R+=(""); fi
     done <<< "$sets"
     # ---- Ligne Total (dernier élément des colonnes) ----
-    base_recent=""; [ -r "$IPSET_COUNTS_FILE" ] && base_recent=$(awk -v cut="$recent_cut" '$1 ~ /^[0-9]+$/ && ($1+0)>=cut { if (e=="") e=$1; if ($1==e) s+=$3 } END { if (e!="") print s }' "$IPSET_COUNTS_FILE" 2>/dev/null)
-    spk=""; [ -r "$IPSET_COUNTS_FILE" ] && spk=$(awk -v cut="$cut" '$1 ~ /^[0-9]+$/ && ($1+0)>=cut { if ($1 != e) { if (e!="") printf "%s ", s; e=$1; s=0 } s+=$3 } END { if (e!="") printf "%s ", s }' "$IPSET_COUNTS_FILE" 2>/dev/null)
-    N+=("$(t stats.ipset_total_label)"); C+=("$tot_cur"); S+=("$(sparkline "$spk$tot_cur")")
+    series=""; [ -r "$IPSET_COUNTS_FILE" ] && series=$(awk -v cut="$cut" '$1 ~ /^[0-9]+$/ && ($1+0)>=cut { if ($1 != e) { if (e!="") printf "%s ", s; e=$1; s=0 } s+=$3 } END { if (e!="") printf "%s ", s }' "$IPSET_COUNTS_FILE" 2>/dev/null)
+    series="$series$tot_cur"
+    N+=("$(t stats.ipset_total_label)"); C+=("$tot_cur"); S+=("$(sparkline "$series")"); R+=("$(series_recent_pm "$series")")
     if [ "$have_all_base" -eq 1 ] && [ -n "$base_epoch" ] && [ "$tot_base" -gt 0 ]; then
         pm=$(( (tot_cur - tot_base) * 1000 / tot_base ))
         D+=("$(fmt_signed $((tot_cur - tot_base)))"); P+=("$(fmt_pct "$pm")"); M+=("$pm")
     else D+=("$(t stats.ipset_new)"); P+=(""); M+=(""); fi
-    if [ -n "$base_recent" ] && [ "$base_recent" -gt 0 ] 2>/dev/null; then R+=("$(( (tot_cur - base_recent) * 1000 / base_recent ))"); else R+=(""); fi
     # ---- Largeurs de colonnes (nom/compte/delta/% = ASCII => ${#} fiable) ----
     for ((i=0; i<${#N[@]}; i++)); do
         [ "${#N[i]}" -gt "$wN" ] && wN=${#N[i]}; [ "${#C[i]}" -gt "$wC" ] && wC=${#C[i]}
         [ "${#D[i]}" -gt "$wD" ] && wD=${#D[i]}; [ "${#P[i]}" -gt "$wP" ] && wP=${#P[i]}
     done
-    # ---- Rendu aligné, une LIGNE VIDE entre chaque graphe (évite la fusion verticale des sparklines) ----
+    hc=$(t stats.ipset_hdr_count); hv=$(t stats.ipset_hdr_var); he=$(t stats.ipset_hdr_evo)
+    [ "${#hc}" -gt "$wC" ] && wC=${#hc}                 # la colonne compte doit contenir son en-tête
+    wV=$(( wD + 1 + wP + 1 + 2 ))                       # largeur visuelle de « delta ␣ % ␣ tri24 »
+    [ "${#hv}" -gt "$wV" ] && wV=${#hv}
+    # ---- Rendu : en-tête de colonnes, puis une ligne par liste avec une LIGNE VIDE entre chaque
+    #      graphe (évite la fusion verticale des sparklines). Triangle 24 h COLLÉ à la variation. ----
     printf '\n── %s ──\n' "$(t stats.ipset_header)"
+    printf '  %-*s  %*s   %-*s  %s\n' "$wN" "" "$wC" "$hc" "$wV" "$hv" "$he"
     for ((i=0; i<${#N[@]}; i++)); do
         [ "$i" -gt 0 ] && printf '\n'
-        if [ -n "${M[i]}" ]; then
+        if [ -n "${M[i]}" ]; then                       # variation 24 h : « delta  %  tri24 » colorée, paddée à wV
             dir=$(dir_of "${M[i]}" "$TREND_FLAT_PCT")
-            numf=$(paint "$(printf '%*s  %*s' "$wD" "${D[i]}" "$wP" "${P[i]}")" "$dir")
-            t24=$(paint "$(tri_slot "${M[i]}" "$TREND_FLAT_PCT" "$TREND_STRONG_PCT")" "$dir")
-        else numf=$(printf '%*s' "$((wD + 2 + wP))" "${D[i]}"); t24='  '; fi   # « nouveau », neutre
+            vplain="$(printf '%*s %*s ' "$wD" "${D[i]}" "$wP" "${P[i]}")$(tri_slot "${M[i]}" "$TREND_FLAT_PCT" "$TREND_STRONG_PCT")"
+            numf=$(paint "$vplain" "$dir")
+            vpad=$(( wV - (wD + 1 + wP + 1 + 2) )); [ "$vpad" -gt 0 ] && numf="$numf$(printf '%*s' "$vpad" "")"
+        else numf=$(printf '%-*s' "$wV" "${D[i]}"); fi   # « nouveau », neutre
         if [ -n "${R[i]}" ]; then trec=$(paint "$(tri_slot "${R[i]}" "$TREND_RECENT_FLAT_PCT" "$TREND_RECENT_STRONG_PCT")" "$(dir_of "${R[i]}" "$TREND_RECENT_FLAT_PCT")"); else trec='  '; fi
-        printf '  %-*s  %*s   %s  %s  %s %s\n' "$wN" "${N[i]}" "$wC" "${C[i]}" "$numf" "$t24" "${S[i]}" "$trec"
+        printf '  %-*s  %*s   %s  %s %s\n' "$wN" "${N[i]}" "$wC" "${C[i]}" "$numf" "${S[i]}" "$trec"
     done
     # Note de fenêtre réelle si l'historique couvre < ~23 h (pas de fausse impression de 24 h pleines).
     if [ -n "$base_epoch" ]; then

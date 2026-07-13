@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="1.5.16"
+BAN404_VERSION="1.5.17"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -1663,6 +1663,16 @@ html_escape() {
 html_text() {
     local s; s=$(html_escape "$1"); s="${s//$'\n'/<br>}"; printf '%s' "$s"
 }
+# En-tête de mail encodé RFC 2047 (base64 UTF-8) SI le texte contient du non-ASCII : un « Résumé »
+# accentué émis brut 8 bits dans un Subject: n'est pas conforme => mojibake possible. ASCII pur =>
+# renvoyé tel quel (pas d'encodage inutile). Détection en LC_ALL=C ([^ -~] = hors ASCII imprimable).
+encode_header() {
+    if printf '%s' "$1" | LC_ALL=C grep -q '[^ -~]'; then
+        printf '=?UTF-8?B?%s?=' "$(printf '%s' "$1" | base64 | tr -d '\n')"
+    else
+        printf '%s' "$1"
+    fi
+}
 # Construit le corps JSON du webhook selon le service (logique centralisée).
 build_webhook_payload() {  # $1 = texte brut -> imprime le JSON
     local esc; esc=$(json_escape "$1")
@@ -1682,18 +1692,27 @@ send_webhook() {  # $1 = texte complet
 send_email() {  # $1 = sujet, $2 = corps texte, $3 = corps HTML (optionnel)
     [ -z "$NOTIFY_EMAIL" ] && return 0
     local bnd
-    if [ -n "$3" ] && command -v sendmail >/dev/null 2>&1; then
-        # multipart/alternative (texte + HTML) : le client choisit ; mobile/Gmail => HTML (<pre>
-        # monospace => tables alignées + triangles colorés). sendmail -t : en-têtes maîtrisés, portable
-        # (fourni par tout MTA). Repli mail/plain plus bas si sendmail absent.
+    if [ -n "$3" ] && command -v sendmail >/dev/null 2>&1 && command -v base64 >/dev/null 2>&1; then
+        # multipart/alternative (texte + HTML) : le client choisit ; mobile/Gmail => HTML (tables +
+        # triangles colorés). sendmail -t : en-têtes maîtrisés, portable (fourni par tout MTA). Repli
+        # mail/plain plus bas si sendmail (ou base64) absent.
+        # Les DEUX parties sont émises en Content-Transfer-Encoding: base64. Sans CTE, le corps 8 bits
+        # (accents UTF-8) partait sur UNE ligne géante (html_text => tout en <br>) : le MTA la repliait
+        # à 76 colonnes, et le pli, rendu comme un espace en HTML, cassait le contenu (« év ol. »,
+        # « < br> »). base64 : le décodeur ignore tout saut inséré => reconstruction exacte. Le Subject
+        # accentué passe par encode_header (RFC 2047), sinon mojibake dans l'objet.
         bnd="b404_$(date +%s)_$$"
         {
             printf 'To: %s\n' "$NOTIFY_EMAIL"
             [ -n "$NOTIFY_FROM" ] && printf 'From: %s\n' "$NOTIFY_FROM"
-            printf 'Subject: %s\nMIME-Version: 1.0\n' "$1"
+            printf 'Subject: %s\nMIME-Version: 1.0\n' "$(encode_header "$1")"
             printf 'Content-Type: multipart/alternative; boundary="%s"\n\n' "$bnd"
-            printf -- '--%s\n' "$bnd"; printf 'Content-Type: text/plain; charset=UTF-8\n\n'; printf '%s\n\n' "$2"
-            printf -- '--%s\n' "$bnd"; printf 'Content-Type: text/html; charset=UTF-8\n\n';  printf '%s\n\n' "$3"
+            printf -- '--%s\n' "$bnd"
+            printf 'Content-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: base64\n\n'
+            printf '%s' "$2" | base64
+            printf -- '--%s\n' "$bnd"
+            printf 'Content-Type: text/html; charset=UTF-8\nContent-Transfer-Encoding: base64\n\n'
+            printf '%s' "$3" | base64
             printf -- '--%s--\n' "$bnd"
         } | sendmail -t 2>/dev/null || true
     elif command -v mail >/dev/null 2>&1; then
@@ -1701,7 +1720,7 @@ send_email() {  # $1 = sujet, $2 = corps texte, $3 = corps HTML (optionnel)
         else printf '%s\n' "$2" | mail -s "$1" "$NOTIFY_EMAIL" 2>/dev/null || true; fi
     elif command -v sendmail >/dev/null 2>&1; then
         { printf 'To: %s\n' "$NOTIFY_EMAIL"; [ -n "$NOTIFY_FROM" ] && printf 'From: %s\n' "$NOTIFY_FROM"
-          printf 'Subject: %s\n\n%s\n' "$1" "$2"; } | sendmail -t 2>/dev/null || true
+          printf 'Subject: %s\n\n%s\n' "$(encode_header "$1")" "$2"; } | sendmail -t 2>/dev/null || true
     else
         t notify.no_mta >&2
     fi
@@ -2220,7 +2239,7 @@ check_email() {
         rc=$?
     elif command -v sendmail >/dev/null 2>&1; then
         { printf 'To: %s\n' "$NOTIFY_EMAIL"; [ -n "$NOTIFY_FROM" ] && printf 'From: %s\n' "$NOTIFY_FROM"
-          printf 'Subject: %s\n\n%s\n' "$subj" "$body"; } | sendmail -t 2>"${tmp:-/dev/null}"; rc=$?
+          printf 'Subject: %s\n\n%s\n' "$(encode_header "$subj")" "$body"; } | sendmail -t 2>"${tmp:-/dev/null}"; rc=$?
     else
         t check.email_no_mta; [ -n "$tmp" ] && rm -f "$tmp"; return 1
     fi

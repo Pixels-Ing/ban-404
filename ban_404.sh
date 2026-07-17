@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="1.5.17"
+BAN404_VERSION="1.6.0"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -25,9 +25,11 @@ HONEYPOT_PATTERN='\.env|wp-config\.php|phpmyadmin|config\.json|setup\.php|actuat
 NOISE_PATTERN='\.(jpg|jpeg|png|gif|webp|ico|css|js|svg|woff2?|map)$|apple-touch-icon|favicon|browserconfig\.xml|mstile|autodiscover\.xml|sitemap\.xml|robots\.txt|ads\.txt|\.well-known/(security\.txt|pki-validation)'
 # Signatures sécurité testées sur la requête ($7) QUEL QUE SOIT le statut HTTP (contrairement aux
 # honeypots, limités aux 404) : traversée de répertoires, sondes RCE, SQLi encodées, bots à liens
-# ré-encodés. Match => +HONEYPOT_SCORE (ban immédiat, timeout HONEYPOT_BAN_TIMEOUT). Critère
-# d'inclusion : aucun client légitime ne produit jamais ces chaînes. Vide => désactivé.
-SECURITY_PATTERN='etc(/|%2f)passwd|\.\./\.\.|%2e%2e%2f|\.\.%2f|%00|vendor/phpunit|eval-stdin\.php|union(\+|%20)select|information_schema|amp%3bamp%3b'
+# ré-encodés, botnet resultsPerPage (PrestaShop : « ? » encodé dans la valeur du paramètre, ou
+# paramètre dupliqué — jamais produit par un client légitime). Match => +HONEYPOT_SCORE (ban
+# immédiat, timeout HONEYPOT_BAN_TIMEOUT). Critère d'inclusion : aucun client légitime ne
+# produit jamais ces chaînes. Vide => désactivé.
+SECURITY_PATTERN='etc(/|%2f)passwd|\.\./\.\.|%2e%2e%2f|\.\.%2f|%00|vendor/phpunit|eval-stdin\.php|union(\+|%20)select|information_schema|amp%3bamp%3b|resultsperpage=[^& ]*%3f|resultsperpage.*resultsperpage'
 # Flood POST (brute-force) : POST dont la requête matche ce motif, comptés dans la fenêtre WINDOW ;
 # au-delà de POST_FLOOD_THRESHOLD => +HONEYPOT_SCORE. Défaut : login/xmlrpc WordPress. Le seuil
 # tolère plusieurs utilisateurs légitimes derrière un même NAT. Motif vide => désactivé.
@@ -43,6 +45,18 @@ WHITELIST_CIDR=""
 # Vhosts à EXCLURE de l'analyse (noms de dossier sous BASE_DIR, séparés par | ),
 # ex: "staging.exemple.com|interne.exemple.com". Vide => tous les vhosts sont analysés.
 EXCLUDE_VHOSTS=""
+
+# Cadence d'exécution supplémentaire (opt-in) : vide = passage horaire seul (cron.hourly, défaut) ;
+# entier 5-30 = le moteur tourne AUSSI toutes les N minutes ; "auto" = adaptatif — tick toutes les
+# 5 min, mais intervalle EFFECTIF modulé 5→60 min selon l'activité (hystérésis), avec une
+# sentinelle légère capable de forcer un run complet en ≤ 5 min sur signes d'attaque. Le fichier
+# /etc/cron.d/ban_404_step est géré par le moteur (self_heal_step_cron) : créé/aligné/retiré
+# selon ce réglage. Valeur invalide => ignorée (horaire seul), le run n'échoue jamais.
+CRON_STEP=""
+CADENCE_FILE="/var/lib/ban_404/cadence"   # état du mode auto : intervalle effectif courant (minutes)
+SENTINEL_LINES=2000        # lignes survolées par log par la sentinelle (mode auto, tick porté)
+SAMPLE_MIN_INTERVAL=3300   # espacement mini (s) des échantillons metrics/ipset : l'historique reste
+                           # ~horaire même quand CRON_STEP fait tourner le moteur toutes les 5-10 min
 
 # Notifications (optionnel ; vides => désactivées). Messages dans la langue BAN404_LANG.
 WEBHOOK_URL=""        # POST JSON des nouveaux bans (Slack/Discord/Teams/n8n...)
@@ -283,6 +297,36 @@ T_FR[heal.update_triggered]="[*] cron.daily muet — updater relancé depuis le 
 T_DE[heal.update_triggered]="[*] cron.daily stumm — Updater vom stündlichen Lauf ausgelöst."
 T_ES[heal.update_triggered]="[*] cron.daily en silencio — updater lanzado desde la ejecución horaria."
 T_IT[heal.update_triggered]="[*] cron.daily silenzioso — updater avviato dall'esecuzione oraria."
+
+T_EN[heal.step_cron]="[*] Step cron installed: %s (CRON_STEP=%s)"
+T_FR[heal.step_cron]="[*] Cron de ticks intermédiaires installé : %s (CRON_STEP=%s)"
+T_DE[heal.step_cron]="[*] Zwischentakt-Cron installiert: %s (CRON_STEP=%s)"
+T_ES[heal.step_cron]="[*] Cron de ticks intermedios instalado: %s (CRON_STEP=%s)"
+T_IT[heal.step_cron]="[*] Cron dei tick intermedi installato: %s (CRON_STEP=%s)"
+
+T_EN[heal.step_cron_syntax]="[*] Step cron rewritten (setting changed): %s"
+T_FR[heal.step_cron_syntax]="[*] Cron de ticks intermédiaires réécrit (réglage modifié) : %s"
+T_DE[heal.step_cron_syntax]="[*] Zwischentakt-Cron neu geschrieben (Einstellung geändert): %s"
+T_ES[heal.step_cron_syntax]="[*] Cron de ticks intermedios reescrito (ajuste modificado): %s"
+T_IT[heal.step_cron_syntax]="[*] Cron dei tick intermedi riscritto (impostazione modificata): %s"
+
+T_EN[heal.step_cron_removed]="[*] Step cron removed (CRON_STEP disabled): %s"
+T_FR[heal.step_cron_removed]="[*] Cron de ticks intermédiaires retiré (CRON_STEP désactivé) : %s"
+T_DE[heal.step_cron_removed]="[*] Zwischentakt-Cron entfernt (CRON_STEP deaktiviert): %s"
+T_ES[heal.step_cron_removed]="[*] Cron de ticks intermedios eliminado (CRON_STEP desactivado): %s"
+T_IT[heal.step_cron_removed]="[*] Cron dei tick intermedi rimosso (CRON_STEP disattivato): %s"
+
+T_EN[sentinel.triggered]="[i] Sentinel: attack signs since the last full run — full analysis forced."
+T_FR[sentinel.triggered]="[i] Sentinelle : signes d'attaque depuis le dernier run complet — analyse complète forcée."
+T_DE[sentinel.triggered]="[i] Wächter: Angriffszeichen seit dem letzten vollständigen Lauf — vollständige Analyse erzwungen."
+T_ES[sentinel.triggered]="[i] Centinela: señales de ataque desde la última ejecución completa — análisis completo forzado."
+T_IT[sentinel.triggered]="[i] Sentinella: segni di attacco dall'ultima esecuzione completa — analisi completa forzata."
+
+T_EN[cadence.adjusted]="[i] Auto cadence: effective interval %s -> %s min"
+T_FR[cadence.adjusted]="[i] Cadence auto : intervalle effectif %s -> %s min"
+T_DE[cadence.adjusted]="[i] Auto-Takt: effektives Intervall %s -> %s min"
+T_ES[cadence.adjusted]="[i] Cadencia auto: intervalo efectivo %s -> %s min"
+T_IT[cadence.adjusted]="[i] Cadenza auto: intervallo effettivo %s -> %s min"
 
 T_EN[no_valid_files]="=> No valid log file found. Done."
 T_FR[no_valid_files]="=> Aucun fichier de log valide trouvé. Fin."
@@ -717,6 +761,36 @@ T_DE[diag.summary_cron_off]="Zusammenfassungs-Cron nicht vorhanden (DAILY_SUMMAR
 T_ES[diag.summary_cron_off]="Cron de resumen ausente (DAILY_SUMMARY desactivado)."
 T_IT[diag.summary_cron_off]="Cron del riepilogo assente (DAILY_SUMMARY disattivato)."
 
+T_EN[diag.step_cron_invalid]="Invalid CRON_STEP (%s): expected 5-30 or auto — ignored, hourly runs only."
+T_FR[diag.step_cron_invalid]="CRON_STEP invalide (%s) : attendu 5-30 ou auto — ignoré, passages horaires seuls."
+T_DE[diag.step_cron_invalid]="Ungültiges CRON_STEP (%s): erwartet 5-30 oder auto — ignoriert, nur stündliche Läufe."
+T_ES[diag.step_cron_invalid]="CRON_STEP no válido (%s): se esperaba 5-30 o auto — ignorado, solo ejecuciones horarias."
+T_IT[diag.step_cron_invalid]="CRON_STEP non valido (%s): atteso 5-30 o auto — ignorato, solo esecuzioni orarie."
+
+T_EN[diag.step_cron_ok]="Step cron present (CRON_STEP=%s min)."
+T_FR[diag.step_cron_ok]="Cron de ticks intermédiaires présent (CRON_STEP=%s min)."
+T_DE[diag.step_cron_ok]="Zwischentakt-Cron vorhanden (CRON_STEP=%s min)."
+T_ES[diag.step_cron_ok]="Cron de ticks intermedios presente (CRON_STEP=%s min)."
+T_IT[diag.step_cron_ok]="Cron dei tick intermedi presente (CRON_STEP=%s min)."
+
+T_EN[diag.step_cron_ok_auto]="Step cron present (CRON_STEP=auto, current effective interval: %s min)."
+T_FR[diag.step_cron_ok_auto]="Cron de ticks intermédiaires présent (CRON_STEP=auto, intervalle effectif courant : %s min)."
+T_DE[diag.step_cron_ok_auto]="Zwischentakt-Cron vorhanden (CRON_STEP=auto, aktuelles effektives Intervall: %s min)."
+T_ES[diag.step_cron_ok_auto]="Cron de ticks intermedios presente (CRON_STEP=auto, intervalo efectivo actual: %s min)."
+T_IT[diag.step_cron_ok_auto]="Cron dei tick intermedi presente (CRON_STEP=auto, intervallo effettivo attuale: %s min)."
+
+T_EN[diag.step_cron_missing_wanted]="Step cron missing although CRON_STEP is set — normal for <1 h after enabling (self-heals on the next real run)."
+T_FR[diag.step_cron_missing_wanted]="Cron de ticks intermédiaires absent alors que CRON_STEP est posé — normal < 1 h après activation (auto-guérison au prochain run réel)."
+T_DE[diag.step_cron_missing_wanted]="Zwischentakt-Cron fehlt, obwohl CRON_STEP gesetzt ist — normal < 1 h nach Aktivierung (Selbstheilung beim nächsten echten Lauf)."
+T_ES[diag.step_cron_missing_wanted]="Cron de ticks intermedios ausente aunque CRON_STEP está definido — normal < 1 h tras la activación (autocuración en la próxima ejecución real)."
+T_IT[diag.step_cron_missing_wanted]="Cron dei tick intermedi assente benché CRON_STEP sia impostato — normale < 1 h dopo l'attivazione (autoguarigione alla prossima esecuzione reale)."
+
+T_EN[diag.step_cron_orphan]="Step cron present although CRON_STEP is disabled — will be removed on the next hourly run."
+T_FR[diag.step_cron_orphan]="Cron de ticks intermédiaires présent alors que CRON_STEP est désactivé — sera retiré au prochain passage horaire."
+T_DE[diag.step_cron_orphan]="Zwischentakt-Cron vorhanden, obwohl CRON_STEP deaktiviert ist — wird beim nächsten stündlichen Lauf entfernt."
+T_ES[diag.step_cron_orphan]="Cron de ticks intermedios presente aunque CRON_STEP está desactivado — se eliminará en la próxima ejecución horaria."
+T_IT[diag.step_cron_orphan]="Cron dei tick intermedi presente benché CRON_STEP sia disattivato — sarà rimosso alla prossima esecuzione oraria."
+
 T_EN[diag.ipset_ok]="ipset %s present (%s members)."
 T_FR[diag.ipset_ok]="ipset %s présent (%s membres)."
 T_DE[diag.ipset_ok]="ipset %s vorhanden (%s Einträge)."
@@ -1048,6 +1122,12 @@ T_FR[help.conf_daily]="  DAILY_SUMMARY    Résumé quotidien (opt-in, défaut fa
 T_DE[help.conf_daily]="  DAILY_SUMMARY    Tägliche Zusammenfassung (opt-in, Standard false), über den konfigurierten Kanal."
 T_ES[help.conf_daily]="  DAILY_SUMMARY    Resumen diario (opt-in, por defecto false), por el canal configurado."
 T_IT[help.conf_daily]="  DAILY_SUMMARY    Riepilogo giornaliero (opt-in, predefinito false), tramite il canale configurato."
+
+T_EN[help.conf_cron_step]="  CRON_STEP        Extra runs via /etc/cron.d (managed): empty = hourly only (default), 5-30 = every N min, auto = adaptive 5-60 min with attack sentinel."
+T_FR[help.conf_cron_step]="  CRON_STEP        Passages supplémentaires via /etc/cron.d (géré) : vide = horaire seul (défaut), 5-30 = toutes les N min, auto = adaptatif 5-60 min avec sentinelle d'attaque."
+T_DE[help.conf_cron_step]="  CRON_STEP        Zusätzliche Läufe über /etc/cron.d (verwaltet): leer = nur stündlich (Standard), 5-30 = alle N min, auto = adaptiv 5-60 min mit Angriffswächter."
+T_ES[help.conf_cron_step]="  CRON_STEP        Ejecuciones adicionales vía /etc/cron.d (gestionado): vacío = solo horaria (por defecto), 5-30 = cada N min, auto = adaptativo 5-60 min con centinela de ataques."
+T_IT[help.conf_cron_step]="  CRON_STEP        Esecuzioni aggiuntive via /etc/cron.d (gestito): vuoto = solo oraria (predefinito), 5-30 = ogni N min, auto = adattivo 5-60 min con sentinella di attacco."
 
 T_EN[help.conf_resolve]="  RESOLVE_PTR      Resolve reverse DNS (PTR) in --list/--stats/--summary (default false)."
 T_FR[help.conf_resolve]="  RESOLVE_PTR      Résoudre le reverse DNS (PTR) dans --list/--stats/--summary (défaut false)."
@@ -1517,6 +1597,7 @@ show_help() {
     t help.conf_min_bans
     t help.conf_notify_bans
     t help.conf_daily
+    t help.conf_cron_step
     t help.conf_resolve
     t help.conf_ptr_timeout
     t help.conf_postflood
@@ -2259,6 +2340,128 @@ check_notification() {  # $1 = email|webhook|all (défaut all)
     exit 0
 }
 
+# ---------- Cadence adaptative (CRON_STEP) ----------
+# CRON_STEP="" (défaut) : passage horaire seul. Entier 5-30 : le cron.d géré (self_heal_step_cron)
+# lance le moteur toutes les N minutes, chaque tick analyse. "auto" : le cron.d tourne toutes les
+# 5 min (plancher) mais le moteur module lui-même l'intervalle EFFECTIF sur l'échelle
+# 5→10→20→40→60 min : la « porte » (posée juste après le verrou) saute les ticks arrivés trop tôt,
+# et une sentinelle légère peut forcer un run complet en ≤ 5 min sur signes d'attaque. Hystérésis :
+# détections => un cran plus serré (signature/honeypot => plancher direct) ; run calme => un cran
+# plus lâche. Plafond 60 min : la fenêtre WINDOW (2 h) impose un recouvrement, et le cron.hourly
+# (porteur des self-heals) tourne de toute façon.
+
+cron_step_mode() {   # -> off | fixed | auto (toute valeur invalide => off, sans casser le run)
+    case "${CRON_STEP:-}" in
+        auto) echo auto ;;
+        *)
+            if [[ "${CRON_STEP:-}" =~ ^[0-9]+$ ]] && [ "$CRON_STEP" -ge 5 ] && [ "$CRON_STEP" -le 30 ]; then
+                echo fixed
+            else
+                echo off
+            fi ;;
+    esac
+}
+
+# Intervalle effectif courant du mode auto (minutes). Fichier absent/corrompu => plafond (60) :
+# un serveur calme ne paie jamais un excès de zèle par défaut.
+cadence_read() {
+    local v
+    v=$(head -n 1 "$CADENCE_FILE" 2>/dev/null)
+    case "$v" in 5|10|20|40|60) printf '%s' "$v" ;; *) printf '%s' 60 ;; esac
+}
+
+# Ajustement d'hystérésis, appelé en fin de run COMPLET (finish_run, donc jamais en dry-run) :
+# $1 = nb de nouveaux bans du run, $2 = 1 si au moins un ban signature/honeypot.
+cadence_adjust() {
+    [ "$(cron_step_mode)" = auto ] || return 0
+    local cur new dir tmp
+    cur=$(cadence_read)
+    if [ "${2:-0}" = "1" ]; then
+        new=5                                                   # attaque caractérisée : plancher direct
+    elif [ "${1:-0}" -gt 0 ] 2>/dev/null; then
+        case "$cur" in 60) new=40 ;; 40) new=20 ;; 20) new=10 ;; *) new=5 ;; esac
+    else
+        case "$cur" in 5) new=10 ;; 10) new=20 ;; 20) new=40 ;; *) new=60 ;; esac
+    fi
+    [ "$new" = "$cur" ] && return 0
+    [ "$VERBOSE" = true ] && t cadence.adjusted "$cur" "$new"
+    dir=$(dirname "$CADENCE_FILE"); mkdir -p "$dir" 2>/dev/null
+    tmp=$(mktemp "$dir/.cadence.XXXXXX" 2>/dev/null) || return 0
+    printf '%s\n' "$new" > "$tmp" 2>/dev/null
+    chmod 644 "$tmp" 2>/dev/null
+    mv -f "$tmp" "$CADENCE_FILE" 2>/dev/null || rm -f "$tmp" 2>/dev/null
+    return 0
+}
+
+# Découverte des logs à analyser (factorisée : boucle principale ET sentinelle). Remplit les
+# tableaux globaux FILES_FOUND puis VALID_FILES (lisibles et non vides). On écarte
+# yesterday-access.log (symlink ISPConfig vers le log de la veille, souvent périmé) : jamais
+# le bon fichier à analyser. Les vhosts d'EXCLUDE_VHOSTS sont sautés (trace --verbose).
+discover_valid_logs() {
+    local log_dir vhost latest file
+    FILES_FOUND=()
+    for log_dir in ${BASE_DIR}/*/log/; do
+        [ -d "$log_dir" ] || continue
+        vhost="${log_dir%/log/}"; vhost="${vhost##*/}"   # nom du dossier vhost sous BASE_DIR
+        if is_excluded_vhost "$vhost"; then
+            [ "$VERBOSE" = true ] && t verbose.vhost_excluded "$vhost"
+            continue
+        fi
+        if [ -f "${log_dir}access.log" ]; then
+            FILES_FOUND+=("${log_dir}access.log")
+        else
+            latest=$(ls -1t "${log_dir}"*access.log 2>/dev/null | grep -v '/yesterday-access\.log$' | head -n 1)
+            [ -n "$latest" ] && FILES_FOUND+=("$latest")
+        fi
+    done
+    VALID_FILES=()
+    for file in "${FILES_FOUND[@]}"; do
+        if [ -r "$file" ] && [ -s "$file" ]; then
+            [ "$VERBOSE" = true ] && t verbose.log_ok "$file"
+            VALID_FILES+=("$file")
+        else
+            [ "$VERBOSE" = true ] && t verbose.log_skip "$file"
+        fi
+    done
+    return 0
+}
+
+# Sentinelle du mode auto (tick « porté ») : survol des SENTINEL_LINES dernières lignes de chaque
+# log à la recherche d'un signal d'attaque POSTÉRIEUR au dernier run complet ($1 = borne
+# AAAAMMJJHHMMSS) — sans cette borne, de vieilles lignes déjà analysées re-déclencheraient un run
+# complet à CHAQUE tick sur un site calme. Signal = une signature sécurité (IP non whitelistée) OU
+# une même IP dépassant BAN_THRESHOLD en 404 hors bruit. Volontairement grossière et légère (fin
+# de fichier en page cache, parse de date payé par les seules lignes candidates) : elle ne bannit
+# rien, elle décide seulement s'il faut payer l'analyse complète — le scoring fenêtré fait foi.
+# Retour 0 = déclenchement.
+sentinel_hit() {
+    local cutoff="$1"
+    discover_valid_logs
+    [ ${#VALID_FILES[@]} -eq 0 ] && return 1
+    tail -n "$SENTINEL_LINES" -q "${VALID_FILES[@]}" 2>/dev/null | \
+        SECURITY_RE="$SECURITY_PATTERN" NOISE_RE="$NOISE_PATTERN" \
+        awk -v wl="$WHITELIST_IP" -v cutoff="$cutoff" -v thr="$BAN_THRESHOLD" '
+    BEGIN {
+        split("Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec", M, " ")
+        for (i=1;i<=12;i++) mon[M[i]]=i
+        n=split(wl, Wl, "|"); for (i=1;i<=n;i++) white[Wl[i]]=1
+        security_re = ENVIRON["SECURITY_RE"]
+        noise_re = ENVIRON["NOISE_RE"]
+    }
+    !($1 in white) {
+        cand = 0
+        if (security_re != "" && tolower($7) ~ security_re) cand = 1
+        else if ($9 == 404 && (noise_re == "" || tolower($7) !~ noise_re)) cand = 2
+        if (!cand) next
+        split(substr($4,2), d, /[\/:]/)
+        ts = sprintf("%04d%02d%02d%02d%02d%02d", d[3], mon[d[2]], d[1], d[4], d[5], d[6])
+        if (ts < cutoff) next
+        if (cand == 1) exit 10
+        if (++c404[$1] > thr) exit 10
+    }'
+    [ $? -eq 10 ]
+}
+
 # ---------- --diag : auto-diagnostic lecture seule de l'état du serveur ----------
 # Liste les anomalies (composants & versions, crons, pare-feu, conf/réseau, logs, cohérence des
 # notifications) sans rien modifier ni envoyer (≠ --check-notification qui émet un test live).
@@ -2429,6 +2632,21 @@ run_diag_checks() {
     else
         if [ -f /etc/cron.daily/1_ban_404_summary ] || [ -f /etc/cron.daily/ban_404_summary ]; then diag_line warn "$(t diag.summary_cron_orphan)"
         else diag_line ok "$(t diag.summary_cron_off)"; fi
+    fi
+    # Cron de ticks intermédiaires : cohérence conf (CRON_STEP) <-> /etc/cron.d/ban_404_step.
+    # CRON_STEP absent + fichier absent => aucune ligne (zéro bruit pour le parc qui n'en use pas).
+    sc_mode=$(cron_step_mode)
+    if [ -n "${CRON_STEP:-}" ] && [ "$sc_mode" = off ]; then
+        diag_line warn "$(t diag.step_cron_invalid "$CRON_STEP")"
+    elif [ "$sc_mode" != off ]; then
+        if [ -f /etc/cron.d/ban_404_step ]; then
+            if [ "$sc_mode" = auto ]; then diag_line ok "$(t diag.step_cron_ok_auto "$(cadence_read)")"
+            else diag_line ok "$(t diag.step_cron_ok "$CRON_STEP")"; fi
+        else
+            diag_line warn "$(t diag.step_cron_missing_wanted)"
+        fi
+    elif [ -f /etc/cron.d/ban_404_step ]; then
+        diag_line warn "$(t diag.step_cron_orphan)"
     fi
 
     # 4. Pare-feu (lecture ipset/iptables => root requis)
@@ -2754,6 +2972,25 @@ if [ "$DRY_RUN" = false ]; then
     fi
 fi
 
+# --- Porte de cadence (CRON_STEP=auto) : sauter les ticks intermédiaires arrivés trop tôt. ---
+# Budget minimal exigé (les ticks tournent toutes les 5 min) : un tick « porté » ne fait que
+# conf + verrou + un stat + la sentinelle (tail/awk sur des fins de fichiers en page cache),
+# AUCUNE écriture (ni stamp, ni journal, ni métriques) et ne touche ni ipset ni self-heals.
+# Jamais appliquée aux runs interactifs (tty) ni au dry-run : un humain qui lance le moteur
+# attend une analyse. Marge de 90 s : le jitter cron ne doit pas faire glisser d'un tick un
+# passage arrivant « pile » à l'échéance. La sortie « portée » ne stampe pas last_run (qui
+# reste = dernier run COMPLET, la référence de la porte ET de la sentinelle).
+if [ "$DRY_RUN" = false ] && [ ! -t 0 ] && [ ! -t 1 ] && [ "$(cron_step_mode)" = auto ]; then
+    LAST_FULL=$(stat -c %Y "$RUN_STAMP_FILE" 2>/dev/null || echo 0)
+    if [ "$(date +%s)" -lt $(( LAST_FULL + $(cadence_read) * 60 - 90 )) ]; then
+        if sentinel_hit "$(date -d "@$LAST_FULL" '+%Y%m%d%H%M%S')"; then
+            t_log sentinel.triggered
+        else
+            exit 0
+        fi
+    fi
+fi
+
 if [ "$VERBOSE" = true ]; then
     if [ "$DRY_RUN" = true ]; then
         echo "========================================="
@@ -2865,6 +3102,36 @@ self_heal_summary_cron() {
     return 0
 }
 
+# Réconciliation du cron de ticks intermédiaires sur CRON_STEP (même modèle que le cron de
+# résumé : le moteur est seul maître du fichier, contenu canonique, idempotent). /etc/cron.d
+# exige un champ utilisateur, un nom SANS point et une fin de fichier avec saut de ligne ;
+# 0644 (fichier de conf, PAS exécutable, contrairement à cron.hourly/daily). nice -n 10 : les
+# ticks (sentinelle comprise) s'effacent devant les vrais services du serveur. Un changement de
+# réglage (10 -> 15, fixe -> auto...) fait diverger le canonique => réécriture ; valeur vide ou
+# invalide => retrait (fail-safe : on retombe sur l'horaire), l'état de cadence partant avec.
+self_heal_step_cron() {
+    local f="/etc/cron.d/ban_404_step" mode step want
+    [ "$DRY_RUN" = true ] && return 0
+    [ "$(id -u)" -eq 0 ] || return 0
+    mode=$(cron_step_mode)
+    if [ "$mode" = off ]; then
+        [ -f "$f" ] || return 0
+        rm -f "$f" "$CADENCE_FILE" 2>/dev/null && t_log heal.step_cron_removed "$f"
+        return 0
+    fi
+    step=5; [ "$mode" = fixed ] && step="$CRON_STEP"   # auto : tick plancher 5 min, la porte module
+    want=$(printf '%s\n%s\n' \
+        "# ban_404 : ticks intermédiaires (CRON_STEP=${CRON_STEP}) — fichier géré par le moteur (self_heal_step_cron), ne pas éditer." \
+        "*/${step} * * * * root nice -n 10 /usr/local/sbin/ban_404.sh >/dev/null 2>&1")
+    if [ -f "$f" ]; then
+        [ "$(cat "$f" 2>/dev/null)" = "$want" ] && return 0   # déjà conforme => rien à faire
+        printf '%s\n' "$want" > "$f" && chmod 644 "$f" && t_log heal.step_cron_syntax "$f"
+        return 0
+    fi
+    printf '%s\n' "$want" > "$f" && chmod 644 "$f" && t_log heal.step_cron "$f" "$CRON_STEP"
+    return 0
+}
+
 # --- Filet de sécurité MAJ -----------------------------------------------------
 # Sur certains serveurs, cron.daily (piloté par anacron) cesse de se déclencher
 # silencieusement : l'updater n'est alors JAMAIS appelé et tout fige (moteur +
@@ -2897,8 +3164,13 @@ self_heal_update_trigger() {
 # (le calcul awk saute ce champ). Purge-on-write : on ne garde que les lignes < 48 h et bien
 # formées, réécriture atomique (mktemp + mv). Toujours return 0 : ne fait jamais échouer le run.
 metrics_sample() {
-    local now load15 io_total iface rx tx mem_avail mem_total mem_pct dir tmp
+    local now load15 io_total iface rx tx mem_avail mem_total mem_pct dir tmp last
     now=$(date +%s)
+    # Garde d'espacement : avec CRON_STEP le moteur peut finir un run complet toutes les 5-10 min,
+    # mais l'historique doit rester ~horaire (les moyennes 24 h et la fenêtre de purge supposent
+    # ~1 point/heure). Fichier chronologique => l'epoch de la DERNIÈRE ligne suffit.
+    last=$(tail -n 1 "$METRICS_FILE" 2>/dev/null | awk '{print $1}')
+    [[ "$last" =~ ^[0-9]+$ ]] && [ $((now - last)) -lt "$SAMPLE_MIN_INTERVAL" ] && return 0
     load15='-'; [ -r /proc/loadavg ] && read -r _ _ load15 _ < /proc/loadavg
     [ -n "$load15" ] || load15='-'
     io_total='-'
@@ -2936,8 +3208,12 @@ metrics_sample() {
 # (base 24 h commune). Énumère via `ipset list -n`, saute le set transitoire ${IPSET_NAME}_grow
 # (redimensionnement). Comptage sans dump via ipset_count_members (-t). Toujours return 0.
 ipset_counts_sample() {
-    local now dir tmp name count
+    local now dir tmp name count last
     now=$(date +%s)
+    # Même garde d'espacement que metrics_sample : la sparkline « Évolution 8 h » (8 derniers
+    # points) suppose ~1 point/heure — sans la garde, un CRON_STEP serré la réduirait à ~40 min.
+    last=$(tail -n 1 "$IPSET_COUNTS_FILE" 2>/dev/null | awk '{print $1}')
+    [[ "$last" =~ ^[0-9]+$ ]] && [ $((now - last)) -lt "$SAMPLE_MIN_INTERVAL" ] && return 0
     dir=$(dirname "$IPSET_COUNTS_FILE"); mkdir -p "$dir" 2>/dev/null
     tmp=$(mktemp "$dir/.ipsetcnt.XXXXXX" 2>/dev/null) || return 0
     {
@@ -2969,6 +3245,7 @@ finish_run() {
         touch "$RUN_STAMP_FILE" 2>/dev/null
         metrics_sample                      # échantillon horaire (moyennes 24 h) ; même garde DRY_RUN+root
         ipset_counts_sample                 # échantillon horaire du nb d'entrées par ipset (évol. + tendance 24 h)
+        cadence_adjust "${#new_bans[@]}" "${had_hp_ban:-0}"   # hystérésis du mode CRON_STEP=auto (no-op sinon)
     fi
     self_heal_update_trigger
     return 0
@@ -3045,35 +3322,13 @@ self_heal_updater
 # Réconciliation du cron de résumé quotidien sur DAILY_SUMMARY (le crée/retire selon le réglage).
 self_heal_summary_cron
 
-# 1. Recherche des fichiers de logs
-FILES_FOUND=()
-for log_dir in ${BASE_DIR}/*/log/; do
-    [ -d "$log_dir" ] || continue
-    vhost="${log_dir%/log/}"; vhost="${vhost##*/}"   # nom du dossier vhost sous BASE_DIR
-    if is_excluded_vhost "$vhost"; then
-        [ "$VERBOSE" = true ] && t verbose.vhost_excluded "$vhost"
-        continue
-    fi
-    if [ -f "${log_dir}access.log" ]; then
-        FILES_FOUND+=("${log_dir}access.log")
-    else
-        # On écarte yesterday-access.log (symlink ISPConfig vers le log de la veille, souvent
-        # périmé) : jamais le bon fichier à analyser.
-        latest=$(ls -1t "${log_dir}"*access.log 2>/dev/null | grep -v '/yesterday-access\.log$' | head -n 1)
-        [ -n "$latest" ] && FILES_FOUND+=("$latest")
-    fi
-done
+# Réconciliation du cron de ticks intermédiaires sur CRON_STEP (créé/aligné/retiré selon la conf).
+self_heal_step_cron
 
-# 2. Filtrage des fichiers lisibles
-VALID_FILES=()
-for file in "${FILES_FOUND[@]}"; do
-    if [ -r "$file" ] && [ -s "$file" ]; then
-        [ "$VERBOSE" = true ] && t verbose.log_ok "$file"
-        VALID_FILES+=("$file")
-    else
-        [ "$VERBOSE" = true ] && t verbose.log_skip "$file"
-    fi
-done
+# 1-2. Recherche + filtrage des fichiers de logs (factorisés dans discover_valid_logs, partagés
+# avec la sentinelle du mode CRON_STEP=auto). Un run déclenché par la sentinelle refait la
+# découverte ici : quelques ls, négligeable devant l'analyse qui suit.
+discover_valid_logs
 
 if [ ${#VALID_FILES[@]} -eq 0 ]; then
     t no_valid_files
@@ -3158,6 +3413,7 @@ fi
 changes_made=false
 rules_simulated=0
 new_bans=()   # accumulés pour la notification (format : "ip|score|honeypot")
+had_hp_ban=0  # au moins un ban signature/honeypot ce run (cadence auto : plancher direct)
 [ "$VERBOSE" = true ] && t verbose.processing
 
 # 4. Boucle de traitement
@@ -3215,7 +3471,7 @@ while read -r count hpflag ip; do
             rules_simulated=$((rules_simulated + 1))
         else
             if [ "$count" -ge "$HONEYPOT_SCORE" ]; then
-                t_log ban.honeypot "$ip" "$count"; hp=1
+                t_log ban.honeypot "$ip" "$count"; hp=1; had_hp_ban=1
                 # Ban honeypot : timeout différencié (plus long que le défaut du set).
                 ipset -exist add "$IPSET_NAME" "$ip" timeout "$HONEYPOT_BAN_TIMEOUT"
             else

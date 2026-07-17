@@ -92,6 +92,7 @@ sudo /usr/local/sbin/update_ban_404.sh --force   # redéploie même si le conten
 | `NOTIFY_MIN_BANS` | `1`         | Ne notifier que si ≥ N nouveaux bans dans l'exécution. |
 | `NOTIFY_BANS`     | `false`     | Alerte à chaque exécution quand des IP sont bannies. `true` pour l'activer (indépendant du résumé quotidien). |
 | `DAILY_SUMMARY`   | `false`     | Résumé quotidien (opt-in) envoyé via le canal configuré (`cron.daily`). |
+| `CRON_STEP`       | (vide)      | Passages supplémentaires via un `/etc/cron.d` **géré par le moteur** : vide ⇒ horaire seul ; `5`-`30` ⇒ toutes les N min ; `auto` ⇒ cadence **adaptative** 5→60 min selon l'activité, avec sentinelle d'attaque (réaction ≤ 5 min, coût quasi nul au calme). |
 | `REPO_RAW`        | —           | URL *raw* du dépôt (utilisée par le self-updater). |
 
 Les notifications sont émises **dans la langue** `BAN404_LANG`. Réglages avancés

@@ -39,6 +39,12 @@ WHITELIST_IP="127.0.0.1"
 #POST_FLOOD_THRESHOLD=20
 #RESOLVE_PTR=false
 #PTR_TIMEOUT=2
+# CRON_STEP: extra runs via a managed /etc/cron.d — empty = hourly only, 5-30 = every N min, auto = adaptive 5-60 min with attack sentinel.
+# CRON_STEP : passages supplémentaires via un /etc/cron.d géré — vide = horaire seul, 5-30 = toutes les N min, auto = adaptatif 5-60 min avec sentinelle d'attaque.
+# CRON_STEP: zusätzliche Läufe über ein verwaltetes /etc/cron.d — leer = nur stündlich, 5-30 = alle N min, auto = adaptiv 5-60 min mit Angriffswächter.
+# CRON_STEP: ejecuciones adicionales vía un /etc/cron.d gestionado — vacío = solo horaria, 5-30 = cada N min, auto = adaptativo 5-60 min con centinela de ataques.
+# CRON_STEP: esecuzioni aggiuntive via un /etc/cron.d gestito — vuoto = solo oraria, 5-30 = ogni N min, auto = adattivo 5-60 min con sentinella di attacco.
+#CRON_STEP=""
 
 # --- CIDR whitelist / subnets to NEVER ban (separated by | ) ---
 # --- Whitelist CIDR / sous-réseaux à ne JAMAIS bannir (séparés par | ) ---
@@ -98,7 +104,7 @@ WHITELIST_IP="127.0.0.1"
 # SECURITY_PATTERN: auf die Anfrage bei JEDEM HTTP-Status geprüft (nicht nur 404); Treffer = sofortige Sperre.
 # SECURITY_PATTERN: probado en la petición con CUALQUIER estado HTTP (no solo 404); coincidencia = bloqueo inmediato.
 # SECURITY_PATTERN: testato sulla richiesta con QUALSIASI stato HTTP (non solo 404); corrispondenza = blocco immediato.
-#SECURITY_PATTERN='etc(/|%2f)passwd|\.\./\.\.|%2e%2e%2f|\.\.%2f|%00|vendor/phpunit|eval-stdin\.php|union(\+|%20)select|information_schema|amp%3bamp%3b'
+#SECURITY_PATTERN='etc(/|%2f)passwd|\.\./\.\.|%2e%2e%2f|\.\.%2f|%00|vendor/phpunit|eval-stdin\.php|union(\+|%20)select|information_schema|amp%3bamp%3b|resultsperpage=[^& ]*%3f|resultsperpage.*resultsperpage'
 # POST_FLOOD_PATTERN: monitored POST paths; over POST_FLOOD_THRESHOLD hits in the window = ban (brute force).
 # POST_FLOOD_PATTERN : chemins POST surveillés ; au-delà de POST_FLOOD_THRESHOLD dans la fenêtre = ban (brute force).
 # POST_FLOOD_PATTERN: überwachte POST-Pfade; mehr als POST_FLOOD_THRESHOLD im Zeitfenster = Sperre (Brute-Force).

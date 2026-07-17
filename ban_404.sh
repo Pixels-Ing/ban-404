@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="1.6.0"
+BAN404_VERSION="1.6.1"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -1207,6 +1207,18 @@ T_DE[stats.versions]="Versionen: Engine v%s · Updater v%s"
 T_ES[stats.versions]="Versiones: motor v%s · updater v%s"
 T_IT[stats.versions]="Versioni: motore v%s · updater v%s"
 
+T_EN[stats.cadence_auto]="Cadence: CRON_STEP=auto — current effective interval: %s min (adaptive 5-60)"
+T_FR[stats.cadence_auto]="Cadence : CRON_STEP=auto — intervalle effectif courant : %s min (adaptatif 5-60)"
+T_DE[stats.cadence_auto]="Takt: CRON_STEP=auto — aktuelles effektives Intervall: %s min (adaptiv 5-60)"
+T_ES[stats.cadence_auto]="Cadencia: CRON_STEP=auto — intervalo efectivo actual: %s min (adaptativo 5-60)"
+T_IT[stats.cadence_auto]="Cadenza: CRON_STEP=auto — intervallo effettivo attuale: %s min (adattivo 5-60)"
+
+T_EN[stats.cadence_fixed]="Cadence: extra run every %s min (fixed CRON_STEP)"
+T_FR[stats.cadence_fixed]="Cadence : passage supplémentaire toutes les %s min (CRON_STEP fixe)"
+T_DE[stats.cadence_fixed]="Takt: zusätzlicher Lauf alle %s min (festes CRON_STEP)"
+T_ES[stats.cadence_fixed]="Cadencia: ejecución adicional cada %s min (CRON_STEP fijo)"
+T_IT[stats.cadence_fixed]="Cadenza: esecuzione aggiuntiva ogni %s min (CRON_STEP fisso)"
+
 T_EN[stats.health_header]="Health (anomalies):"
 T_FR[stats.health_header]="Santé (anomalies) :"
 T_DE[stats.health_header]="Zustand (Anomalien):"
@@ -2136,6 +2148,12 @@ build_stats_text() {
         [ -z "$upd_ver" ] && upd_ver="?"   # updater legacy sans UPDATER_VERSION
     fi
     t stats.versions "$BAN404_VERSION" "$upd_ver"
+    # Cadence CRON_STEP : statut visible dans le rapport ET le résumé quotidien (sinon, au vert,
+    # seul diag la montrait). L'ÉVOLUTION, elle, vit au journal (cadence.adjusted via t_log).
+    case "$(cron_step_mode)" in
+        auto)  t stats.cadence_auto "$(cadence_read)" ;;
+        fixed) t stats.cadence_fixed "$CRON_STEP" ;;
+    esac
     # --- Santé : uniquement les WARN/FAIL des contrôles de diagnostic (réseau inclus) ---
     DIAG_QUIET=true; DIAG_PROBLEMS=0; DIAG_ISSUES=()
     run_diag_checks            # remplit DIAG_ISSUES sans rien imprimer
@@ -2384,7 +2402,9 @@ cadence_adjust() {
         case "$cur" in 5) new=10 ;; 10) new=20 ;; 20) new=40 ;; *) new=60 ;; esac
     fi
     [ "$new" = "$cur" ] && return 0
-    [ "$VERBOSE" = true ] && t cadence.adjusted "$cur" "$new"
+    # Journalisé [i] (pas seulement --verbose) : la suite des montées/descentes dans
+    # /var/log/ban_404.log raconte les attaques ; les compteurs de stats ne lisent que [+]/[-].
+    t_log cadence.adjusted "$cur" "$new"
     dir=$(dirname "$CADENCE_FILE"); mkdir -p "$dir" 2>/dev/null
     tmp=$(mktemp "$dir/.cadence.XXXXXX" 2>/dev/null) || return 0
     printf '%s\n' "$new" > "$tmp" 2>/dev/null

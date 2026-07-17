@@ -1,5 +1,5 @@
 # VERSIONS — versions publiées du moteur et de l'updater, lues par le contrôle réseau du
 # diag de ban_404.sh en UNE requête (au lieu de télécharger les deux scripts entiers).
 # Ne pas éditer à la main sans bumper les scripts : la synchro est vérifiée par check.sh.
-BAN404_VERSION="1.6.0"
+BAN404_VERSION="1.6.1"
 UPDATER_VERSION="1.3.0"

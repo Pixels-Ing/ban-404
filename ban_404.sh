@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="1.6.1"
+BAN404_VERSION="1.6.2"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -53,7 +53,9 @@ EXCLUDE_VHOSTS=""
 # /etc/cron.d/ban_404_step est géré par le moteur (self_heal_step_cron) : créé/aligné/retiré
 # selon ce réglage. Valeur invalide => ignorée (horaire seul), le run n'échoue jamais.
 CRON_STEP=""
-CADENCE_FILE="/var/lib/ban_404/cadence"   # état du mode auto : intervalle effectif courant (minutes)
+CADENCE_FILE="/var/lib/ban_404/cadence"   # état du mode auto : « intervalle epoch_dernier_ban »
+CADENCE_CALM_SECS=1800     # mode auto : accalmie (s) sans AUCUN ban requise avant de relâcher d'un cran
+CADENCE_SURGE=3            # mode auto : nb de bans dans UN MÊME run qui plante direct au plancher (5 min)
 SENTINEL_LINES=2000        # lignes survolées par log par la sentinelle (mode auto, tick porté)
 SAMPLE_MIN_INTERVAL=3300   # espacement mini (s) des échantillons metrics/ipset : l'historique reste
                            # ~horaire même quand CRON_STEP fait tourner le moteur toutes les 5-10 min
@@ -2380,34 +2382,53 @@ cron_step_mode() {   # -> off | fixed | auto (toute valeur invalide => off, sans
     esac
 }
 
-# Intervalle effectif courant du mode auto (minutes). Fichier absent/corrompu => plafond (60) :
+# Intervalle effectif courant du mode auto (minutes) : 1er champ du fichier d'état (le 2e,
+# epoch du dernier ban, ne sert qu'à cadence_adjust). Fichier absent/corrompu => plafond (60) :
 # un serveur calme ne paie jamais un excès de zèle par défaut.
 cadence_read() {
     local v
     v=$(head -n 1 "$CADENCE_FILE" 2>/dev/null)
+    v=${v%% *}
     case "$v" in 5|10|20|40|60) printf '%s' "$v" ;; *) printf '%s' 60 ;; esac
 }
 
 # Ajustement d'hystérésis, appelé en fin de run COMPLET (finish_run, donc jamais en dry-run) :
-# $1 = nb de nouveaux bans du run, $2 = 1 si au moins un ban signature/honeypot.
+# $1 = nb de nouveaux bans du run. Descente : un cran plus serré par run avec ban ; plancher 5
+# direct SEULEMENT si >= CADENCE_SURGE bans dans le même run (attaque multi-IP caractérisée —
+# pour un attaquant isolé, la sentinelle garantit déjà une réaction <= 5 min : inutile de
+# s'affoler sur le bruit de scan permanent). Remontée : un cran plus lâche SEULEMENT si aucun
+# ban depuis CADENCE_CALM_SECS (accalmie constatée, pas simple run calme — sinon dents de scie
+# 5<->10 permanentes sous le bruit, ~150 changements/jour observés sur carat, juil. 2026).
+# L'epoch du dernier ban (2e champ de CADENCE_FILE) se rafraîchit à CHAQUE run avec ban, même à
+# intervalle inchangé (sinon la relâche démarrerait trop tôt) ; ancien format à 1 champ => 0.
 cadence_adjust() {
     [ "$(cron_step_mode)" = auto ] || return 0
-    local cur new dir tmp
+    local now line cur last new dir tmp
+    now=$(date +%s)
     cur=$(cadence_read)
-    if [ "${2:-0}" = "1" ]; then
-        new=5                                                   # attaque caractérisée : plancher direct
-    elif [ "${1:-0}" -gt 0 ] 2>/dev/null; then
-        case "$cur" in 60) new=40 ;; 40) new=20 ;; 20) new=10 ;; *) new=5 ;; esac
-    else
+    line=$(head -n 1 "$CADENCE_FILE" 2>/dev/null)
+    last=${line#* }
+    [ "$last" = "$line" ] && last=""                            # pas d'espace : ancien format 1 champ
+    case "$last" in ''|*[!0-9]*) last=0 ;; esac
+    if [ "${1:-0}" -gt 0 ] 2>/dev/null; then
+        if [ "${1:-0}" -ge "$CADENCE_SURGE" ] 2>/dev/null; then
+            new=5                                               # attaque massive : plancher direct
+        else
+            case "$cur" in 60) new=40 ;; 40) new=20 ;; 20) new=10 ;; *) new=5 ;; esac
+        fi
+        last=$now
+    elif [ $(( now - last )) -ge "$CADENCE_CALM_SECS" ]; then
         case "$cur" in 5) new=10 ;; 10) new=20 ;; 20) new=40 ;; *) new=60 ;; esac
+        [ "$new" = "$cur" ] && return 0                         # déjà au plafond : rien à écrire
+    else
+        return 0                                                # calme, mais accalmie pas encore acquise
     fi
-    [ "$new" = "$cur" ] && return 0
     # Journalisé [i] (pas seulement --verbose) : la suite des montées/descentes dans
     # /var/log/ban_404.log raconte les attaques ; les compteurs de stats ne lisent que [+]/[-].
-    t_log cadence.adjusted "$cur" "$new"
+    [ "$new" != "$cur" ] && t_log cadence.adjusted "$cur" "$new"
     dir=$(dirname "$CADENCE_FILE"); mkdir -p "$dir" 2>/dev/null
     tmp=$(mktemp "$dir/.cadence.XXXXXX" 2>/dev/null) || return 0
-    printf '%s\n' "$new" > "$tmp" 2>/dev/null
+    printf '%s %s\n' "$new" "$last" > "$tmp" 2>/dev/null
     chmod 644 "$tmp" 2>/dev/null
     mv -f "$tmp" "$CADENCE_FILE" 2>/dev/null || rm -f "$tmp" 2>/dev/null
     return 0
@@ -3265,7 +3286,7 @@ finish_run() {
         touch "$RUN_STAMP_FILE" 2>/dev/null
         metrics_sample                      # échantillon horaire (moyennes 24 h) ; même garde DRY_RUN+root
         ipset_counts_sample                 # échantillon horaire du nb d'entrées par ipset (évol. + tendance 24 h)
-        cadence_adjust "${#new_bans[@]}" "${had_hp_ban:-0}"   # hystérésis du mode CRON_STEP=auto (no-op sinon)
+        cadence_adjust "${#new_bans[@]}"    # hystérésis du mode CRON_STEP=auto (no-op sinon)
     fi
     self_heal_update_trigger
     return 0
@@ -3433,7 +3454,6 @@ fi
 changes_made=false
 rules_simulated=0
 new_bans=()   # accumulés pour la notification (format : "ip|score|honeypot")
-had_hp_ban=0  # au moins un ban signature/honeypot ce run (cadence auto : plancher direct)
 [ "$VERBOSE" = true ] && t verbose.processing
 
 # 4. Boucle de traitement
@@ -3491,7 +3511,7 @@ while read -r count hpflag ip; do
             rules_simulated=$((rules_simulated + 1))
         else
             if [ "$count" -ge "$HONEYPOT_SCORE" ]; then
-                t_log ban.honeypot "$ip" "$count"; hp=1; had_hp_ban=1
+                t_log ban.honeypot "$ip" "$count"; hp=1
                 # Ban honeypot : timeout différencié (plus long que le défaut du set).
                 ipset -exist add "$IPSET_NAME" "$ip" timeout "$HONEYPOT_BAN_TIMEOUT"
             else

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="1.6.2"
+BAN404_VERSION="1.6.3"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -55,7 +55,7 @@ EXCLUDE_VHOSTS=""
 CRON_STEP=""
 CADENCE_FILE="/var/lib/ban_404/cadence"   # état du mode auto : « intervalle epoch_dernier_ban »
 CADENCE_CALM_SECS=1800     # mode auto : accalmie (s) sans AUCUN ban requise avant de relâcher d'un cran
-CADENCE_SURGE=3            # mode auto : nb de bans dans UN MÊME run qui plante direct au plancher (5 min)
+CADENCE_SURGE=3            # mode auto : nb de bans dans UN MÊME run qui fait descendre de 2 crans (au lieu d'1)
 SENTINEL_LINES=2000        # lignes survolées par log par la sentinelle (mode auto, tick porté)
 SAMPLE_MIN_INTERVAL=3300   # espacement mini (s) des échantillons metrics/ipset : l'historique reste
                            # ~horaire même quand CRON_STEP fait tourner le moteur toutes les 5-10 min
@@ -2393,10 +2393,10 @@ cadence_read() {
 }
 
 # Ajustement d'hystérésis, appelé en fin de run COMPLET (finish_run, donc jamais en dry-run) :
-# $1 = nb de nouveaux bans du run. Descente : un cran plus serré par run avec ban ; plancher 5
-# direct SEULEMENT si >= CADENCE_SURGE bans dans le même run (attaque multi-IP caractérisée —
-# pour un attaquant isolé, la sentinelle garantit déjà une réaction <= 5 min : inutile de
-# s'affoler sur le bruit de scan permanent). Remontée : un cran plus lâche SEULEMENT si aucun
+# $1 = nb de nouveaux bans du run. Descente : un cran plus serré par run avec ban ; DEUX crans
+# si >= CADENCE_SURGE bans dans le même run (attaque multi-IP caractérisée — descente graduée
+# plutôt que plancher brutal : pour un attaquant isolé, la sentinelle garantit déjà une réaction
+# <= 5 min, inutile de s'affoler sur le bruit de scan permanent). Remontée : un cran plus lâche SEULEMENT si aucun
 # ban depuis CADENCE_CALM_SECS (accalmie constatée, pas simple run calme — sinon dents de scie
 # 5<->10 permanentes sous le bruit, ~150 changements/jour observés sur carat, juil. 2026).
 # L'epoch du dernier ban (2e champ de CADENCE_FILE) se rafraîchit à CHAQUE run avec ban, même à
@@ -2412,7 +2412,7 @@ cadence_adjust() {
     case "$last" in ''|*[!0-9]*) last=0 ;; esac
     if [ "${1:-0}" -gt 0 ] 2>/dev/null; then
         if [ "${1:-0}" -ge "$CADENCE_SURGE" ] 2>/dev/null; then
-            new=5                                               # attaque massive : plancher direct
+            case "$cur" in 60) new=20 ;; 40) new=10 ;; *) new=5 ;; esac   # attaque massive : 2 crans
         else
             case "$cur" in 60) new=40 ;; 40) new=20 ;; 20) new=10 ;; *) new=5 ;; esac
         fi

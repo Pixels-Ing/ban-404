@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="1.6.6"
+BAN404_VERSION="1.6.7"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -1318,6 +1318,12 @@ T_DE[stats.ipset_new]="neu"
 T_ES[stats.ipset_new]="nuevo"
 T_IT[stats.ipset_new]="nuovo"
 
+T_EN[stats.ipset_stable]="stable"
+T_FR[stats.ipset_stable]="stable"
+T_DE[stats.ipset_stable]="stabil"
+T_ES[stats.ipset_stable]="estable"
+T_IT[stats.ipset_stable]="stabile"
+
 T_EN[stats.sec_stats]="Statistics (24h)"
 T_FR[stats.sec_stats]="Statistiques (24h)"
 T_DE[stats.sec_stats]="Statistiken (24h)"
@@ -2049,7 +2055,8 @@ ipset_summary_prose() {
     for ((i=0; i<${#N[@]}; i++)); do
         if [ -n "${M[i]}" ]; then
             tri=$(tri_slot "${M[i]}" "$TREND_FLAT_PCT" "$TREND_STRONG_PCT"); tri="${tri// /}"
-            pr="${D[i]} (${P[i]})${tri:+ $tri}"
+            if [ -n "$tri" ]; then pr="${D[i]} (${P[i]}) $tri"
+            else pr="${D[i]} (${P[i]}) ● $(t stats.ipset_stable)"; fi   # calme => marqueur stable (nu, sans couleur en prose)
         else pr=$(t stats.ipset_new); fi
         IPSET_PROSE+=$'\n'"• ${N[i]} : ${C[i]}  ·  $pr"
     done
@@ -2063,10 +2070,11 @@ ipset_summary_html() {
             case "$(dir_of "${M[i]}" "$TREND_FLAT_PCT")" in
                 up)   col="color:#cc3333" ;;   # hausse => rouge
                 down) col="color:#2e9e44" ;;   # baisse => vert
-                *)    col="" ;;
+                *)    col="color:#2e9e44" ;;   # calme => vert (marqueur stable)
             esac
             tri=$(tri_slot "${M[i]}" "$TREND_FLAT_PCT" "$TREND_STRONG_PCT"); tri="${tri// /}"
-            vr="${D[i]} (${P[i]})${tri:+ $tri}"
+            if [ -n "$tri" ]; then vr="${D[i]} (${P[i]}) $tri"
+            else vr="${D[i]} (${P[i]}) ● $(t stats.ipset_stable)"; fi
         else col=""; vr=$(t stats.ipset_new); fi
         nm=$(html_escape "${N[i]}")
         rows+="<tr><td style=\"padding:3px 12px;border-bottom:1px solid #eee\">$nm</td><td style=\"padding:3px 12px;text-align:right;border-bottom:1px solid #eee\">${C[i]}</td><td style=\"padding:3px 12px;text-align:right;border-bottom:1px solid #eee;$col\">$(html_escape "$vr")</td></tr>"
@@ -2159,9 +2167,14 @@ build_ipset_counts() {
         [ "$i" -gt 0 ] && printf '\n'
         if [ -n "${M[i]}" ]; then                       # variation 24 h : « delta (%) tri24 » colorée, paddée à wV
             dir=$(dir_of "${M[i]}" "$TREND_FLAT_PCT")
-            vplain="$(printf '%*s (%*s) ' "$wD" "${D[i]}" "$wP" "${P[i]}")$(tri_slot "${M[i]}" "$TREND_FLAT_PCT" "$TREND_STRONG_PCT")"   # delta + (% aligné à droite) + tri24
-            numf=$(paint "$vplain" "$dir")
-            vpad=$(( wV - (wD + wP + 6) )); [ "$vpad" -gt 0 ] && numf="$numf$(printf '%*s' "$vpad" "")"
+            if [ "$dir" = flat ]; then                  # calme => marqueur stable ● vert (distinct de ▲▼ ; delta/(%) neutre)
+                numf="$(printf '%*s (%*s) ' "$wD" "${D[i]}" "$wP" "${P[i]}")$(sev_ansi ok '●')"
+                vpad=$(( wV - (wD + wP + 5) )); [ "$vpad" -gt 0 ] && numf="$numf$(printf '%*s' "$vpad" "")"
+            else
+                vplain="$(printf '%*s (%*s) ' "$wD" "${D[i]}" "$wP" "${P[i]}")$(tri_slot "${M[i]}" "$TREND_FLAT_PCT" "$TREND_STRONG_PCT")"   # delta + (% aligné à droite) + tri24
+                numf=$(paint "$vplain" "$dir")
+                vpad=$(( wV - (wD + wP + 6) )); [ "$vpad" -gt 0 ] && numf="$numf$(printf '%*s' "$vpad" "")"
+            fi
         else numf=$(printf '%-*s' "$wV" "${D[i]}"); fi   # « nouveau », neutre
         if [ -n "${R[i]}" ]; then trec=$(paint "$(tri_slot "${R[i]}" "$TREND_RECENT_FLAT_PCT" "$TREND_RECENT_STRONG_PCT")" "$(dir_of "${R[i]}" "$TREND_RECENT_FLAT_PCT")"); else trec='  '; fi
         printf '  %-*s  %*s   %s  %s %s\n' "$wN" "${N[i]}" "$wC" "${C[i]}" "$numf" "${S[i]}" "$trec"

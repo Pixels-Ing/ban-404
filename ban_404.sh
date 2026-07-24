@@ -1,11 +1,14 @@
 #!/bin/bash
 
-BAN404_VERSION="2.0.1"
+BAN404_VERSION="2.1.0"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
 IPSET_NAME="ban_404_list"
 IPSET_SAVE_FILE="/etc/iptables/ipsets"   # chemin canonique du plugin ipset-persistent
+IPTABLES_RULES_FILE="/etc/iptables/rules.v4"   # persistance des règles iptables (plugin iptables-persistent)
+FW_BACKEND="auto"    # backend pare-feu : auto (défaut = préférer iptables+ipset, coexistence) | iptables | nftables
+FW_ACTIVE="iptables" # backend EFFECTIF, résolu par fw_init après le sourcing de la conf (ne pas régler à la main)
 BAN_TIMEOUT=172800   # 48 heures
 WINDOW=7200          # Fenêtre glissante en secondes (2h). Cron horaire => recouvrement, pas de trou aux bornes.
 TAIL_LINES=50000     # On n'analyse que les N dernières lignes de chaque log (borne le coût sur gros sites).
@@ -833,35 +836,47 @@ T_DE[diag.fw_none]="keines (nur lesen)"
 T_ES[diag.fw_none]="ninguno (solo lectura)"
 T_IT[diag.fw_none]="nessuno (sola lettura)"
 
-T_EN[diag.ipset_ok]="ipset %s present (%s members)."
-T_FR[diag.ipset_ok]="ipset %s présent (%s membres)."
-T_DE[diag.ipset_ok]="ipset %s vorhanden (%s Einträge)."
-T_ES[diag.ipset_ok]="ipset %s presente (%s miembros)."
-T_IT[diag.ipset_ok]="ipset %s presente (%s membri)."
+T_EN[fw.migrated]="[i] Firewall backend migrated: %s -> %s (bans transferred, old artefacts removed)."
+T_FR[fw.migrated]="[i] Backend pare-feu migré : %s -> %s (bans transférés, anciens artefacts retirés)."
+T_DE[fw.migrated]="[i] Firewall-Backend migriert: %s -> %s (Sperren übertragen, alte Artefakte entfernt)."
+T_ES[fw.migrated]="[i] Backend de firewall migrado: %s -> %s (bloqueos transferidos, artefactos antiguos eliminados)."
+T_IT[fw.migrated]="[i] Backend firewall migrato: %s -> %s (blocchi trasferiti, vecchi artefatti rimossi)."
 
-T_EN[diag.ipset_missing]="ipset %s missing — no bans are enforced."
-T_FR[diag.ipset_missing]="ipset %s absent — aucun ban n'est appliqué."
-T_DE[diag.ipset_missing]="ipset %s fehlt — keine Sperren aktiv."
-T_ES[diag.ipset_missing]="ipset %s ausente — no se aplica ningún bloqueo."
-T_IT[diag.ipset_missing]="ipset %s assente — nessun blocco applicato."
+T_EN[fw.migrate_abort]="[i] Firewall backend switch aborted: %s not ready — staying on the current backend (no protection gap)."
+T_FR[fw.migrate_abort]="[i] Bascule de backend pare-feu annulée : %s pas prêt — on reste sur le backend courant (aucun trou de protection)."
+T_DE[fw.migrate_abort]="[i] Firewall-Backend-Wechsel abgebrochen: %s nicht bereit — aktuelles Backend bleibt (keine Schutzlücke)."
+T_ES[fw.migrate_abort]="[i] Cambio de backend de firewall cancelado: %s no está listo — se mantiene el backend actual (sin brecha de protección)."
+T_IT[fw.migrate_abort]="[i] Cambio del backend firewall annullato: %s non pronto — si resta sul backend attuale (nessuna falla di protezione)."
 
-T_EN[diag.iptables_ok]="iptables INPUT DROP rule present."
-T_FR[diag.iptables_ok]="Règle iptables INPUT DROP présente."
-T_DE[diag.iptables_ok]="iptables INPUT-DROP-Regel vorhanden."
-T_ES[diag.iptables_ok]="Regla iptables INPUT DROP presente."
-T_IT[diag.iptables_ok]="Regola iptables INPUT DROP presente."
+T_EN[diag.fw_set_ok]="Firewall set %s present (%s members)."
+T_FR[diag.fw_set_ok]="Set pare-feu %s présent (%s membres)."
+T_DE[diag.fw_set_ok]="Firewall-Set %s vorhanden (%s Einträge)."
+T_ES[diag.fw_set_ok]="Set del firewall %s presente (%s miembros)."
+T_IT[diag.fw_set_ok]="Set del firewall %s presente (%s membri)."
 
-T_EN[diag.iptables_missing]="iptables INPUT DROP rule missing — bans are not enforced."
-T_FR[diag.iptables_missing]="Règle iptables INPUT DROP absente — les bans ne sont pas appliqués."
-T_DE[diag.iptables_missing]="iptables INPUT-DROP-Regel fehlt — Sperren werden nicht durchgesetzt."
-T_ES[diag.iptables_missing]="Regla iptables INPUT DROP ausente — los bloqueos no se aplican."
-T_IT[diag.iptables_missing]="Regola iptables INPUT DROP assente — i blocchi non vengono applicati."
+T_EN[diag.fw_set_missing]="Firewall set %s missing — no bans are enforced."
+T_FR[diag.fw_set_missing]="Set pare-feu %s absent — aucun ban n'est appliqué."
+T_DE[diag.fw_set_missing]="Firewall-Set %s fehlt — keine Sperren aktiv."
+T_ES[diag.fw_set_missing]="Set del firewall %s ausente — no se aplica ningún bloqueo."
+T_IT[diag.fw_set_missing]="Set del firewall %s assente — nessun blocco applicato."
 
-T_EN[diag.persist_ok]="Firewall persistence present (ipset + rules.v4)."
-T_FR[diag.persist_ok]="Persistance du pare-feu présente (ipset + rules.v4)."
-T_DE[diag.persist_ok]="Firewall-Persistenz vorhanden (ipset + rules.v4)."
-T_ES[diag.persist_ok]="Persistencia del firewall presente (ipset + rules.v4)."
-T_IT[diag.persist_ok]="Persistenza del firewall presente (ipset + rules.v4)."
+T_EN[diag.fw_rule_ok]="Firewall DROP rule present."
+T_FR[diag.fw_rule_ok]="Règle DROP du pare-feu présente."
+T_DE[diag.fw_rule_ok]="DROP-Regel der Firewall vorhanden."
+T_ES[diag.fw_rule_ok]="Regla DROP del firewall presente."
+T_IT[diag.fw_rule_ok]="Regola DROP del firewall presente."
+
+T_EN[diag.fw_rule_missing]="Firewall DROP rule missing — bans are not enforced."
+T_FR[diag.fw_rule_missing]="Règle DROP du pare-feu absente — les bans ne sont pas appliqués."
+T_DE[diag.fw_rule_missing]="DROP-Regel der Firewall fehlt — Sperren werden nicht durchgesetzt."
+T_ES[diag.fw_rule_missing]="Regla DROP del firewall ausente — los bloqueos no se aplican."
+T_IT[diag.fw_rule_missing]="Regola DROP del firewall assente — i blocchi non vengono applicati."
+
+T_EN[diag.persist_ok]="Firewall persistence present."
+T_FR[diag.persist_ok]="Persistance du pare-feu présente."
+T_DE[diag.persist_ok]="Firewall-Persistenz vorhanden."
+T_ES[diag.persist_ok]="Persistencia del firewall presente."
+T_IT[diag.persist_ok]="Persistenza del firewall presente."
 
 T_EN[diag.persist_missing]="Firewall persistence incomplete — bans may be lost on reboot."
 T_FR[diag.persist_missing]="Persistance du pare-feu incomplète — les bans risquent d'être perdus au reboot."
@@ -1176,6 +1191,12 @@ T_FR[help.conf_cron_step]="  CRON_STEP        Passages supplémentaires via /etc
 T_DE[help.conf_cron_step]="  CRON_STEP        Zusätzliche Läufe über /etc/cron.d (verwaltet): leer = nur stündlich (Standard), 5-30 = alle N min, auto = adaptiv 5-60 min mit Angriffswächter."
 T_ES[help.conf_cron_step]="  CRON_STEP        Ejecuciones adicionales vía /etc/cron.d (gestionado): vacío = solo horaria (por defecto), 5-30 = cada N min, auto = adaptativo 5-60 min con centinela de ataques."
 T_IT[help.conf_cron_step]="  CRON_STEP        Esecuzioni aggiuntive via /etc/cron.d (gestito): vuoto = solo oraria (predefinito), 5-30 = ogni N min, auto = adattivo 5-60 min con sentinella di attacco."
+
+T_EN[help.conf_fw_backend]="  FW_BACKEND       Firewall backend: auto (default = prefer iptables+ipset for coexistence) | iptables | nftables. Switching migrates existing bans."
+T_FR[help.conf_fw_backend]="  FW_BACKEND       Backend pare-feu : auto (défaut = préférer iptables+ipset pour la coexistence) | iptables | nftables. La bascule migre les bans existants."
+T_DE[help.conf_fw_backend]="  FW_BACKEND       Firewall-Backend: auto (Standard = iptables+ipset bevorzugen, Koexistenz) | iptables | nftables. Der Wechsel migriert bestehende Sperren."
+T_ES[help.conf_fw_backend]="  FW_BACKEND       Backend de firewall: auto (por defecto = preferir iptables+ipset por coexistencia) | iptables | nftables. El cambio migra los bloqueos existentes."
+T_IT[help.conf_fw_backend]="  FW_BACKEND       Backend firewall: auto (predefinito = preferire iptables+ipset per coesistenza) | iptables | nftables. Il cambio migra i blocchi esistenti."
 
 T_EN[help.conf_resolve]="  RESOLVE_PTR      Resolve reverse DNS (PTR) in --list/--stats/--summary (default false)."
 T_FR[help.conf_resolve]="  RESOLVE_PTR      Résoudre le reverse DNS (PTR) dans --list/--stats/--summary (défaut false)."
@@ -1616,10 +1637,220 @@ platform_supported() {
     local ids
     ids=$( . /etc/os-release 2>/dev/null; printf ' %s %s ' "${ID:-}" "${ID_LIKE:-}" )
     case "$ids" in *debian*|*ubuntu*) ;; *) return 1 ;; esac
-    command -v ipset >/dev/null 2>&1 || return 1
-    { command -v iptables >/dev/null 2>&1 || [ -x /sbin/iptables ]; } || return 1
-    return 0
+    fw_backend_usable   # le backend résolu (iptables+ipset OU nftables) doit avoir ses outils
 }
+
+# ============================================================================
+#  Abstraction du backend pare-feu (fw_*) — universalisation 2.1.0
+# ----------------------------------------------------------------------------
+#  DEUX backends : « iptables » (iptables + ipset, DÉFAUT — le comportement du
+#  parc, extrait VERBATIM ici, garanti non régressé par la CI) et « nftables »
+#  (opt-in, ou auto-choisi si iptables/ipset absents). Chaque fw_<op> dispatche
+#  sur $FW_ACTIVE vers ipt_<op> / nft_<op> ; FW_ACTIVE est figé par fw_init une
+#  fois la conf sourcée. COEXISTENCE (règle absolue) : ban-404 n'insère QUE sa
+#  propre règle / sa propre table nft namespacée, ne FLUSH jamais le pare-feu et
+#  ne touche jamais un artefact tiers — sur nft, notre table « inet ban_404 » est
+#  isolée au niveau netfilter (chaînes base multiples autorisées sur un hook).
+# ============================================================================
+NFT_TABLE_FAMILY="inet"; NFT_TABLE="ban_404"; NFT_CHAIN="input"
+NFT_SAVE_FILE="/etc/nftables/ban_404.conf"   # persistance dédiée (incluse en FIN de nftables.conf)
+NFT_MAIN_CONF="/etc/nftables.conf"
+IPT_BIN="/sbin/iptables"; IPT_SAVE_BIN="/sbin/iptables-save"; NFT_BIN="/usr/sbin/nft"  # résolus par fw_init
+
+fw_have_ipset()    { command -v ipset >/dev/null 2>&1; }
+fw_have_iptables() { command -v iptables >/dev/null 2>&1 || [ -x /sbin/iptables ]; }
+fw_have_nft()      { command -v nft >/dev/null 2>&1 || [ -x /usr/sbin/nft ]; }
+
+# Backend EFFECTIF (echo iptables|nftables) selon FW_BACKEND + présence des outils.
+# auto = PRÉFÉRER iptables+ipset (coexistence avec les scripts iptables déjà en place) ;
+# nft seulement si iptables/ipset absents. Un choix explicite est honoré tel quel.
+fw_resolve_backend() {
+    case "${FW_BACKEND:-auto}" in
+        iptables|ipset)  printf 'iptables' ;;
+        nft|nftables)    printf 'nftables' ;;
+        *) if fw_have_ipset && fw_have_iptables; then printf 'iptables'
+           elif fw_have_nft; then printf 'nftables'
+           else printf 'iptables'; fi ;;   # repli : platform_supported tranchera (lecture seule)
+    esac
+}
+# Le backend résolu a-t-il ses outils utilisables ? (base du fail-safe plateforme)
+fw_backend_usable() {
+    case "$(fw_resolve_backend)" in
+        nftables) fw_have_nft ;;
+        *)        fw_have_ipset && fw_have_iptables ;;
+    esac
+}
+# Fige FW_ACTIVE + les chemins des binaires (cron peut ne pas avoir /sbin dans le PATH).
+fw_init() {
+    FW_ACTIVE=$(fw_resolve_backend)
+    IPT_BIN=$(command -v iptables 2>/dev/null || echo /sbin/iptables)
+    IPT_SAVE_BIN=$(command -v iptables-save 2>/dev/null || echo /sbin/iptables-save)
+    NFT_BIN=$(command -v nft 2>/dev/null || echo /usr/sbin/nft)
+}
+fw_backend_label() { case "$FW_ACTIVE" in nftables) printf 'nftables' ;; *) printf 'iptables+ipset' ;; esac; }
+
+# ---------- Backend iptables + ipset (DÉFAUT, comportement historique verbatim) ----------
+ipt_set_exists()       { ipset list "$IPSET_NAME" &>/dev/null; }
+ipt_is_banned()        { ipset test "$IPSET_NAME" "$1" &>/dev/null; }        # $1=ip
+ipt_ban_ip()           { ipset -exist add "$IPSET_NAME" "$1"; }              # $1=ip (timeout du set)
+ipt_ban_ip_ttl()       { ipset -exist add "$IPSET_NAME" "$1" timeout "$2"; } # $1=ip $2=ttl(s)
+ipt_unban_ip()         { ipset del "$IPSET_NAME" "$1" 2>/dev/null; }         # $1=ip
+ipt_flush()            { ipset flush "$IPSET_NAME" 2>/dev/null; }
+ipt_list_members()     { ipset list "$IPSET_NAME" 2>/dev/null | awk '/^Members:/{m=1;next} m&&NF{print $1}'; }
+ipt_list_members_raw() { ipset list "$IPSET_NAME" 2>/dev/null | awk '/^Members:/{m=1;next} m&&NF{print}'; }
+ipt_count()            { ipset_count_members "$1"; }                          # $1=setname
+ipt_list_sets()        { ipset list -n 2>/dev/null | grep -vxF "${IPSET_NAME}_grow"; }
+ipt_persist()          { mkdir -p "$(dirname "$IPSET_SAVE_FILE")"; ipset save > "$IPSET_SAVE_FILE"; }
+ipt_rule_present()     { "$IPT_BIN" -C INPUT -m set --match-set "$IPSET_NAME" src -j DROP &>/dev/null; }
+ipt_persist_present()  { [ -f "$IPSET_SAVE_FILE" ] && [ -f "$IPTABLES_RULES_FILE" ]; }
+# Auto-agrandissement (one-shot) des sets pré-1.4.26 (maxelem 65536 -> 1048576) : copie + swap
+# atomique, bans conservés. Sans objet en nft (set dynamique à size fixée). Verbatim d'origine.
+ipt_grow_set() {
+    local cur_max tmp_set
+    cur_max=$(ipset list "$IPSET_NAME" -t 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="maxelem"){print $(i+1); exit}}')
+    if [ -n "$cur_max" ] && [ "$cur_max" -lt 1048576 ]; then
+        tmp_set="${IPSET_NAME}_grow"
+        ipset destroy "$tmp_set" 2>/dev/null
+        if ipset create "$tmp_set" hash:ip timeout $BAN_TIMEOUT maxelem 1048576 hashsize 65536 2>/dev/null; then
+            ipset save "$IPSET_NAME" 2>/dev/null | awk -v t="$tmp_set" '/^add /{$2=t; print}' | ipset restore -exist 2>/dev/null
+            if ipset swap "$tmp_set" "$IPSET_NAME" 2>/dev/null; then
+                ipset destroy "$tmp_set" 2>/dev/null
+                ipset save > "$IPSET_SAVE_FILE"
+                t_log heal.ipset_grown "$IPSET_NAME" "$cur_max"
+            else
+                ipset destroy "$tmp_set" 2>/dev/null
+            fi
+        fi
+    fi
+}
+ipt_ensure_infra() {
+    if ! ipset list "$IPSET_NAME" &>/dev/null; then
+        ipset create "$IPSET_NAME" hash:ip timeout $BAN_TIMEOUT maxelem 1048576 hashsize 65536
+    else
+        ipt_grow_set
+    fi
+    if ! "$IPT_BIN" -C INPUT -m set --match-set "$IPSET_NAME" src -j DROP &>/dev/null; then
+        "$IPT_BIN" -I INPUT -m set --match-set "$IPSET_NAME" src -j DROP
+        mkdir -p "$(dirname "$IPTABLES_RULES_FILE")"
+        "$IPT_SAVE_BIN" > "$IPTABLES_RULES_FILE"
+    fi
+}
+
+# ---------- Backend nftables (opt-in ; table « inet ban_404 » NAMESPACÉE, coexistence-safe) ----------
+# Set ipv4_addr à timeout par défaut (parité avec l'ipset hash:ip timeout=BAN_TIMEOUT) ; les bans
+# honeypot reçoivent un timeout par élément plus long. Test d'appartenance en O(1) via « get element »
+# (nft ≥ 0.9.3, Debian 11+/Ubuntu 20.04+ ; le backend nft cible des installs modernes) — bien moins
+# coûteux qu'un grep du dump complet à chaque IP candidate de la boucle de ban. La règle « ip saddr
+# @set drop » vit dans NOTRE chaîne base ; les autres tables (firewalld/ufw...) restent évaluées =>
+# pas de prise de contrôle. IPv4 uniquement, comme l'ipset actuel.
+nft_set_exists() { "$NFT_BIN" list set "$NFT_TABLE_FAMILY" "$NFT_TABLE" "$IPSET_NAME" &>/dev/null; }
+nft_is_banned()  { "$NFT_BIN" get element "$NFT_TABLE_FAMILY" "$NFT_TABLE" "$IPSET_NAME" "{ $1 }" &>/dev/null; }
+nft_ban_ip()     { "$NFT_BIN" add element "$NFT_TABLE_FAMILY" "$NFT_TABLE" "$IPSET_NAME" "{ $1 }" 2>/dev/null; }
+nft_ban_ip_ttl() { "$NFT_BIN" add element "$NFT_TABLE_FAMILY" "$NFT_TABLE" "$IPSET_NAME" "{ $1 timeout ${2}s }" 2>/dev/null; }
+nft_unban_ip()   { "$NFT_BIN" delete element "$NFT_TABLE_FAMILY" "$NFT_TABLE" "$IPSET_NAME" "{ $1 }" 2>/dev/null; }
+nft_flush()      { "$NFT_BIN" flush set "$NFT_TABLE_FAMILY" "$NFT_TABLE" "$IPSET_NAME" 2>/dev/null; }
+nft_list_members() { "$NFT_BIN" list set "$NFT_TABLE_FAMILY" "$NFT_TABLE" "$IPSET_NAME" 2>/dev/null | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}'; }
+nft_count() { "$NFT_BIN" list set "$NFT_TABLE_FAMILY" "$NFT_TABLE" "$1" 2>/dev/null | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' | wc -l | tr -d ' '; }
+nft_list_sets()  { nft_set_exists && printf '%s\n' "$IPSET_NAME"; }   # portée = NOTRE table (pas d'inventaire des tables tierces)
+# expires nft humain (1d23h59m30s) -> secondes (pour le tri de « list ») ; '?' si absent/illisible.
+nft_dur_to_secs() {
+    printf '%s' "${1:-}" | awk '{ s=0; n=""; ok=0
+        for(i=1;i<=length($0);i++){ c=substr($0,i,1)
+            if(c ~ /[0-9]/){n=n c}
+            else if(c=="d"){s+=n*86400;n="";ok=1} else if(c=="h"){s+=n*3600;n="";ok=1}
+            else if(c=="m"){s+=n*60;n="";ok=1}   else if(c=="s"){s+=n;n="";ok=1} }
+        if(ok) print s; else print "?" }'
+}
+# Membres « bruts » façon ipset (« ip timeout <secs_résiduelles> ») pour do_list.
+nft_list_members_raw() {
+    "$NFT_BIN" list set "$NFT_TABLE_FAMILY" "$NFT_TABLE" "$IPSET_NAME" 2>/dev/null | tr ',' '\n' \
+        | awk '{ ip=""; exp=""
+            for(i=1;i<=NF;i++){ if($i ~ /^([0-9]{1,3}\.){3}[0-9]{1,3}$/) ip=$i; if($i=="expires") exp=$(i+1) }
+            if(ip!="") print ip, exp }' \
+        | while read -r ip exp; do printf '%s timeout %s\n' "$ip" "$(nft_dur_to_secs "$exp")"; done
+}
+nft_rule_present()    { "$NFT_BIN" list chain "$NFT_TABLE_FAMILY" "$NFT_TABLE" "$NFT_CHAIN" 2>/dev/null | grep -q "@$IPSET_NAME drop"; }
+nft_persist_present() { [ -f "$NFT_SAVE_FILE" ]; }
+nft_grow_set()        { return 0; }   # sans objet en nft (set dynamique)
+nft_ensure_infra() {
+    "$NFT_BIN" list table "$NFT_TABLE_FAMILY" "$NFT_TABLE" &>/dev/null \
+        || "$NFT_BIN" add table "$NFT_TABLE_FAMILY" "$NFT_TABLE" 2>/dev/null
+    nft_set_exists \
+        || "$NFT_BIN" add set "$NFT_TABLE_FAMILY" "$NFT_TABLE" "$IPSET_NAME" \
+             "{ type ipv4_addr; flags timeout; timeout ${BAN_TIMEOUT}s; size 1048576; }" 2>/dev/null
+    "$NFT_BIN" list chain "$NFT_TABLE_FAMILY" "$NFT_TABLE" "$NFT_CHAIN" &>/dev/null \
+        || "$NFT_BIN" add chain "$NFT_TABLE_FAMILY" "$NFT_TABLE" "$NFT_CHAIN" \
+             "{ type filter hook input priority 0; policy accept; }" 2>/dev/null
+    nft_rule_present \
+        || "$NFT_BIN" add rule "$NFT_TABLE_FAMILY" "$NFT_TABLE" "$NFT_CHAIN" ip saddr "@$IPSET_NAME" drop 2>/dev/null
+}
+# Persistance nft : fichier dédié à NOTRE table (idiome « create+delete+define » = rechargeable
+# idempotent), inclus en FIN de nftables.conf (donc APRÈS un éventuel « flush ruleset »), jamais de
+# réécriture du fichier principal. Service de restauration best-effort.
+nft_persist() {
+    mkdir -p "$(dirname "$NFT_SAVE_FILE")"
+    { printf 'table %s %s\ndelete table %s %s\n' "$NFT_TABLE_FAMILY" "$NFT_TABLE" "$NFT_TABLE_FAMILY" "$NFT_TABLE"
+      "$NFT_BIN" list table "$NFT_TABLE_FAMILY" "$NFT_TABLE" 2>/dev/null
+    } > "$NFT_SAVE_FILE"
+    if [ -f "$NFT_MAIN_CONF" ] && ! grep -qF "$NFT_SAVE_FILE" "$NFT_MAIN_CONF"; then
+        printf 'include "%s"\n' "$NFT_SAVE_FILE" >> "$NFT_MAIN_CONF"
+    fi
+    command -v systemctl >/dev/null 2>&1 && systemctl enable nftables.service >/dev/null 2>&1 || true
+}
+
+# ---------- Dispatchers fw_* (interface unique consommée par le moteur) ----------
+fw_ensure_infra()     { case "$FW_ACTIVE" in nftables) nft_ensure_infra ;; *) ipt_ensure_infra ;; esac; }
+fw_set_exists()       { case "$FW_ACTIVE" in nftables) nft_set_exists ;; *) ipt_set_exists ;; esac; }
+fw_is_banned()        { case "$FW_ACTIVE" in nftables) nft_is_banned "$1" ;; *) ipt_is_banned "$1" ;; esac; }
+fw_ban_ip()           { case "$FW_ACTIVE" in nftables) nft_ban_ip "$1" ;; *) ipt_ban_ip "$1" ;; esac; }
+fw_ban_ip_ttl()       { case "$FW_ACTIVE" in nftables) nft_ban_ip_ttl "$1" "$2" ;; *) ipt_ban_ip_ttl "$1" "$2" ;; esac; }
+fw_unban_ip()         { case "$FW_ACTIVE" in nftables) nft_unban_ip "$1" ;; *) ipt_unban_ip "$1" ;; esac; }
+fw_flush()            { case "$FW_ACTIVE" in nftables) nft_flush ;; *) ipt_flush ;; esac; }
+fw_list_members()     { case "$FW_ACTIVE" in nftables) nft_list_members ;; *) ipt_list_members ;; esac; }
+fw_list_members_raw() { case "$FW_ACTIVE" in nftables) nft_list_members_raw ;; *) ipt_list_members_raw ;; esac; }
+fw_list_sets()        { case "$FW_ACTIVE" in nftables) nft_list_sets ;; *) ipt_list_sets ;; esac; }
+fw_count()            { case "$FW_ACTIVE" in nftables) nft_count "$1" ;; *) ipt_count "$1" ;; esac; }
+fw_persist()          { case "$FW_ACTIVE" in nftables) nft_persist ;; *) ipt_persist ;; esac; }
+fw_rule_present()     { case "$FW_ACTIVE" in nftables) nft_rule_present ;; *) ipt_rule_present ;; esac; }
+fw_persist_present()  { case "$FW_ACTIVE" in nftables) nft_persist_present ;; *) ipt_persist_present ;; esac; }
+
+# Bascule migratoire de backend (one-shot, détectée au run). FAIL-SAFE : on ne retire les artefacts
+# de l'ancien backend qu'APRÈS avoir vérifié que le nouveau applique bien sa règle — sinon on ne
+# touche à RIEN (aucun trou de protection). Jamais de flush du pare-feu. Réversible (les deux sens).
+fw_migrate_if_needed() {
+    if [ "$FW_ACTIVE" = nftables ] && fw_have_ipset && ipset list "$IPSET_NAME" &>/dev/null; then
+        # iptables/ipset -> nftables
+        nft_ensure_infra
+        nft_rule_present || { t_log fw.migrate_abort "nftables"; return 0; }
+        ipset save "$IPSET_NAME" 2>/dev/null | awk '/^add /{ to=0; for(i=1;i<=NF;i++) if($i=="timeout") to=$(i+1); print $3, to }' \
+            | while read -r ip to; do
+                  [ -z "$ip" ] && continue
+                  if [ "${to:-0}" -gt 0 ] 2>/dev/null; then nft_ban_ip_ttl "$ip" "$to"; else nft_ban_ip "$ip"; fi
+              done
+        nft_persist
+        if fw_have_iptables; then
+            "$IPT_BIN" -D INPUT -m set --match-set "$IPSET_NAME" src -j DROP 2>/dev/null
+            mkdir -p "$(dirname "$IPTABLES_RULES_FILE")"; "$IPT_SAVE_BIN" > "$IPTABLES_RULES_FILE" 2>/dev/null
+        fi
+        ipset destroy "$IPSET_NAME" 2>/dev/null
+        [ -f "$IPSET_SAVE_FILE" ] && ipset save > "$IPSET_SAVE_FILE" 2>/dev/null
+        t_log fw.migrated "iptables+ipset" "nftables"
+    elif [ "$FW_ACTIVE" != nftables ] && fw_have_nft && "$NFT_BIN" list table "$NFT_TABLE_FAMILY" "$NFT_TABLE" &>/dev/null; then
+        # nftables -> iptables/ipset
+        ipt_ensure_infra
+        ipt_rule_present || { t_log fw.migrate_abort "iptables+ipset"; return 0; }
+        nft_list_members_raw | while read -r ip _to_kw to; do
+            [ -z "$ip" ] && continue
+            if [ "${to:-0}" -gt 0 ] 2>/dev/null; then ipt_ban_ip_ttl "$ip" "$to"; else ipt_ban_ip "$ip"; fi
+        done
+        ipt_persist
+        "$NFT_BIN" delete table "$NFT_TABLE_FAMILY" "$NFT_TABLE" 2>/dev/null
+        [ -f "$NFT_SAVE_FILE" ] && rm -f "$NFT_SAVE_FILE"
+        t_log fw.migrated "nftables" "iptables+ipset"
+    fi
+}
+
+fw_init   # fige FW_ACTIVE + les chemins des binaires (conf déjà sourcée ci-dessus)
 
 # Initialisation des options
 DRY_RUN=false
@@ -1682,6 +1913,7 @@ show_help() {
     t help.conf_notify_bans
     t help.conf_daily
     t help.conf_cron_step
+    t help.conf_fw_backend
     t help.conf_resolve
     t help.conf_ptr_timeout
     t help.conf_postflood
@@ -1775,8 +2007,8 @@ enforce_whitelist_unban() {
         for w in "${wips[@]}"; do
             [ -z "$w" ] && continue
             if [ "$DRY_RUN" = true ]; then
-                ipset test "$IPSET_NAME" "$w" 2>/dev/null && t wl.sim_unban "$w"
-            elif ipset del "$IPSET_NAME" "$w" 2>/dev/null; then
+                fw_is_banned "$w" && t wl.sim_unban "$w"
+            elif fw_unban_ip "$w"; then
                 t_log wl.unban "$w"; removed=true
             fi
         done
@@ -1789,14 +2021,13 @@ enforce_whitelist_unban() {
             in_whitelist_cidr "$ip" || continue
             if [ "$DRY_RUN" = true ]; then
                 t wl.sim_unban "$ip"
-            elif ipset del "$IPSET_NAME" "$ip" 2>/dev/null; then
+            elif fw_unban_ip "$ip"; then
                 t_log wl.unban "$ip"; removed=true
             fi
-        done < <(ipset list "$IPSET_NAME" 2>/dev/null | awk '/^Members:/{m=1;next} m&&NF{print $1}')
+        done < <(fw_list_members)
     fi
     if [ "$removed" = true ]; then
-        mkdir -p "$(dirname "$IPSET_SAVE_FILE")"
-        ipset save > "$IPSET_SAVE_FILE"
+        fw_persist
     fi
 }
 
@@ -2236,7 +2467,7 @@ build_ipset_counts() {
     local sets now cut base_epoch name cur base series pm i wN=0 wC=0 wD=0 wP=0 wV vplain vpad numf trec dir span hc hv he
     local tot_cur=0 tot_base=0 have_all_base=1
     local -a N=() C=() D=() P=() M=() R=() S=()   # colonnes : nom, compte, delta, %, pm 24h, pm récent, sparkline
-    sets=$(ipset list -n 2>/dev/null | grep -vxF "${IPSET_NAME}_grow")
+    sets=$(fw_list_sets)
     [ -z "$sets" ] && return 0
     now=$(date +%s); cut=$((now - 86400)); base_epoch=""
     [ -r "$IPSET_COUNTS_FILE" ] && base_epoch=$(awk -v cut="$cut" '$1 ~ /^[0-9]+$/ && ($1+0)>=cut {print $1; exit}' "$IPSET_COUNTS_FILE" 2>/dev/null)
@@ -2245,7 +2476,7 @@ build_ipset_counts() {
     #      triangle récent (series_recent_pm sur la même fenêtre => cohérent). ----
     while IFS= read -r name; do
         [ -n "$name" ] || continue
-        cur=$(ipset_count_members "$name"); tot_cur=$((tot_cur + cur))
+        cur=$(fw_count "$name"); tot_cur=$((tot_cur + cur))
         base=""; [ -n "$base_epoch" ] && base=$(awk -v e="$base_epoch" -v s="$name" '$1==e && $2==s {print $3; exit}' "$IPSET_COUNTS_FILE" 2>/dev/null)
         series=""; [ -r "$IPSET_COUNTS_FILE" ] && series=$(awk -v cut="$cut" -v s="$name" '$1 ~ /^[0-9]+$/ && ($1+0)>=cut && $2==s {printf "%s ", $3}' "$IPSET_COUNTS_FILE" 2>/dev/null)
         series="$series$cur"
@@ -2438,7 +2669,7 @@ build_stats_text() {
 }
 do_list() {
     local members ip rest to_raw to fam key ipkey
-    members=$(ipset list "$IPSET_NAME" 2>/dev/null | awk '/^Members:/{m=1;next} m&&NF{print}')
+    members=$(fw_list_members_raw)
     t list.header "$IPSET_NAME"
     if [ -z "$members" ]; then t list.empty; return 0; fi
     # Construit des lignes triables "<clef>\t<ip>\t<timeout>", trie en LC_ALL=C
@@ -2939,20 +3170,19 @@ run_diag_checks() {
     [ -n "$pf_avail" ] || pf_avail="—"
     if platform_supported; then
         diag_line ok "$(t diag.platform_ok "$pf_id")"
-        diag_line ok "$(t diag.fw_backend "iptables+ipset" "$pf_avail")"   # seul backend implémenté en 2.0.x (FW_BACKEND arrive en Phase 1)
+        diag_line ok "$(t diag.fw_backend "$(fw_backend_label)" "$pf_avail")"   # backend EFFECTIF (FW_BACKEND) + disponibles
         if [ "$(id -u)" -eq 0 ]; then
-            if ipset list "$IPSET_NAME" &>/dev/null; then
-                n=$(ipset list "$IPSET_NAME" 2>/dev/null | awk '/^Members:/{m=1;next} m&&NF{c++} END{print c+0}')
-                diag_line ok "$(t diag.ipset_ok "$IPSET_NAME" "$n")"
+            if fw_set_exists; then
+                diag_line ok "$(t diag.fw_set_ok "$IPSET_NAME" "$(fw_count "$IPSET_NAME")")"
             else
-                diag_line fail "$(t diag.ipset_missing "$IPSET_NAME")"
+                diag_line fail "$(t diag.fw_set_missing "$IPSET_NAME")"
             fi
-            if /sbin/iptables -C INPUT -m set --match-set "$IPSET_NAME" src -j DROP &>/dev/null; then
-                diag_line ok "$(t diag.iptables_ok)"
+            if fw_rule_present; then
+                diag_line ok "$(t diag.fw_rule_ok)"
             else
-                diag_line fail "$(t diag.iptables_missing)"
+                diag_line fail "$(t diag.fw_rule_missing)"
             fi
-            if [ -f "$IPSET_SAVE_FILE" ] && [ -f /etc/iptables/rules.v4 ]; then
+            if fw_persist_present; then
                 diag_line ok "$(t diag.persist_ok)"
             else
                 diag_line warn "$(t diag.persist_missing)"
@@ -3200,19 +3430,18 @@ do_unban() {  # $1 = IP | all  (valeur requise, pas de défaut)
     local target="${1:-}" n
     [ -z "$target" ] && { t unban.missing; exit 1; }
     [ "$(id -u)" -ne 0 ] && { t unban.needroot; exit 1; }
-    ipset list "$IPSET_NAME" &>/dev/null || { t unban.noset "$IPSET_NAME"; exit 1; }
+    fw_set_exists || { t unban.noset "$IPSET_NAME"; exit 1; }
     if [ "${target,,}" = "all" ]; then
-        n=$(ipset list "$IPSET_NAME" 2>/dev/null | awk '/^Members:/{m=1;next} m&&NF{c++} END{print c+0}')
-        ipset flush "$IPSET_NAME" 2>/dev/null || { t unban.fail "all"; exit 1; }
+        n=$(fw_count "$IPSET_NAME")
+        fw_flush || { t unban.fail "all"; exit 1; }
         t_log unban.all_done "$n"
-    elif ipset test "$IPSET_NAME" "$target" &>/dev/null; then
-        ipset del "$IPSET_NAME" "$target" 2>/dev/null || { t unban.fail "$target"; exit 1; }
+    elif fw_is_banned "$target"; then
+        fw_unban_ip "$target" || { t unban.fail "$target"; exit 1; }
         t_log unban.done "$target"
     else
         t unban.notfound "$target"; exit 0
     fi
-    mkdir -p "$(dirname "$IPSET_SAVE_FILE")"
-    ipset save > "$IPSET_SAVE_FILE" 2>/dev/null
+    fw_persist
     exit 0
 }
 
@@ -3519,8 +3748,8 @@ metrics_sample() {
 # Même style que metrics_sample : appelé depuis finish_run (garde DRY_RUN=false + root), AUCUN sleep
 # (on relève les compteurs bruts), écriture atomique mktemp + mv, purge-on-write des lignes < 48 h.
 # Une ligne = 3 colonnes « epoch setname count » ; toutes les listes d'un passage partagent l'epoch
-# (base 24 h commune). Énumère via `ipset list -n`, saute le set transitoire ${IPSET_NAME}_grow
-# (redimensionnement). Comptage sans dump via ipset_count_members (-t). Toujours return 0.
+# (base 24 h commune). Énumère via fw_list_sets (le set transitoire ${IPSET_NAME}_grow est déjà
+# écarté par le backend). Comptage sans dump via fw_count. Toujours return 0.
 ipset_counts_sample() {
     local now dir tmp name count last
     now=$(date +%s)
@@ -3534,10 +3763,9 @@ ipset_counts_sample() {
         [ -f "$IPSET_COUNTS_FILE" ] && awk -v cut=$((now - 172800)) 'NF==3 && $1 ~ /^[0-9]+$/ && $1+0>=cut' "$IPSET_COUNTS_FILE" 2>/dev/null
         while IFS= read -r name; do
             [ -n "$name" ] || continue
-            [ "$name" = "${IPSET_NAME}_grow" ] && continue
-            count=$(ipset_count_members "$name")
+            count=$(fw_count "$name")
             printf '%s %s %s\n' "$now" "$name" "$count"
-        done < <(ipset list -n 2>/dev/null)
+        done < <(fw_list_sets)
     } > "$tmp" 2>/dev/null
     chmod 644 "$tmp" 2>/dev/null
     mv -f "$tmp" "$IPSET_COUNTS_FILE" 2>/dev/null || rm -f "$tmp" 2>/dev/null
@@ -3599,40 +3827,17 @@ EOF
 self_heal_hourly_cron
 
 if [ "$DRY_RUN" = false ]; then
-    ipset list "$IPSET_NAME" &>/dev/null
-    if [ $? -ne 0 ]; then
-        ipset create "$IPSET_NAME" hash:ip timeout $BAN_TIMEOUT maxelem 1048576 hashsize 65536
-    else
-        # Auto-agrandissement (one-shot) : les sets créés avant 1.4.26 plafonnent au défaut
-        # noyau maxelem=65536 — saturable en < 1 jour sous botnet (bans honeypot 7 j à
-        # plusieurs milliers d'IP/h). Un set plein refuse tout nouvel ajout EN SILENCE :
-        # la protection meurt sans bruit. Même principe que les self_heal_* : détection et
-        # réparation au passage horaire, bans existants conservés (copie + swap atomique).
-        cur_max=$(ipset list "$IPSET_NAME" -t 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="maxelem"){print $(i+1); exit}}')
-        if [ -n "$cur_max" ] && [ "$cur_max" -lt 1048576 ]; then
-            tmp_set="${IPSET_NAME}_grow"
-            ipset destroy "$tmp_set" 2>/dev/null
-            if ipset create "$tmp_set" hash:ip timeout $BAN_TIMEOUT maxelem 1048576 hashsize 65536 2>/dev/null; then
-                ipset save "$IPSET_NAME" 2>/dev/null | awk -v t="$tmp_set" '/^add /{$2=t; print}' | ipset restore -exist 2>/dev/null
-                if ipset swap "$tmp_set" "$IPSET_NAME" 2>/dev/null; then
-                    ipset destroy "$tmp_set" 2>/dev/null
-                    ipset save > "$IPSET_SAVE_FILE"
-                    t_log heal.ipset_grown "$IPSET_NAME" "$cur_max"
-                else
-                    ipset destroy "$tmp_set" 2>/dev/null
-                fi
-            fi
-        fi
-    fi
-    /sbin/iptables -C INPUT -m set --match-set "$IPSET_NAME" src -j DROP &>/dev/null
-    if [ $? -ne 0 ]; then
-        /sbin/iptables -I INPUT -m set --match-set "$IPSET_NAME" src -j DROP
-        mkdir -p /etc/iptables
-        /sbin/iptables-save > /etc/iptables/rules.v4
-    fi
+    # Bascule migratoire de backend (one-shot, fail-safe) : si l'admin a changé FW_BACKEND, on
+    # transfère les bans vers le nouveau backend AVANT de démonter l'ancien (jamais de trou).
+    fw_migrate_if_needed
+    # Mise en place de l'infra du backend ACTIF : création du set + insertion de NOTRE règle DROP
+    # (idempotent) ; en iptables, auto-agrandissement one-shot des sets pré-1.4.26 (maxelem 65536
+    # -> 1048576, saturable en < 1 j sous botnet, ajouts refusés EN SILENCE une fois plein). Voir
+    # fw_ensure_infra / ipt_ensure_infra / nft_ensure_infra dans la couche fw_*.
+    fw_ensure_infra
 fi
 
-# Débannissement actif des IP whitelistées déjà présentes dans l'ipset (avant l'analyse,
+# Débannissement actif des IP whitelistées déjà présentes dans le set (avant l'analyse,
 # pour s'appliquer même s'il n'y a aucun nouveau suspect ce passage-ci).
 enforce_whitelist_unban
 
@@ -3750,11 +3955,11 @@ while read -r count hpflag ip; do
         crawler_domain=$(is_legit_crawler "$ip"); is_crawler=$?
     fi
     if [ "$is_crawler" -eq 0 ]; then
-        if [ "$DRY_RUN" = false ] && ipset test "$IPSET_NAME" "$ip" &>/dev/null; then
+        if [ "$DRY_RUN" = false ] && fw_is_banned "$ip"; then
             t_log unban.crawler "$ip" "$crawler_domain" "$count"
-            ipset del "$IPSET_NAME" "$ip"
+            fw_unban_ip "$ip"
             changes_made=true
-        elif [ "$DRY_RUN" = true ] && ipset test "$IPSET_NAME" "$ip" &>/dev/null; then
+        elif [ "$DRY_RUN" = true ] && fw_is_banned "$ip"; then
             t sim.unban "$ip" "$crawler_domain"
             rules_simulated=$((rules_simulated + 1))
         else
@@ -3765,11 +3970,11 @@ while read -r count hpflag ip; do
 
     # Whitelist CIDR : même logique que les crawlers (deban si présent, sinon skip)
     if in_whitelist_cidr "$ip"; then
-        if [ "$DRY_RUN" = false ] && ipset test "$IPSET_NAME" "$ip" &>/dev/null; then
+        if [ "$DRY_RUN" = false ] && fw_is_banned "$ip"; then
             t_log cidr.unban "$ip" "$count"
-            ipset del "$IPSET_NAME" "$ip"
+            fw_unban_ip "$ip"
             changes_made=true
-        elif [ "$DRY_RUN" = true ] && ipset test "$IPSET_NAME" "$ip" &>/dev/null; then
+        elif [ "$DRY_RUN" = true ] && fw_is_banned "$ip"; then
             t cidr.sim_unban "$ip"
             rules_simulated=$((rules_simulated + 1))
         else
@@ -3778,7 +3983,7 @@ while read -r count hpflag ip; do
         continue
     fi
 
-    if ipset test "$IPSET_NAME" "$ip" &>/dev/null; then
+    if fw_is_banned "$ip"; then
         [ "$SHOW_BLOCKED" = true ] && t already.banned "$ip" "$count"
     else
         if [ "$DRY_RUN" = true ]; then
@@ -3792,10 +3997,10 @@ while read -r count hpflag ip; do
             if [ "$count" -ge "$HONEYPOT_SCORE" ]; then
                 t_log ban.honeypot "$ip" "$count"; hp=1
                 # Ban honeypot : timeout différencié (plus long que le défaut du set).
-                ipset -exist add "$IPSET_NAME" "$ip" timeout "$HONEYPOT_BAN_TIMEOUT"
+                fw_ban_ip_ttl "$ip" "$HONEYPOT_BAN_TIMEOUT"
             else
                 t_log ban.add "$ip" "$count"; hp=0
-                ipset -exist add "$IPSET_NAME" "$ip"
+                fw_ban_ip "$ip"
             fi
             changes_made=true
             new_bans+=("$ip|$count|$hp")
@@ -3810,8 +4015,7 @@ if [ "$DRY_RUN" = true ]; then
 else
     if [ "$changes_made" = true ]; then
         [ "$VERBOSE" = true ] && t verbose.changes_saved
-        mkdir -p "$(dirname "$IPSET_SAVE_FILE")"
-        ipset save > "$IPSET_SAVE_FILE"
+        fw_persist
     else
         [ "$VERBOSE" = true ] && t verbose.no_change
     fi

@@ -18,6 +18,13 @@ REPO_RAW="https://raw.githubusercontent.com/Pixels-Ing/ban-404/main"
 # Fail-safe piattaforma: vuoto = rilevamento automatico; true = forzare l'applicazione su una piattaforma non riconosciuta (a proprio rischio); false = forzare la sola lettura.
 #PLATFORM_VALIDATED=""
 
+# Firewall backend: auto (default = prefer iptables+ipset for coexistence with existing iptables scripts) | iptables | nftables. Switching migrates existing bans one-shot (fail-safe, no protection gap).
+# Backend pare-feu : auto (défaut = préférer iptables+ipset, coexistence avec les scripts iptables déjà en place) | iptables | nftables. La bascule migre les bans existants une fois (fail-safe, aucun trou de protection).
+# Firewall-Backend: auto (Standard = iptables+ipset bevorzugen, Koexistenz mit vorhandenen iptables-Skripten) | iptables | nftables. Der Wechsel migriert bestehende Sperren einmalig (fail-safe, keine Schutzlücke).
+# Backend de firewall: auto (por defecto = preferir iptables+ipset por coexistencia con scripts iptables existentes) | iptables | nftables. El cambio migra los bloqueos existentes una vez (fail-safe, sin brecha de protección).
+# Backend firewall: auto (predefinito = preferire iptables+ipset per coesistenza con script iptables esistenti) | iptables | nftables. Il cambio migra i blocchi esistenti una volta (fail-safe, nessuna falla di protezione).
+#FW_BACKEND="auto"
+
 # IPs to NEVER ban (exact match, separated by | ).
 # IP à ne JAMAIS bannir (correspondance exacte, séparées par | ).
 # Niemals zu sperrende IPs (exakte Übereinstimmung, durch | getrennt).

@@ -24,3 +24,14 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y ipset iptables
       - name: Lancer le test d'intégration (dry-run + ban/unban réel)
         run: sudo bash tests/integration.sh ./ban_404.sh
+
+  # Backend nftables (opt-in) + bascule migratoire iptables -> nft. Le runner Ubuntu porte ipset,
+  # iptables ET nft => on peut valider le backend nft ET la migration one-shot. Voir tests/integration_nft.sh.
+  integration-nft:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Installer ipset + iptables + nftables
+        run: sudo apt-get update && sudo apt-get install -y ipset iptables nftables
+      - name: Lancer le test d'intégration nft (backend nft + bascule)
+        run: sudo bash tests/integration_nft.sh ./ban_404.sh

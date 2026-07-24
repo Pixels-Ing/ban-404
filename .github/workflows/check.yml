@@ -13,3 +13,14 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y shellcheck
       - name: Lancer check.sh
         run: bash check.sh
+
+  # Test d'intégration : verrouille le comportement de RÉFÉRENCE (Apache/ISPConfig + ipset/iptables)
+  # pour détecter toute régression avant l'universalisation. Voir tests/integration.sh.
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Installer ipset + iptables
+        run: sudo apt-get update && sudo apt-get install -y ipset iptables
+      - name: Lancer le test d'intégration (dry-run + ban/unban réel)
+        run: sudo bash tests/integration.sh ./ban_404.sh

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="1.6.11"
+BAN404_VERSION="1.6.12"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -2113,7 +2113,7 @@ ipset_summary_html() {
             case "$(dir_of "${M[i]}" "$TREND_FLAT_PCT")" in
                 up)   col="color:#cc3333" ;;   # hausse => rouge
                 down) col="color:#2e9e44" ;;   # baisse => vert
-                *)    col="color:#2e9e44" ;;   # calme => vert (marqueur stable)
+                *)    col="" ;;                 # calme => neutre (marqueur ● stable)
             esac
             tri=$(tri_slot "${M[i]}" "$TREND_FLAT_PCT" "$TREND_STRONG_PCT"); tri="${tri// /}"
             if [ -n "$tri" ]; then vr="${D[i]} (${P[i]}) $tri"
@@ -2162,13 +2162,14 @@ ipset_card() {  # utilise N/C/D/P/M/base_epoch/now par portée dynamique (appel 
     for ((i=0; i<${#N[@]}; i++)); do
         if [ -n "${M[i]}" ]; then
             case "$(dir_of "${M[i]}" "$TREND_FLAT_PCT")" in
-                up) col="#cc3333" ;;   # hausse => rouge
-                *)  col="#2e9e44" ;;   # baisse OU calme => vert
+                up)   col="#cc3333" ;;   # hausse => rouge
+                down) col="#2e9e44" ;;   # baisse => vert
+                *)    col="" ;;          # calme => neutre (marqueur ● stable)
             esac
             tri=$(tri_slot "${M[i]}" "$TREND_FLAT_PCT" "$TREND_STRONG_PCT"); tri="${tri// /}"
             if [ -n "$tri" ]; then vr="${D[i]} (${P[i]}) $tri"
             else vr="${D[i]} (${P[i]}) ● $(t stats.ipset_stable)"; fi
-            vr="<font color=\"$col\">$(html_escape "$vr")</font>"
+            vr="${col:+<font color=\"$col\">}$(html_escape "$vr")${col:+</font>}"
         else vr=$(html_escape "$(t stats.ipset_new)"); fi
         IPSET_CARD+="<br>• $(html_escape "${N[i]} : ${C[i]}  ·  ")$vr"
     done
@@ -2237,8 +2238,8 @@ build_ipset_counts() {
         [ "$i" -gt 0 ] && printf '\n'
         if [ -n "${M[i]}" ]; then                       # variation 24 h : « delta (%) tri24 » colorée, paddée à wV
             dir=$(dir_of "${M[i]}" "$TREND_FLAT_PCT")
-            if [ "$dir" = flat ]; then                  # calme => marqueur stable ● vert (distinct de ▲▼ ; delta/(%) neutre)
-                numf="$(printf '%*s (%*s) ' "$wD" "${D[i]}" "$wP" "${P[i]}")$(sev_ansi ok '●')"
+            if [ "$dir" = flat ]; then                  # calme => marqueur stable ● NEUTRE (rouge=hausse / neutre=stable / vert=baisse)
+                numf="$(printf '%*s (%*s) ' "$wD" "${D[i]}" "$wP" "${P[i]}")●"
                 vpad=$(( wV - (wD + wP + 5) )); [ "$vpad" -gt 0 ] && numf="$numf$(printf '%*s' "$vpad" "")"
             else
                 vplain="$(printf '%*s (%*s) ' "$wD" "${D[i]}" "$wP" "${P[i]}")$(tri_slot "${M[i]}" "$TREND_FLAT_PCT" "$TREND_STRONG_PCT")"   # delta + (% aligné à droite) + tri24

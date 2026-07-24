@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="1.6.8"
+BAN404_VERSION="1.6.9"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -62,7 +62,7 @@ SAMPLE_MIN_INTERVAL=3300   # espacement mini (s) des échantillons metrics/ipset
 
 # Notifications (optionnel ; vides => désactivées). Messages dans la langue BAN404_LANG.
 WEBHOOK_URL=""        # POST JSON des nouveaux bans (Slack/Discord/Teams/n8n...)
-WEBHOOK_CHAT_CARD=false  # Google Chat : true => résumé quotidien en CARTE colorée (cardsV2) au lieu du texte simple
+WEBHOOK_CHAT_CARD=true   # Google Chat : résumé quotidien en CARTE colorée (cardsV2) ; false => texte simple sans couleur
 NOTIFY_EMAIL=""       # e-mail des nouveaux bans (nécessite un MTA : mail/sendmail)
 NOTIFY_FROM=""        # expéditeur e-mail (optionnel)
 NOTIFY_MIN_BANS=1     # ne notifier que si AU MOINS N nouveaux bans dans le run
@@ -1103,11 +1103,11 @@ T_DE[help.conf_webhook]="  WEBHOOK_URL      JSON-POST neuer Sperren (Slack/Disco
 T_ES[help.conf_webhook]="  WEBHOOK_URL      POST JSON de nuevos bloqueos (Slack/Discord/Teams/Google Chat...); vacío = inactivo."
 T_IT[help.conf_webhook]="  WEBHOOK_URL      POST JSON dei nuovi blocchi (Slack/Discord/Teams/Google Chat...); vuoto = disattivato."
 
-T_EN[help.conf_chatcard]="  WEBHOOK_CHAT_CARD  Google Chat only: true => daily summary as a colored card (cardsV2); default false."
-T_FR[help.conf_chatcard]="  WEBHOOK_CHAT_CARD  Google Chat uniquement : true => résumé quotidien en carte colorée (cardsV2) ; défaut false."
-T_DE[help.conf_chatcard]="  WEBHOOK_CHAT_CARD  Nur Google Chat: true => tägliche Zusammenfassung als farbige Karte (cardsV2); Standard false."
-T_ES[help.conf_chatcard]="  WEBHOOK_CHAT_CARD  Solo Google Chat: true => resumen diario como tarjeta con color (cardsV2); por defecto false."
-T_IT[help.conf_chatcard]="  WEBHOOK_CHAT_CARD  Solo Google Chat: true => riepilogo giornaliero come scheda colorata (cardsV2); predefinito false."
+T_EN[help.conf_chatcard]="  WEBHOOK_CHAT_CARD  Google Chat only: daily summary as a colored card (cardsV2); default true, false = plain text."
+T_FR[help.conf_chatcard]="  WEBHOOK_CHAT_CARD  Google Chat uniquement : résumé quotidien en carte colorée (cardsV2) ; défaut true, false = texte simple."
+T_DE[help.conf_chatcard]="  WEBHOOK_CHAT_CARD  Nur Google Chat: tägliche Zusammenfassung als farbige Karte (cardsV2); Standard true, false = einfacher Text."
+T_ES[help.conf_chatcard]="  WEBHOOK_CHAT_CARD  Solo Google Chat: resumen diario como tarjeta con color (cardsV2); por defecto true, false = texto simple."
+T_IT[help.conf_chatcard]="  WEBHOOK_CHAT_CARD  Solo Google Chat: riepilogo giornaliero come scheda colorata (cardsV2); predefinito true, false = testo semplice."
 
 T_EN[help.conf_email]="  NOTIFY_EMAIL     E-mail of new bans (needs an MTA: mail/sendmail); empty = off."
 T_FR[help.conf_email]="  NOTIFY_EMAIL     E-mail des nouveaux bans (MTA requis : mail/sendmail) ; vide = inactif."
@@ -1814,7 +1814,10 @@ encode_header() {
 build_webhook_payload() {
     case "$WEBHOOK_URL" in
         *chat.googleapis.com*)
-            if [ -n "${2:-}" ] && diag_is_on "${WEBHOOK_CHAT_CARD:-false}"; then
+            # Repli vers {text} si la carte dépasserait ~la limite de taille de Google Chat : sans ce
+            # garde, un corps trop long => 400 silencieux (curl -f + || true) => résumé perdu. Le texte
+            # simple, plus court (sans balises), passe alors sans couleur mais SANS perte.
+            if [ -n "${2:-}" ] && [ "${#2}" -lt 3800 ] && diag_is_on "${WEBHOOK_CHAT_CARD:-true}"; then
                 printf '{"cardsV2":[{"cardId":"ban404","card":{"header":{"title":"%s"},"sections":[{"widgets":[{"textParagraph":{"text":"%s"}}]}]}}]}' \
                        "$(json_escape "${3:-$(server_label)}")" "$(json_escape "$2")"
             else
@@ -1826,7 +1829,7 @@ build_webhook_payload() {
 send_webhook() {  # $1 = texte plain ; $2 = corps carte (optionnel) ; $3 = titre carte (optionnel)
     [ -z "$WEBHOOK_URL" ] && return 0
     command -v curl >/dev/null 2>&1 || return 0
-    curl -fsS -m 15 -H 'Content-Type: application/json' \
+    curl -fsS -m 15 -H 'Content-Type: application/json; charset=UTF-8' \
          -X POST -d "$(build_webhook_payload "$1" "${2:-}" "${3:-}")" "$WEBHOOK_URL" >/dev/null 2>&1 || true
 }
 send_email() {  # $1 = sujet, $2 = corps texte, $3 = corps HTML (optionnel)
@@ -2132,7 +2135,7 @@ vitals_html() {
     local i col rows=""
     for ((i=0; i<${#HEALTH_LINES[@]}; i++)); do
         col=$(sev_hex "${HEALTH_SEV[i]:-ok}")
-        rows+="<div${col:+ style=\"color:$col\"}>$(html_escape "${HEALTH_LINES[i]}")</div>"
+        rows+="<div><span style=\"color:$col\">●</span> $(html_escape "${HEALTH_LINES[i]}")</div>"
     done
     VITALS_HTML="<div style=\"margin:12px 0 4px;font-weight:bold\">$(html_escape "$(t stats.health_vitals)")</div>$rows"
 }
@@ -2142,8 +2145,7 @@ vitals_card() {
     VITALS_CARD="<br><b>$(html_escape "$(t stats.health_vitals)")</b>"
     for ((i=0; i<${#HEALTH_LINES[@]}; i++)); do
         col=$(sev_hex "${HEALTH_SEV[i]:-ok}")
-        if [ -n "$col" ]; then VITALS_CARD+="<br><font color=\"$col\">$(html_escape "${HEALTH_LINES[i]}")</font>"
-        else VITALS_CARD+="<br>$(html_escape "${HEALTH_LINES[i]}")"; fi
+        VITALS_CARD+="<br><font color=\"$col\">●</font> $(html_escape "${HEALTH_LINES[i]}")"   # résultat seul en couleur : ● coloré, texte neutre
     done
 }
 ipset_card() {  # utilise N/C/D/P/M/base_epoch/now par portée dynamique (appel depuis build_ipset_counts)
@@ -2282,8 +2284,12 @@ build_stats_text() {
         t stats.health_ok                       # ligne inline « Santé : aucune anomalie détectée. »
     else
         t stats.health_header                   # « Santé (anomalies) : »
-        for issue in "${DIAG_ISSUES[@]}"; do
-            printf '  %s\n' "$issue"             # déjà préfixé [WARN]/[FAIL] + déjà localisé (pas de re-format t)
+        for issue in "${DIAG_ISSUES[@]}"; do   # déjà préfixé [WARN]/[FAIL] + localisé ; colorées au terminal (alertes)
+            case "$issue" in
+                "[FAIL]"*) printf '  %s\n' "$(sev_ansi crit "$issue")" ;;
+                "[WARN]"*) printf '  %s\n' "$(sev_ansi warn "$issue")" ;;
+                *)         printf '  %s\n' "$issue" ;;
+            esac
         done
     fi
     # --- Signes vitaux : TOUJOURS affichés (valeurs mesurées par run_diag_checks ci-dessus via
@@ -2297,11 +2303,12 @@ build_stats_text() {
             printf '\001VITALSBLOCK\002\n'
         else
             printf '\n── %s ──\n' "$(t stats.health_vitals)"
-            # Coloration par gravité au terminal : vert=OK, orange=élevé, rouge=critique (sev_ansi ne
-            # colore qu'en OUTPUT_MODE=ansi ; en 'plain' les lignes sortent nues).
+            # Résultat SEUL en couleur : un ● coloré par gravité (vert=OK / orange=élevé / rouge=critique),
+            # le texte reste neutre — colorer toute la ligne nuisait à la lisibilité. sev_ansi ne colore
+            # qu'en OUTPUT_MODE=ansi (terminal) ; en 'plain' le ● sort nu.
             local _hi
             for ((_hi = 0; _hi < ${#HEALTH_LINES[@]}; _hi++)); do
-                sev_ansi "${HEALTH_SEV[_hi]:-ok}" "${HEALTH_LINES[_hi]}"; printf '\n'
+                printf '%s %s\n' "$(sev_ansi "${HEALTH_SEV[_hi]:-ok}" '●')" "${HEALTH_LINES[_hi]}"
             done
         fi
     fi
@@ -2465,7 +2472,7 @@ check_webhook() {
     host=$(server_label)
     tmp=$(mktemp 2>/dev/null) || tmp=""
     local cbody; cbody=$(t check.body "$host")   # passe aussi le corps en CARTE : le test live montre la carte quand WEBHOOK_CHAT_CARD est actif
-    code=$(curl -sS -m 15 -o "${tmp:-/dev/null}" -w '%{http_code}' -H 'Content-Type: application/json' \
+    code=$(curl -sS -m 15 -o "${tmp:-/dev/null}" -w '%{http_code}' -H 'Content-Type: application/json; charset=UTF-8' \
                 -X POST -d "$(build_webhook_payload "$cbody" "$cbody" "$host")" "$WEBHOOK_URL" 2>/dev/null); rc=$?
     body=""; [ -n "$tmp" ] && { body=$(tr -d '\r' < "$tmp" 2>/dev/null | tr '\n' ' ' | head -c 300); rm -f "$tmp"; }
     if [ "$rc" -ne 0 ]; then t check.webhook_err; [ -n "$body" ] && t check.diag "$body"; return 1; fi
@@ -2666,14 +2673,14 @@ declare -a HEALTH_LINES=() # signes vitaux localisés AVEC valeurs (bloc « Sign
 declare -a HEALTH_SEV=()   # gravité (ok|warn|crit) alignée sur HEALTH_LINES (coloration vert/orange/rouge)
 HEALTH_DONE=false          # garde anti-double-mesure (l'échantillon réseau ~1 s ne tourne qu'une fois)
 diag_line() {  # $1 = ok|warn|fail ; $2 = message déjà localisé
-    local tag
+    local tag sev
     case "$1" in
-        ok)   tag="[ OK ]" ;;
-        warn) tag="[WARN]"; DIAG_PROBLEMS=$((DIAG_PROBLEMS + 1)); DIAG_ISSUES+=("$tag $2") ;;
-        *)    tag="[FAIL]"; DIAG_PROBLEMS=$((DIAG_PROBLEMS + 1)); DIAG_ISSUES+=("$tag $2") ;;
+        ok)   tag="[ OK ]"; sev=ok ;;
+        warn) tag="[WARN]"; sev=warn; DIAG_PROBLEMS=$((DIAG_PROBLEMS + 1)); DIAG_ISSUES+=("$tag $2") ;;
+        *)    tag="[FAIL]"; sev=crit; DIAG_PROBLEMS=$((DIAG_PROBLEMS + 1)); DIAG_ISSUES+=("$tag $2") ;;
     esac
     [ "$DIAG_QUIET" = true ] && return 0
-    printf '%s %s\n' "$tag" "$2"
+    printf '%s %s\n' "$(sev_ansi "$sev" "$tag")" "$2"   # tag coloré au terminal (OUTPUT_MODE=ansi) ; DIAG_ISSUES reste nu (résumé)
 }
 diag_is_on() { case "${1:-}" in true|1|yes|on) return 0 ;; *) return 1 ;; esac; }
 
@@ -3072,6 +3079,7 @@ run_health_checks() {
 }
 
 do_diag() {
+    [ -t 1 ] && OUTPUT_MODE=ansi      # tags [ OK ]/[WARN]/[FAIL] colorés au terminal (sev_ansi ; plain sinon)
     t diag.header
     run_diag_checks
     # Moyennes 24 h uniquement sur demande explicite (--avg) : diag reste l'état COURANT par défaut.
@@ -3086,6 +3094,7 @@ do_diag() {
 # Demander explicitement les signes vitaux doit toujours répondre : on force HEALTH_CHECKS
 # (une conf HEALTH_CHECKS=false ne désactive que diag et le résumé).
 do_health() {
+    [ -t 1 ] && OUTPUT_MODE=ansi      # tags colorés au terminal
     t health.header
     HEALTH_CHECKS=true
     run_health_checks

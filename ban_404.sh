@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="1.6.12"
+BAN404_VERSION="2.0.0"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -16,6 +16,8 @@ UPDATE_STAMP_FILE="/var/lib/ban_404/last_update"   # repère « l'updater a tour
 RUN_STAMP_FILE="/var/lib/ban_404/last_run"         # repère « le moteur a fini un run réel » (lu par --diag/--summary)
 METRICS_FILE="/var/lib/ban_404/metrics"            # historique horaire load/IO/réseau/mémoire (moyennes 24 h du résumé)
 IPSET_COUNTS_FILE="/var/lib/ban_404/ipset_counts"  # historique horaire du nb d'entrées par ipset (évol. + tendance 24 h du résumé)
+PLATFORM_VALIDATED=""   # fail-safe plateforme : vide = auto-détection (os-release distro + backend iptables/ipset) ;
+                        # true = forcer l'application même sur plateforme non reconnue (l'admin assume le risque) ; false = forcer la lecture seule
 
 # Seuils & motifs de détection (surchargeables par la conf)
 BAN_THRESHOLD=10     # Ban si le score dépasse ce seuil dans la fenêtre.
@@ -337,6 +339,12 @@ T_FR[cadence.adjusted]="[i] Cadence auto : intervalle effectif %s -> %s min"
 T_DE[cadence.adjusted]="[i] Auto-Takt: effektives Intervall %s -> %s min"
 T_ES[cadence.adjusted]="[i] Cadencia auto: intervalo efectivo %s -> %s min"
 T_IT[cadence.adjusted]="[i] Cadenza auto: intervallo effettivo %s -> %s min"
+
+T_EN[platform.readonly]="[i] Unvalidated platform (unknown distro/firewall backend) — READ-ONLY mode, no firewall write. Override: PLATFORM_VALIDATED."
+T_FR[platform.readonly]="[i] Plateforme non validée (distro/back-end pare-feu inconnus) — mode LECTURE SEULE, aucune écriture pare-feu. Override : PLATFORM_VALIDATED."
+T_DE[platform.readonly]="[i] Nicht validierte Plattform (unbekannte Distro/Firewall-Backend) — NUR-LESE-Modus, keine Firewall-Schreibvorgänge. Override: PLATFORM_VALIDATED."
+T_ES[platform.readonly]="[i] Plataforma no validada (distro/backend de firewall desconocidos) — modo SOLO LECTURA, sin escritura de firewall. Override: PLATFORM_VALIDATED."
+T_IT[platform.readonly]="[i] Piattaforma non validata (distro/backend firewall sconosciuti) — modalità SOLA LETTURA, nessuna scrittura firewall. Override: PLATFORM_VALIDATED."
 
 T_EN[no_valid_files]="=> No valid log file found. Done."
 T_FR[no_valid_files]="=> Aucun fichier de log valide trouvé. Fin."
@@ -1570,6 +1578,23 @@ t_log() {  # comme t, mais duplique la ligne (horodatée) dans LOG_FILE
     local m; m=$(t "$@")
     printf '%s\n' "$m"
     log_line "$m"
+}
+
+# Plateforme supportée pour l'APPLICATION des règles ? Sinon le run bascule en LECTURE SEULE (voir le
+# fail-safe avant le verrou). Override explicite PLATFORM_VALIDATED (l'admin assume le risque) ; sinon
+# détection : distro connue (os-release debian/ubuntu, sourcé en SOUS-SHELL pour ne rien polluer) +
+# backend iptables/ipset présent. Sera étendu au fil de l'universalisation (nft, autres distros/panels).
+platform_supported() {
+    case "${PLATFORM_VALIDATED:-}" in
+        true|1|yes|on)  return 0 ;;
+        false|0|no|off) return 1 ;;
+    esac
+    local ids
+    ids=$( . /etc/os-release 2>/dev/null; printf ' %s %s ' "${ID:-}" "${ID_LIKE:-}" )
+    case "$ids" in *debian*|*ubuntu*) ;; *) return 1 ;; esac
+    command -v ipset >/dev/null 2>&1 || return 1
+    { command -v iptables >/dev/null 2>&1 || [ -x /sbin/iptables ]; } || return 1
+    return 0
 }
 
 # Initialisation des options
@@ -3200,6 +3225,15 @@ if [ "$DO_STATS" = true ] || [ "$DO_LIST" = true ]; then
     [ "$DO_STATS" = true ] && [ "$DO_LIST" = true ] && echo ""
     [ "$DO_LIST" = true ] && do_list
     exit 0
+fi
+
+# --- Fail-safe plateforme : sur une plateforme NON validée (distro/back-end inconnus), on force la
+#     LECTURE SEULE (aucune écriture ipset/iptables/persistance) plutôt que d'agir de travers. Les
+#     sous-commandes lecture seule (diag/stats/list/health, ci-dessus) restent disponibles. Backward-
+#     compatible : le parc Debian/Ubuntu + iptables/ipset reste « supporté » => comportement inchangé. ---
+if [ "$DRY_RUN" = false ] && ! platform_supported; then
+    t_log platform.readonly       # journalisé AVANT de forcer dry-run (LOG_EVENTS encore actif ici)
+    DRY_RUN=true
 fi
 
 # --- Verrou anti-chevauchement (cron). Inutile en simulation (lecture seule). ---

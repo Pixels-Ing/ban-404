@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="1.6.10"
+BAN404_VERSION="1.6.11"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -2282,14 +2282,15 @@ build_stats_text() {
     # seul diag la montrait). L'ÉVOLUTION, elle, vit au journal (cadence.adjusted via t_log).
     case "$(cron_step_mode)" in
         auto)
-            # Intervalle effectif : la SEULE valeur est colorée (lâche=vert / 20=neutre / serré=rouge).
-            # En notif : placeholder \001CVAL\002 dans la ligne (survit à html_escape/card_text) => coloré
-            # par do_summary selon le canal, via CADENCE_VAL/CADENCE_HEX. Au terminal : coloré inline.
-            CADENCE_VAL=$(cadence_read); CADENCE_HEX=$(sev_hex "$(cadence_sev "$CADENCE_VAL")")
+            # « Bulle » de statut : un ● coloré préfixe la ligne (comme les signes vitaux) ; la valeur
+            # reste neutre. Couleur = lâche (>=40)=vert / 20=neutre / serré (<=10)=rouge. En notif, le ●
+            # est un placeholder \001CVAL\002 (survit à html_escape/card_text), coloré par do_summary
+            # selon le canal via CADENCE_HEX ; au terminal, ● coloré inline (sev_ansi).
+            local _cds; CADENCE_VAL=$(cadence_read); _cds=$(cadence_sev "$CADENCE_VAL"); CADENCE_HEX=$(sev_hex "$_cds")
             if [ "${SUMMARY_NOTIFY:-}" = 1 ]; then
-                t stats.cadence_auto $'\001CVAL\002'
+                printf '%s %s\n' $'\001CVAL\002' "$(t stats.cadence_auto "$CADENCE_VAL")"
             else
-                t stats.cadence_auto "$(sev_ansi "$(cadence_sev "$CADENCE_VAL")" "$CADENCE_VAL")"
+                printf '%s %s\n' "$(sev_ansi "$_cds" '●')" "$(t stats.cadence_auto "$CADENCE_VAL")"
             fi ;;
         fixed) t stats.cadence_fixed "$CRON_STEP" ;;
     esac
@@ -2471,12 +2472,12 @@ do_summary() {
     fi
     seg="${seg//$vtok/}"; seg="${seg//$itok/}"
     body_card+="$(card_text "$seg")"
-    # Valeur de cadence colorée SEULE : le placeholder \001CVAL\002 (posé par build_stats_text en mode
-    # auto) survit à html_escape/card_text ; on le remplace ici par canal (neutre => valeur nue).
+    # Bulle ● de la cadence : le placeholder \001CVAL\002 (posé par build_stats_text en mode auto)
+    # survit à html_escape/card_text ; on le remplace ici par un ● coloré selon le canal (neutre => ● nu).
     local cval=$'\001CVAL\002'
-    body_plain="${body_plain//$cval/$CADENCE_VAL}"
-    body_html="${body_html//$cval/${CADENCE_HEX:+<span style=\"color:$CADENCE_HEX\">}$CADENCE_VAL${CADENCE_HEX:+</span>}}"
-    body_card="${body_card//$cval/${CADENCE_HEX:+<font color=\"$CADENCE_HEX\">}$CADENCE_VAL${CADENCE_HEX:+</font>}}"
+    body_plain="${body_plain//$cval/●}"
+    body_html="${body_html//$cval/${CADENCE_HEX:+<span style=\"color:$CADENCE_HEX\">}●${CADENCE_HEX:+</span>}}"
+    body_card="${body_card//$cval/${CADENCE_HEX:+<font color=\"$CADENCE_HEX\">}●${CADENCE_HEX:+</font>}}"
     if [ "${DIAG_PROBLEMS:-0}" -gt 0 ]; then
         subj=$(t summary.subject_warn "$host" "$DIAG_PROBLEMS")
     else

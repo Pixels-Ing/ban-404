@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="1.6.9"
+BAN404_VERSION="1.6.10"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -2034,6 +2034,14 @@ sev_ansi() {  # $1 = ok|warn|crit ; $2 = texte
 sev_hex() {  # $1 = ok|warn|crit => #RRGGBB (mail HTML + carte chat)
     case "$1" in crit) printf '#cc3333' ;; warn) printf '#d97a00' ;; ok) printf '#2e9e44' ;; *) printf '' ;; esac
 }
+# Gravité de COULEUR de l'intervalle effectif (mode auto) : lâche (>= 40 min) = calme => vert (ok) ;
+# serré (<= 10 min) = sous pression => rouge (crit) ; 20 = neutre (aucune couleur). Même sémantique
+# que le reste (vert = calme, rouge = activité). Sert à colorer la SEULE valeur de la ligne cadence.
+cadence_sev() {  # $1 = intervalle effectif (min)
+    [ "${1:-}" -ge 40 ] 2>/dev/null && { printf ok; return; }
+    [ "${1:-}" -le 10 ] 2>/dev/null && { printf crit; return; }
+    printf ''   # 20 => neutre
+}
 
 # fmt_pct <pour-mille signé> : évolution en % à une décimale, virgule française (« -0,8 % », « +12,5 % »).
 fmt_pct() {
@@ -2273,7 +2281,16 @@ build_stats_text() {
     # Cadence CRON_STEP : statut visible dans le rapport ET le résumé quotidien (sinon, au vert,
     # seul diag la montrait). L'ÉVOLUTION, elle, vit au journal (cadence.adjusted via t_log).
     case "$(cron_step_mode)" in
-        auto)  t stats.cadence_auto "$(cadence_read)" ;;
+        auto)
+            # Intervalle effectif : la SEULE valeur est colorée (lâche=vert / 20=neutre / serré=rouge).
+            # En notif : placeholder \001CVAL\002 dans la ligne (survit à html_escape/card_text) => coloré
+            # par do_summary selon le canal, via CADENCE_VAL/CADENCE_HEX. Au terminal : coloré inline.
+            CADENCE_VAL=$(cadence_read); CADENCE_HEX=$(sev_hex "$(cadence_sev "$CADENCE_VAL")")
+            if [ "${SUMMARY_NOTIFY:-}" = 1 ]; then
+                t stats.cadence_auto $'\001CVAL\002'
+            else
+                t stats.cadence_auto "$(sev_ansi "$(cadence_sev "$CADENCE_VAL")" "$CADENCE_VAL")"
+            fi ;;
         fixed) t stats.cadence_fixed "$CRON_STEP" ;;
     esac
     # --- Santé : uniquement les WARN/FAIL des contrôles de diagnostic (réseau inclus) ---
@@ -2419,7 +2436,7 @@ do_summary() {
     # perdrait dans son sous-shell). On peut ainsi FLAGGER le sujet — mail ET webhook, ce dernier
     # recevant « sujet\ncorps » (cf. notify) — quand le résumé contient au moins un [WARN]/[FAIL].
     DIAG_PROBLEMS=0
-    SUMMARY_NOTIFY=1; IPSET_PROSE=""; IPSET_HTML=""; IPSET_CARD=""; VITALS_PLAIN=""; VITALS_HTML=""; VITALS_CARD=""  # build_stats_text => jetons + variantes
+    SUMMARY_NOTIFY=1; IPSET_PROSE=""; IPSET_HTML=""; IPSET_CARD=""; VITALS_PLAIN=""; VITALS_HTML=""; VITALS_CARD=""; CADENCE_VAL=""; CADENCE_HEX=""  # build_stats_text => jetons + variantes
     tmp=$(mktemp 2>/dev/null) || tmp=""
     if [ -n "$tmp" ]; then
         build_stats_text > "$tmp"; body=$(cat "$tmp"); rm -f "$tmp"
@@ -2454,6 +2471,12 @@ do_summary() {
     fi
     seg="${seg//$vtok/}"; seg="${seg//$itok/}"
     body_card+="$(card_text "$seg")"
+    # Valeur de cadence colorée SEULE : le placeholder \001CVAL\002 (posé par build_stats_text en mode
+    # auto) survit à html_escape/card_text ; on le remplace ici par canal (neutre => valeur nue).
+    local cval=$'\001CVAL\002'
+    body_plain="${body_plain//$cval/$CADENCE_VAL}"
+    body_html="${body_html//$cval/${CADENCE_HEX:+<span style=\"color:$CADENCE_HEX\">}$CADENCE_VAL${CADENCE_HEX:+</span>}}"
+    body_card="${body_card//$cval/${CADENCE_HEX:+<font color=\"$CADENCE_HEX\">}$CADENCE_VAL${CADENCE_HEX:+</font>}}"
     if [ "${DIAG_PROBLEMS:-0}" -gt 0 ]; then
         subj=$(t summary.subject_warn "$host" "$DIAG_PROBLEMS")
     else

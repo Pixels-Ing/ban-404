@@ -572,7 +572,7 @@ cat > "$UPDATER_PATH" <<'UPD_EOF'
 # à la conf si elle est absente (langue héritée du shell/système, sinon en).
 set -u
 
-UPDATER_VERSION="1.3.4"
+UPDATER_VERSION="1.4.0"
 CONF_FILE="/etc/ban_404.conf"
 TARGET="/usr/local/sbin/ban_404.sh"
 SELF="/usr/local/sbin/update_ban_404.sh"
@@ -618,6 +618,36 @@ T_FR[help.force]="  --force, -f      Redéployer même si les fichiers sont iden
 T_DE[help.force]="  --force, -f      Neu ausrollen, auch wenn die Dateien unverändert sind."
 T_ES[help.force]="  --force, -f      Redesplegar aunque los archivos no hayan cambiado."
 T_IT[help.force]="  --force, -f      Ridistribuire anche se i file non sono cambiati."
+
+T_EN[help.verbose]="  --verbose, -v    Trace each step (download, validation, atomic switch); silent by default (cron)."
+T_FR[help.verbose]="  --verbose, -v    Tracer chaque étape (téléchargement, validation, bascule atomique) ; silencieux par défaut (cron)."
+T_DE[help.verbose]="  --verbose, -v    Jeden Schritt protokollieren (Download, Prüfung, atomarer Wechsel); standardmäßig still (Cron)."
+T_ES[help.verbose]="  --verbose, -v    Trazar cada paso (descarga, validación, cambio atómico); silencioso por defecto (cron)."
+T_IT[help.verbose]="  --verbose, -v    Tracciare ogni passo (download, validazione, cambio atomico); silenzioso per impostazione predefinita (cron)."
+
+T_EN[vupd.start]="ban-404 update — repo: %s"
+T_FR[vupd.start]="MAJ ban-404 — dépôt : %s"
+T_DE[vupd.start]="ban-404-Update — Repo: %s"
+T_ES[vupd.start]="Actualización ban-404 — repo: %s"
+T_IT[vupd.start]="Aggiornamento ban-404 — repo: %s"
+
+T_EN[vupd.checking]="%s: downloading and validating (shebang + bash -n)…"
+T_FR[vupd.checking]="%s : téléchargement et validation (shebang + bash -n)…"
+T_DE[vupd.checking]="%s: Download und Prüfung (Shebang + bash -n)…"
+T_ES[vupd.checking]="%s: descarga y validación (shebang + bash -n)…"
+T_IT[vupd.checking]="%s: download e validazione (shebang + bash -n)…"
+
+T_EN[vupd.uptodate]="%s: already up to date."
+T_FR[vupd.uptodate]="%s : déjà à jour."
+T_DE[vupd.uptodate]="%s: bereits aktuell."
+T_ES[vupd.uptodate]="%s: ya está actualizado."
+T_IT[vupd.uptodate]="%s: già aggiornato."
+
+T_EN[vupd.done]="Update run finished."
+T_FR[vupd.done]="Passage de MAJ terminé."
+T_DE[vupd.done]="Update-Lauf abgeschlossen."
+T_ES[vupd.done]="Ejecución de actualización finalizada."
+T_IT[vupd.done]="Esecuzione di aggiornamento completata."
 
 T_EN[help.help]="  --help, -h       Show this help message."
 T_FR[help.help]="  --help, -h       Afficher ce message d'aide."
@@ -743,7 +773,16 @@ detect_lang() {
     case "$l" in en|fr|de|es|it) printf '%s' "$l" ;; *) printf '%s' en ;; esac
 }
 
-log(){ printf '%s [update] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$LOG" 2>/dev/null; }
+# log : événement horodaté dans le journal (toujours) ; ÉGALEMENT sur stdout en mode --verbose,
+# pour qu'un admin qui lance l'updater à la main voie les bascules/erreurs en direct.
+log(){
+    printf '%s [update] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$LOG" 2>/dev/null
+    [ "${VERBOSE:-false}" = true ] && printf '%s\n' "$*"
+    return 0
+}
+# vsay : trace de PROGRESSION (étapes non événementielles) — stdout SEULEMENT en --verbose, jamais
+# dans le journal (on ne pollue pas /var/log/ban_404.log avec le détail des passages).
+vsay(){ [ "${VERBOSE:-false}" = true ] && printf '%s\n' "$*"; return 0; }
 
 # Sourcing sous set +u : une conf locale peut ÉTENDRE une variable du moteur que
 # l'updater ne prédéfinit pas (pattern d'append recommandé, ex.
@@ -778,15 +817,18 @@ show_help() {
     echo ""
     t help.options_header
     t help.force
+    t help.verbose
     t help.version
     t help.help
     exit 0
 }
 
 FORCE=false
+VERBOSE="${BAN404_VERBOSE:-false}"   # survit à l'auto-relance post-self-update (exec) via l'environnement
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --force|-f) FORCE=true; shift ;;
+        --verbose|-v) VERBOSE=true; shift ;;
         --version) t version.line "$UPDATER_VERSION"; t version.author; exit 0 ;;
         --help|-h) show_help ;;
         *) t err.unknown_opt "$1"; exit 1 ;;
@@ -795,6 +837,7 @@ done
 
 : "${REPO_RAW:=}"
 [ -z "$REPO_RAW" ] && { log "$(t upd.repo_undef "$CONF_FILE")"; exit 0; }
+vsay "$(t vupd.start "$REPO_RAW")"
 
 # Trace d'exécution lue par le moteur (« l'updater a tourné »). Touchée même si un download échoue
 # ensuite : prouve que cron.daily s'est bien déclenché, pour que le moteur ne double pas la MAJ
@@ -1008,6 +1051,7 @@ download(){
 update_file(){
     local name="$1" target="$2" label="$3" url tmp dir new ver
     url="$REPO_RAW/$name"
+    vsay "$(t vupd.checking "$label")"
 
     tmp=$(download "$url") || { log "$(t upd.dl_fail "$label" "$url")"; return 2; }
 
@@ -1017,7 +1061,7 @@ update_file(){
     bash -n "$tmp" 2>/dev/null || { log "$(t upd.syntax "$label")"; rm -f "$tmp"; return 2; }
 
     # Déjà à jour ? (--force court-circuite cette vérification)
-    if [ "$FORCE" != true ] && [ -f "$target" ] && cmp -s "$tmp" "$target"; then rm -f "$tmp"; return 1; fi
+    if [ "$FORCE" != true ] && [ -f "$target" ] && cmp -s "$tmp" "$target"; then rm -f "$tmp"; vsay "$(t vupd.uptodate "$label")"; return 1; fi
 
     # Bascule atomique (copie dans le même répertoire que la cible puis mv), avec sauvegarde
     dir=$(dirname "$target")
@@ -1078,9 +1122,11 @@ update_file "update_ban_404.sh" "$SELF" "update_ban_404.sh"; _rc_self=$?
 if [ "$_rc_self" -eq 0 ] && [ "${BAN404_SELF_REEXEC:-0}" != 1 ]; then
     log "$(t upd.self_reexec)"
     export BAN404_SELF_REEXEC=1
+    export BAN404_VERBOSE="$VERBOSE"   # la nouvelle version reprend le mode verbeux (exec sans args)
     exec "$SELF"
 fi
 
+vsay "$(t vupd.done)"
 exit 0
 UPD_EOF
 chmod 755 "$UPDATER_PATH"

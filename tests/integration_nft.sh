@@ -97,5 +97,14 @@ ok "B3 ipset retiré (uniquement nos artefacts, jamais de flush)"
 iptables -C INPUT -m set --match-set "$SET" src -j DROP 2>/dev/null && fail "B3 : la règle iptables ban-404 subsiste après la bascule"
 ok "B3 règle iptables ban-404 retirée"
 
+echo "== Test B (suite) : bascule INVERSE nftables -> iptables (réversibilité + nettoyage) =="
+write_conf iptables
+bash "$ENGINE" >/dev/null 2>&1 || true
+ipset test "$SET" "$IP" 2>/dev/null || fail "B4 : IP $IP non re-transférée vers l'ipset au retour iptables"
+iptables -C INPUT -m set --match-set "$SET" src -j DROP 2>/dev/null || fail "B4 : règle iptables absente au retour"
+ok "B4 ban re-transféré vers ipset + règle iptables restaurée"
+nft list table inet ban_404 &>/dev/null && fail "B5 : table nft ban_404 subsiste après retour iptables"
+ok "B5 table nft ban_404 retirée (retour propre)"
+
 cleanup_fw
 echo "== INTÉGRATION NFT OK =="

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="2.1.0"
+BAN404_VERSION="2.1.1"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -1653,8 +1653,8 @@ platform_supported() {
 #  isolée au niveau netfilter (chaînes base multiples autorisées sur un hook).
 # ============================================================================
 NFT_TABLE_FAMILY="inet"; NFT_TABLE="ban_404"; NFT_CHAIN="input"
-NFT_SAVE_FILE="/etc/nftables/ban_404.conf"   # persistance dédiée (incluse en FIN de nftables.conf)
-NFT_MAIN_CONF="/etc/nftables.conf"
+NFT_SAVE_FILE="/etc/nftables/ban_404.conf"   # persistance dédiée (notre table SEULE, rechargée par l'unité ci-dessous)
+NFT_UNIT="/etc/systemd/system/ban_404-nft.service"   # unité systemd isolée : restaure UNIQUEMENT notre table au boot (aucun flush global)
 IPT_BIN="/sbin/iptables"; IPT_SAVE_BIN="/sbin/iptables-save"; NFT_BIN="/usr/sbin/nft"  # résolus par fw_init
 
 fw_have_ipset()    { command -v ipset >/dev/null 2>&1; }
@@ -1784,18 +1784,39 @@ nft_ensure_infra() {
     nft_rule_present \
         || "$NFT_BIN" add rule "$NFT_TABLE_FAMILY" "$NFT_TABLE" "$NFT_CHAIN" ip saddr "@$IPSET_NAME" drop 2>/dev/null
 }
-# Persistance nft : fichier dédié à NOTRE table (idiome « create+delete+define » = rechargeable
-# idempotent), inclus en FIN de nftables.conf (donc APRÈS un éventuel « flush ruleset »), jamais de
-# réécriture du fichier principal. Service de restauration best-effort.
+# Persistance nft — COEXISTENCE-SAFE. Fichier dédié à NOTRE table (idiome « create+delete+define » =
+# rechargeable, vérifié `nft -f`), restauré au boot par une **unité systemd DÉDIÉE** qui charge
+# UNIQUEMENT ce fichier (`nft -f`), SANS aucun « flush ruleset » global. On n'active JAMAIS le service
+# nftables global et on n'édite JAMAIS /etc/nftables.conf : sur un serveur qui persiste via
+# netfilter-persistent (iptables) avec une nftables.conf en `flush ruleset` (cas courant Debian/Ubuntu),
+# activer ce service viderait au boot les tables tierces — dont les chaînes fail2ban de `ip filter`.
+# Notre unité isolée ne touche donc que `inet ban_404`. Idempotent ; best-effort (systemd absent => on
+# écrit juste le fichier). Nettoyée par la bascule inverse (fw_migrate_if_needed).
 nft_persist() {
     mkdir -p "$(dirname "$NFT_SAVE_FILE")"
     { printf 'table %s %s\ndelete table %s %s\n' "$NFT_TABLE_FAMILY" "$NFT_TABLE" "$NFT_TABLE_FAMILY" "$NFT_TABLE"
       "$NFT_BIN" list table "$NFT_TABLE_FAMILY" "$NFT_TABLE" 2>/dev/null
     } > "$NFT_SAVE_FILE"
-    if [ -f "$NFT_MAIN_CONF" ] && ! grep -qF "$NFT_SAVE_FILE" "$NFT_MAIN_CONF"; then
-        printf 'include "%s"\n' "$NFT_SAVE_FILE" >> "$NFT_MAIN_CONF"
+    command -v systemctl >/dev/null 2>&1 || return 0
+    [ -d /etc/systemd/system ] || return 0
+    local want
+    want="[Unit]
+Description=ban-404 nftables table restore (isolated, no global flush)
+DefaultDependencies=no
+Before=network-pre.target
+Wants=network-pre.target
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=$NFT_BIN -f $NFT_SAVE_FILE
+[Install]
+WantedBy=multi-user.target"
+    if [ ! -f "$NFT_UNIT" ] || [ "$(cat "$NFT_UNIT" 2>/dev/null)" != "$want" ]; then
+        printf '%s\n' "$want" > "$NFT_UNIT" 2>/dev/null || return 0
+        systemctl daemon-reload >/dev/null 2>&1
+        systemctl enable ban_404-nft.service >/dev/null 2>&1
     fi
-    command -v systemctl >/dev/null 2>&1 && systemctl enable nftables.service >/dev/null 2>&1 || true
+    return 0
 }
 
 # ---------- Dispatchers fw_* (interface unique consommée par le moteur) ----------
@@ -1846,6 +1867,10 @@ fw_migrate_if_needed() {
         ipt_persist
         "$NFT_BIN" delete table "$NFT_TABLE_FAMILY" "$NFT_TABLE" 2>/dev/null
         [ -f "$NFT_SAVE_FILE" ] && rm -f "$NFT_SAVE_FILE"
+        # Retrait de l'unité de restauration dédiée (posée par nft_persist).
+        if [ -f "$NFT_UNIT" ] && command -v systemctl >/dev/null 2>&1; then
+            systemctl disable ban_404-nft.service >/dev/null 2>&1; rm -f "$NFT_UNIT"; systemctl daemon-reload >/dev/null 2>&1
+        fi
         t_log fw.migrated "nftables" "iptables+ipset"
     fi
 }

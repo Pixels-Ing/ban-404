@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="1.6.3"
+BAN404_VERSION="1.6.4"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -54,8 +54,8 @@ EXCLUDE_VHOSTS=""
 # selon ce réglage. Valeur invalide => ignorée (horaire seul), le run n'échoue jamais.
 CRON_STEP=""
 CADENCE_FILE="/var/lib/ban_404/cadence"   # état du mode auto : « intervalle epoch_dernier_ban »
-CADENCE_CALM_SECS=1800     # mode auto : accalmie (s) sans AUCUN ban requise avant de relâcher d'un cran
-CADENCE_SURGE=3            # mode auto : nb de bans dans UN MÊME run qui fait descendre de 2 crans (au lieu d'1)
+CADENCE_CALM_SECS=1800     # mode auto : accalmie (s) sans ban RÉEL (hp=0, hors bruit honeypot) avant de relâcher d'un cran
+CADENCE_SURGE=3            # mode auto : nb de bans RÉELS dans UN MÊME run qui fait descendre de 2 crans (au lieu d'1)
 SENTINEL_LINES=2000        # lignes survolées par log par la sentinelle (mode auto, tick porté)
 SAMPLE_MIN_INTERVAL=3300   # espacement mini (s) des échantillons metrics/ipset : l'historique reste
                            # ~horaire même quand CRON_STEP fait tourner le moteur toutes les 5-10 min
@@ -2393,14 +2393,19 @@ cadence_read() {
 }
 
 # Ajustement d'hystérésis, appelé en fin de run COMPLET (finish_run, donc jamais en dry-run) :
-# $1 = nb de nouveaux bans du run. Descente : un cran plus serré par run avec ban ; DEUX crans
-# si >= CADENCE_SURGE bans dans le même run (attaque multi-IP caractérisée — descente graduée
-# plutôt que plancher brutal : pour un attaquant isolé, la sentinelle garantit déjà une réaction
-# <= 5 min, inutile de s'affoler sur le bruit de scan permanent). Remontée : un cran plus lâche SEULEMENT si aucun
-# ban depuis CADENCE_CALM_SECS (accalmie constatée, pas simple run calme — sinon dents de scie
-# 5<->10 permanentes sous le bruit, ~150 changements/jour observés sur un mutualisé, juil. 2026).
-# L'epoch du dernier ban (2e champ de CADENCE_FILE) se rafraîchit à CHAQUE run avec ban, même à
-# intervalle inchangé (sinon la relâche démarrerait trop tôt) ; ancien format à 1 champ => 0.
+# $1 = nb de bans « RÉELS » du run = floods volume-404 (hp=0) UNIQUEMENT. Les bans du circuit
+# honeypot (hp=1 : honeypot + signatures SECURITY/POST-flood) ne comptent PAS ici (cf. finish_run) :
+# le bruit de scan d'un mutualisé bannit une nouvelle IP honeypot toutes les ~10-15 min et clouait
+# la cadence au plancher en permanence (l'accalmie de CADENCE_CALM_SECS n'était jamais atteinte).
+# La réaction rapide aux attaques reste assurée par la SENTINELLE (sentinel_hit force un run complet
+# <= 5 min sur toute signature SECURITY ou IP > BAN_THRESHOLD), pas par le resserrement du planning.
+# Descente : un cran plus serré par run avec ban réel ; DEUX crans si >= CADENCE_SURGE bans réels
+# dans le même run (attaque multi-IP caractérisée — descente graduée plutôt que plancher brutal).
+# Remontée : un cran plus lâche SEULEMENT si aucun ban réel depuis CADENCE_CALM_SECS (accalmie
+# constatée, pas simple run calme — sinon dents de scie 5<->10 permanentes, ~150 changements/jour
+# observés sur un mutualisé, juil. 2026). L'epoch du dernier ban réel (2e champ de CADENCE_FILE) se
+# rafraîchit à CHAQUE run avec ban réel, même à intervalle inchangé (sinon la relâche démarrerait
+# trop tôt) ; ancien format à 1 champ => 0.
 cadence_adjust() {
     [ "$(cron_step_mode)" = auto ] || return 0
     local now line cur last new dir tmp
@@ -3286,7 +3291,13 @@ finish_run() {
         touch "$RUN_STAMP_FILE" 2>/dev/null
         metrics_sample                      # échantillon horaire (moyennes 24 h) ; même garde DRY_RUN+root
         ipset_counts_sample                 # échantillon horaire du nb d'entrées par ipset (évol. + tendance 24 h)
-        cadence_adjust "${#new_bans[@]}"    # hystérésis du mode CRON_STEP=auto (no-op sinon)
+        # Cadence auto : ne compter QUE les bans « réels » (hp=0, flood volume-404) — pas le bruit du
+        # circuit honeypot (hp=1 : honeypot + signatures SECURITY/POST-flood). Le scan de fond d'un
+        # mutualisé bannit une nouvelle IP honeypot toutes les ~10-15 min ; le compter épinglait la
+        # cadence au plancher en permanence (l'accalmie n'était jamais atteinte). Voir cadence_adjust.
+        local _cad_real=0 _cad_b
+        for _cad_b in "${new_bans[@]}"; do [ "${_cad_b##*|}" = 0 ] && _cad_real=$((_cad_real + 1)); done
+        cadence_adjust "$_cad_real"         # hystérésis du mode CRON_STEP=auto (no-op sinon)
     fi
     self_heal_update_trigger
     return 0

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="2.1.1"
+BAN404_VERSION="2.1.2"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -1761,13 +1761,17 @@ nft_dur_to_secs() {
             else if(c=="m"){s+=n*60;n="";ok=1}   else if(c=="s"){s+=n;n="";ok=1} }
         if(ok) print s; else print "?" }'
 }
-# Membres « bruts » façon ipset (« ip timeout <secs_résiduelles> ») pour do_list.
+# Membres « bruts » façon ipset (« ip timeout <secs_résiduelles> ») pour do_list ET la bascule
+# inverse nft->iptables (transfert des bans). La variable awk s'appelle « ev » (JAMAIS « exp » :
+# c'est une fonction intégrée de gawk => « exp= » est une erreur de syntaxe sous gawk, silencieuse
+# sous mawk — incident constaté en production). On retire la fraction « <n>ms » de la durée « expires » avant
+# conversion (sinon le « m » de « ms » serait compté comme des minutes).
 nft_list_members_raw() {
     "$NFT_BIN" list set "$NFT_TABLE_FAMILY" "$NFT_TABLE" "$IPSET_NAME" 2>/dev/null | tr ',' '\n' \
-        | awk '{ ip=""; exp=""
-            for(i=1;i<=NF;i++){ if($i ~ /^([0-9]{1,3}\.){3}[0-9]{1,3}$/) ip=$i; if($i=="expires") exp=$(i+1) }
-            if(ip!="") print ip, exp }' \
-        | while read -r ip exp; do printf '%s timeout %s\n' "$ip" "$(nft_dur_to_secs "$exp")"; done
+        | awk '{ ip=""; ev=""
+            for(i=1;i<=NF;i++){ if($i ~ /^([0-9]{1,3}\.){3}[0-9]{1,3}$/) ip=$i; if($i=="expires") ev=$(i+1) }
+            if(ip!="") print ip, ev }' \
+        | while read -r ip ev; do ev="${ev%%[0-9]*ms}"; printf '%s timeout %s\n' "$ip" "$(nft_dur_to_secs "$ev")"; done
 }
 nft_rule_present()    { "$NFT_BIN" list chain "$NFT_TABLE_FAMILY" "$NFT_TABLE" "$NFT_CHAIN" 2>/dev/null | grep -q "@$IPSET_NAME drop"; }
 nft_persist_present() { [ -f "$NFT_SAVE_FILE" ]; }

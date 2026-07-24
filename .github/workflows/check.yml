@@ -31,7 +31,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Installer ipset + iptables + nftables
-        run: sudo apt-get update && sudo apt-get install -y ipset iptables nftables
-      - name: Lancer le test d'intégration nft (backend nft + bascule)
+      - name: Installer ipset + iptables + nftables + gawk
+        run: sudo apt-get update && sudo apt-get install -y ipset iptables nftables gawk
+      # Forcer gawk comme awk par défaut : le runner Ubuntu utilise mawk, plus permissif ; gawk
+      # rejette p.ex. une variable nommée « exp » (fonction intégrée) — on veut attraper ces bugs
+      # de portabilité awk en CI (incident constaté en production, moteur 2.1.2).
+      - name: Forcer gawk comme awk par défaut
+        run: sudo update-alternatives --set awk /usr/bin/gawk
+      - name: Lancer le test d'intégration nft (backend nft + bascule, sous gawk)
         run: sudo bash tests/integration_nft.sh ./ban_404.sh

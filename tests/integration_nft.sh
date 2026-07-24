@@ -69,6 +69,11 @@ ok "A2 IP bannie dans le set nft inet ban_404 $SET"
 nft_rule || fail "A3 : règle « ip saddr @$SET drop » absente de la chaîne nft input"
 ok "A3 règle DROP nft présente"
 
+# 'list' doit énumérer l'IP bannie (exerce nft_list_members_raw : ce chemin awk avait un bug de
+# collision « exp » invisible sous mawk mais fatal sous gawk — cf. job CI qui force gawk).
+bash "$ENGINE" list 2>&1 | grep -q "$IP" || { bash "$ENGINE" list 2>&1 | head; fail "A3bis : 'list' n'affiche pas l'IP $IP bannie (nft_list_members_raw)"; }
+ok "A3bis 'list' énumère l'IP bannie sous nft"
+
 bash "$ENGINE" unban "$IP" >/dev/null 2>&1 || fail "A4 : la sous-commande unban a échoué (backend nft)"
 nft_has && fail "A4 : IP $IP toujours dans le set nft après unban"
 ok "A4 IP débannie proprement (backend nft)"

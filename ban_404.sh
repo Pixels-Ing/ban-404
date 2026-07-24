@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="1.6.7"
+BAN404_VERSION="1.6.8"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -62,6 +62,7 @@ SAMPLE_MIN_INTERVAL=3300   # espacement mini (s) des échantillons metrics/ipset
 
 # Notifications (optionnel ; vides => désactivées). Messages dans la langue BAN404_LANG.
 WEBHOOK_URL=""        # POST JSON des nouveaux bans (Slack/Discord/Teams/n8n...)
+WEBHOOK_CHAT_CARD=false  # Google Chat : true => résumé quotidien en CARTE colorée (cardsV2) au lieu du texte simple
 NOTIFY_EMAIL=""       # e-mail des nouveaux bans (nécessite un MTA : mail/sendmail)
 NOTIFY_FROM=""        # expéditeur e-mail (optionnel)
 NOTIFY_MIN_BANS=1     # ne notifier que si AU MOINS N nouveaux bans dans le run
@@ -1102,6 +1103,12 @@ T_DE[help.conf_webhook]="  WEBHOOK_URL      JSON-POST neuer Sperren (Slack/Disco
 T_ES[help.conf_webhook]="  WEBHOOK_URL      POST JSON de nuevos bloqueos (Slack/Discord/Teams/Google Chat...); vacío = inactivo."
 T_IT[help.conf_webhook]="  WEBHOOK_URL      POST JSON dei nuovi blocchi (Slack/Discord/Teams/Google Chat...); vuoto = disattivato."
 
+T_EN[help.conf_chatcard]="  WEBHOOK_CHAT_CARD  Google Chat only: true => daily summary as a colored card (cardsV2); default false."
+T_FR[help.conf_chatcard]="  WEBHOOK_CHAT_CARD  Google Chat uniquement : true => résumé quotidien en carte colorée (cardsV2) ; défaut false."
+T_DE[help.conf_chatcard]="  WEBHOOK_CHAT_CARD  Nur Google Chat: true => tägliche Zusammenfassung als farbige Karte (cardsV2); Standard false."
+T_ES[help.conf_chatcard]="  WEBHOOK_CHAT_CARD  Solo Google Chat: true => resumen diario como tarjeta con color (cardsV2); por defecto false."
+T_IT[help.conf_chatcard]="  WEBHOOK_CHAT_CARD  Solo Google Chat: true => riepilogo giornaliero come scheda colorata (cardsV2); predefinito false."
+
 T_EN[help.conf_email]="  NOTIFY_EMAIL     E-mail of new bans (needs an MTA: mail/sendmail); empty = off."
 T_FR[help.conf_email]="  NOTIFY_EMAIL     E-mail des nouveaux bans (MTA requis : mail/sendmail) ; vide = inactif."
 T_DE[help.conf_email]="  NOTIFY_EMAIL     E-Mail neuer Sperren (MTA nötig: mail/sendmail); leer = aus."
@@ -1619,6 +1626,7 @@ show_help() {
     t help.conf_honeypot_timeout
     t help.conf_nickname
     t help.conf_webhook
+    t help.conf_chatcard
     t help.conf_email
     t help.conf_from
     t help.conf_min_bans
@@ -1771,6 +1779,22 @@ html_escape() {
 html_text() {
     local s; s=$(html_escape "$1"); s="${s//$'\n'/<br>}"; printf '%s' "$s"
 }
+# Texte brut -> sous-ensemble de tags de la CARTE Google Chat (widget textParagraph : <b>/<br>/<font>
+# ; pas de <div>/<table>). Échappe &<>, met en GRAS les lignes d'en-tête « ── … ── », \n -> <br>.
+# Traitement ligne par ligne via glob bash (pas de sed multi-octets) : robuste sur les filets UTF-8
+# — si le glob ne matchait pas, la ligne resterait simplement non grasse (jamais d'erreur).
+card_text() {
+    local out="" line first=1
+    while IFS= read -r line || [ -n "$line" ]; do
+        [ "$first" = 1 ] || out+="<br>"; first=0
+        line=$(html_escape "$line")
+        case "$line" in
+            "── "*" ──") out+="<b>$line</b>" ;;
+            *)           out+="$line" ;;
+        esac
+    done <<< "$1"
+    printf '%s' "$out"
+}
 # En-tête de mail encodé RFC 2047 (base64 UTF-8) SI le texte contient du non-ASCII : un « Résumé »
 # accentué émis brut 8 bits dans un Subject: n'est pas conforme => mojibake possible. ASCII pur =>
 # renvoyé tel quel (pas d'encodage inutile). Détection en LC_ALL=C ([^ -~] = hors ASCII imprimable).
@@ -1781,21 +1805,29 @@ encode_header() {
         printf '%s' "$1"
     fi
 }
-# Construit le corps JSON du webhook selon le service (logique centralisée).
-build_webhook_payload() {  # $1 = texte brut -> imprime le JSON
-    local esc; esc=$(json_escape "$1")
-    # Google Chat n'accepte QUE "text" (rejet 400 des champs inconnus) ; les autres
-    # acceptent "text" (Slack/Mattermost/n8n) et "content" (Discord/Teams).
+# Construit le corps JSON du webhook selon le service. $1 = texte brut (plain, tous services) ;
+# $2 = corps CARTE (optionnel, sous-ensemble <b>/<br>/<font>) ; $3 = titre de carte (optionnel).
+# Carte cardsV2 UNIQUEMENT pour Google Chat quand WEBHOOK_CHAT_CARD est actif ET $2 fourni — seule
+# la carte accepte la couleur (<font color>), le message {text} n'en accepte aucune. Sinon texte
+# simple : Google Chat n'accepte QUE "text" (rejet 400 des champs inconnus) ; les autres services
+# (Slack/Mattermost/n8n/Discord/Teams) acceptent "text" et "content".
+build_webhook_payload() {
     case "$WEBHOOK_URL" in
-        *chat.googleapis.com*) printf '{"text":"%s"}' "$esc" ;;
-        *)                     printf '{"text":"%s","content":"%s"}' "$esc" "$esc" ;;
+        *chat.googleapis.com*)
+            if [ -n "${2:-}" ] && diag_is_on "${WEBHOOK_CHAT_CARD:-false}"; then
+                printf '{"cardsV2":[{"cardId":"ban404","card":{"header":{"title":"%s"},"sections":[{"widgets":[{"textParagraph":{"text":"%s"}}]}]}}]}' \
+                       "$(json_escape "${3:-$(server_label)}")" "$(json_escape "$2")"
+            else
+                printf '{"text":"%s"}' "$(json_escape "$1")"
+            fi ;;
+        *) local esc; esc=$(json_escape "$1"); printf '{"text":"%s","content":"%s"}' "$esc" "$esc" ;;
     esac
 }
-send_webhook() {  # $1 = texte complet
+send_webhook() {  # $1 = texte plain ; $2 = corps carte (optionnel) ; $3 = titre carte (optionnel)
     [ -z "$WEBHOOK_URL" ] && return 0
     command -v curl >/dev/null 2>&1 || return 0
     curl -fsS -m 15 -H 'Content-Type: application/json' \
-         -X POST -d "$(build_webhook_payload "$1")" "$WEBHOOK_URL" >/dev/null 2>&1 || true
+         -X POST -d "$(build_webhook_payload "$1" "${2:-}" "${3:-}")" "$WEBHOOK_URL" >/dev/null 2>&1 || true
 }
 send_email() {  # $1 = sujet, $2 = corps texte, $3 = corps HTML (optionnel)
     [ -z "$NOTIFY_EMAIL" ] && return 0
@@ -1841,10 +1873,10 @@ server_label() {
     if [ -n "${SERVER_NICKNAME:-}" ]; then printf '%s [%s]' "$SERVER_NICKNAME" "$host"
     else printf '%s' "$host"; fi
 }
-notify() {  # $1 = sujet, $2 = corps texte (webhook + text/plain mail), $3 = corps HTML (optionnel, mail)
-    # Webhook = texte brut SANS bloc de code (les tables du résumé sont rendues en PROSE pour le chat,
-    # donc pas besoin de chasse fixe). Mail = multipart texte + HTML (tableau) quand $3 est fourni.
-    send_webhook "$1"$'\n'"$2"
+notify() {  # $1 = sujet, $2 = corps texte (webhook plain + text/plain mail), $3 = corps HTML (mail), $4 = corps CARTE (Google Chat)
+    # Webhook = texte brut (prose) SAUF si $4 fourni ET Google Chat + WEBHOOK_CHAT_CARD => carte colorée
+    # (le sujet devient le titre de carte). Mail = multipart texte + HTML (tableau) quand $3 est fourni.
+    send_webhook "$1"$'\n'"$2" "${4:-}" "$1"
     send_email "$1" "$2" "${3:-}"
 }
 maybe_notify_new_bans() {
@@ -2104,6 +2136,34 @@ vitals_html() {
     done
     VITALS_HTML="<div style=\"margin:12px 0 4px;font-weight:bold\">$(html_escape "$(t stats.health_vitals)")</div>$rows"
 }
+# Variantes CARTE Google Chat (sous-ensemble <b>/<br>/<font>) : couleurs HEX FIXES via sev_hex/dir.
+vitals_card() {
+    local i col
+    VITALS_CARD="<br><b>$(html_escape "$(t stats.health_vitals)")</b>"
+    for ((i=0; i<${#HEALTH_LINES[@]}; i++)); do
+        col=$(sev_hex "${HEALTH_SEV[i]:-ok}")
+        if [ -n "$col" ]; then VITALS_CARD+="<br><font color=\"$col\">$(html_escape "${HEALTH_LINES[i]}")</font>"
+        else VITALS_CARD+="<br>$(html_escape "${HEALTH_LINES[i]}")"; fi
+    done
+}
+ipset_card() {  # utilise N/C/D/P/M/base_epoch/now par portée dynamique (appel depuis build_ipset_counts)
+    local i tri col vr
+    IPSET_CARD="<br><b>$(html_escape "$(t stats.ipset_header)")</b>"
+    for ((i=0; i<${#N[@]}; i++)); do
+        if [ -n "${M[i]}" ]; then
+            case "$(dir_of "${M[i]}" "$TREND_FLAT_PCT")" in
+                up) col="#cc3333" ;;   # hausse => rouge
+                *)  col="#2e9e44" ;;   # baisse OU calme => vert
+            esac
+            tri=$(tri_slot "${M[i]}" "$TREND_FLAT_PCT" "$TREND_STRONG_PCT"); tri="${tri// /}"
+            if [ -n "$tri" ]; then vr="${D[i]} (${P[i]}) $tri"
+            else vr="${D[i]} (${P[i]}) ● $(t stats.ipset_stable)"; fi
+            vr="<font color=\"$col\">$(html_escape "$vr")</font>"
+        else vr=$(html_escape "$(t stats.ipset_new)"); fi
+        IPSET_CARD+="<br>• $(html_escape "${N[i]} : ${C[i]}  ·  ")$vr"
+    done
+    if [ -n "$base_epoch" ]; then local sp=$((now - base_epoch)); [ "$sp" -lt 82800 ] 2>/dev/null && IPSET_CARD+="<br>  $(html_escape "$(t stats.avg24_window "$(metrics_fmt_span "$sp")")")"; fi
+}
 
 # Sous-bloc « Comptage ipset (évol. + tendance 24 h) » : pour CHAQUE ipset de la machine + un total,
 # le nb d'entrées COURANT (mesuré live), son évolution sur 24 h (+X/-Y) et une sparkline de tendance.
@@ -2146,7 +2206,7 @@ build_ipset_counts() {
     # ---- Mode NOTIFICATION : on ne rend pas le tableau texte ; on produit prose + HTML (via les
     #      tableaux ci-dessus) et on n'imprime qu'un JETON, remplacé par do_summary selon le canal. ----
     if [ "${SUMMARY_NOTIFY:-}" = 1 ]; then
-        ipset_summary_prose; ipset_summary_html
+        ipset_summary_prose; ipset_summary_html; ipset_card
         printf '\001IPSETBLOCK\002\n'
         return 0
     fi
@@ -2232,8 +2292,8 @@ build_stats_text() {
     if [ "${#HEALTH_LINES[@]}" -gt 0 ]; then
         if [ "${SUMMARY_NOTIFY:-}" = 1 ]; then
             # Notification : jeton remplacé par do_summary selon le canal (VITALS_PLAIN neutre pour
-            # text/plain + chat, VITALS_HTML coloré par gravité pour le mail HTML).
-            vitals_prose; vitals_html
+            # text/plain, VITALS_HTML coloré pour le mail HTML, VITALS_CARD coloré pour la carte chat).
+            vitals_prose; vitals_html; vitals_card
             printf '\001VITALSBLOCK\002\n'
         else
             printf '\n── %s ──\n' "$(t stats.health_vitals)"
@@ -2339,7 +2399,7 @@ do_list() {
 do_summary() {
     case "$DAILY_SUMMARY" in true|1|yes|on) ;; *) exit 0 ;; esac
     [ -z "$WEBHOOK_URL" ] && [ -z "$NOTIFY_EMAIL" ] && exit 0
-    local host tmp body body_plain body_html subj vtok itok seg; host=$(server_label)
+    local host tmp body body_plain body_html body_card subj vtok itok seg; host=$(server_label)
     # Résumé DESTINÉ À L'ENVOI : on neutralise --verbose afin que le détail par dossier
     # (lignes verbose de run_diag_checks, rejoué par build_stats_text) ne soit PAS injecté dans
     # le corps notifié. L'affichage direct de --stats (sans cette neutralisation) le conserve.
@@ -2352,7 +2412,7 @@ do_summary() {
     # perdrait dans son sous-shell). On peut ainsi FLAGGER le sujet — mail ET webhook, ce dernier
     # recevant « sujet\ncorps » (cf. notify) — quand le résumé contient au moins un [WARN]/[FAIL].
     DIAG_PROBLEMS=0
-    SUMMARY_NOTIFY=1; IPSET_PROSE=""; IPSET_HTML=""; VITALS_PLAIN=""; VITALS_HTML=""  # build_stats_text => jetons + variantes PROSE/HTML
+    SUMMARY_NOTIFY=1; IPSET_PROSE=""; IPSET_HTML=""; IPSET_CARD=""; VITALS_PLAIN=""; VITALS_HTML=""; VITALS_CARD=""  # build_stats_text => jetons + variantes
     tmp=$(mktemp 2>/dev/null) || tmp=""
     if [ -n "$tmp" ]; then
         build_stats_text > "$tmp"; body=$(cat "$tmp"); rm -f "$tmp"
@@ -2375,12 +2435,24 @@ do_summary() {
     fi
     seg="${seg//$vtok/}"; seg="${seg//$itok/}"                    # filet : purge tout jeton résiduel (repli sous-shell) avant html_text
     body_html+="<div>$(html_text "$seg")</div></body></html>"
+    # Carte Google Chat : même découpe autour des jetons, blocs colorés <font> intercalés, reste via
+    # card_text (sous-ensemble <b>/<br>). Construit inconditionnellement (léger) ; build_webhook_payload
+    # ne l'utilise que pour Google Chat + WEBHOOK_CHAT_CARD actif.
+    seg="$body"; body_card=""
+    if [ -n "$VITALS_CARD" ] && [[ "$seg" == *"$vtok"* ]]; then
+        body_card+="$(card_text "${seg%%"$vtok"*}")$VITALS_CARD"; seg="${seg#*"$vtok"}"
+    fi
+    if [ -n "$IPSET_CARD" ] && [[ "$seg" == *"$itok"* ]]; then
+        body_card+="$(card_text "${seg%%"$itok"*}")$IPSET_CARD"; seg="${seg#*"$itok"}"
+    fi
+    seg="${seg//$vtok/}"; seg="${seg//$itok/}"
+    body_card+="$(card_text "$seg")"
     if [ "${DIAG_PROBLEMS:-0}" -gt 0 ]; then
         subj=$(t summary.subject_warn "$host" "$DIAG_PROBLEMS")
     else
         subj=$(t summary.subject "$host")
     fi
-    notify "$subj" "$body_plain" "$body_html"   # chat = prose (pas de chasse fixe) ; mail = multipart texte + tableau HTML
+    notify "$subj" "$body_plain" "$body_html" "$body_card"   # chat = carte colorée si activée, sinon prose ; mail = multipart texte + tableau HTML
     exit 0
 }
 
@@ -2392,8 +2464,9 @@ check_webhook() {
     local host code rc tmp body
     host=$(server_label)
     tmp=$(mktemp 2>/dev/null) || tmp=""
+    local cbody; cbody=$(t check.body "$host")   # passe aussi le corps en CARTE : le test live montre la carte quand WEBHOOK_CHAT_CARD est actif
     code=$(curl -sS -m 15 -o "${tmp:-/dev/null}" -w '%{http_code}' -H 'Content-Type: application/json' \
-                -X POST -d "$(build_webhook_payload "$(t check.body "$host")")" "$WEBHOOK_URL" 2>/dev/null); rc=$?
+                -X POST -d "$(build_webhook_payload "$cbody" "$cbody" "$host")" "$WEBHOOK_URL" 2>/dev/null); rc=$?
     body=""; [ -n "$tmp" ] && { body=$(tr -d '\r' < "$tmp" 2>/dev/null | tr '\n' ' ' | head -c 300); rm -f "$tmp"; }
     if [ "$rc" -ne 0 ]; then t check.webhook_err; [ -n "$body" ] && t check.diag "$body"; return 1; fi
     case "$code" in

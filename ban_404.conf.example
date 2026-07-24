@@ -73,17 +73,23 @@ WHITELIST_IP="127.0.0.1"
 #NOTIFY_BANS=false
 #DAILY_SUMMARY=false
 
-# --- Server vital signs (shown by diag/health and the daily summary; WARN thresholds) ---
-# --- Signes vitaux du serveur (affichés par diag/health et le résumé quotidien ; seuils de WARN) ---
-# --- Vitalwerte des Servers (angezeigt von diag/health und der täglichen Zusammenfassung; WARN-Schwellen) ---
-# --- Constantes vitales del servidor (mostradas por diag/health y el resumen diario; umbrales de WARN) ---
-# --- Segni vitali del server (mostrati da diag/health e dal riepilogo giornaliero; soglie di WARN) ---
+# --- Server vital signs (shown by diag/health and the daily summary; WARN + CRIT thresholds) ---
+# --- Signes vitaux du serveur (affichés par diag/health et le résumé quotidien ; seuils WARN + CRIT) ---
+# --- Vitalwerte des Servers (angezeigt von diag/health und der täglichen Zusammenfassung; WARN- + CRIT-Schwellen) ---
+# --- Constantes vitales del servidor (mostradas por diag/health y el resumen diario; umbrales WARN + CRIT) ---
+# --- Segni vitali del server (mostrati da diag/health e dal riepilogo giornaliero; soglie WARN + CRIT) ---
 #HEALTH_CHECKS=true
 #HEALTH_LOAD_WARN=2
 #HEALTH_MEM_WARN=10
 #HEALTH_DISK_WARN=90
 #HEALTH_MAILQ_WARN=50
 #HEALTH_IO_WARN=25
+# Seuils CRITIQUES (rouge) — franchis => [FAIL] rouge au lieu du [WARN] orange (doivent dépasser le WARN) :
+#HEALTH_LOAD_CRIT=4
+#HEALTH_MEM_CRIT=5
+#HEALTH_DISK_CRIT=95
+#HEALTH_MAILQ_CRIT=500
+#HEALTH_IO_CRIT=50
 
 # --- Detection patterns (awk regex) — ADVANCED: override only if you know what you are doing ---
 # --- Motifs de détection (regex awk) — AVANCÉ : ne surcharger qu'en connaissance de cause ---

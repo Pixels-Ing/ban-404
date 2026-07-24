@@ -572,7 +572,7 @@ cat > "$UPDATER_PATH" <<'UPD_EOF'
 # à la conf si elle est absente (langue héritée du shell/système, sinon en).
 set -u
 
-UPDATER_VERSION="1.3.0"
+UPDATER_VERSION="1.3.1"
 CONF_FILE="/etc/ban_404.conf"
 TARGET="/usr/local/sbin/ban_404.sh"
 SELF="/usr/local/sbin/update_ban_404.sh"
@@ -895,11 +895,11 @@ C_H_motifs=(
 "# --- Patrones de detección (regex awk) — AVANZADO: sobrescribir solo con conocimiento ---"
 "# --- Pattern di rilevamento (regex awk) — AVANZATO: sovrascrivere solo con cognizione di causa ---")
 C_H_health=(
-"# --- Server vital signs (shown by diag/health and the daily summary; WARN thresholds) ---"
-"# --- Signes vitaux du serveur (affichés par diag/health et le résumé quotidien ; seuils de WARN) ---"
-"# --- Vitalwerte des Servers (angezeigt von diag/health und der täglichen Zusammenfassung; WARN-Schwellen) ---"
-"# --- Constantes vitales del servidor (mostradas por diag/health y el resumen diario; umbrales de WARN) ---"
-"# --- Segni vitali del server (mostrati da diag/health e dal riepilogo giornaliero; soglie di WARN) ---")
+"# --- Server vital signs (shown by diag/health and the daily summary; WARN + CRIT thresholds) ---"
+"# --- Signes vitaux du serveur (affichés par diag/health et le résumé quotidien ; seuils WARN + CRIT) ---"
+"# --- Vitalwerte des Servers (angezeigt von diag/health und der täglichen Zusammenfassung; WARN- + CRIT-Schwellen) ---"
+"# --- Constantes vitales del servidor (mostradas por diag/health y el resumen diario; umbrales WARN + CRIT) ---"
+"# --- Segni vitali del server (mostrati da diag/health e dal riepilogo giornaliero; soglie WARN + CRIT) ---")
 C_OTHER=(
 "# --- Other active settings preserved as-is ---"
 "# --- Autres réglages actifs conservés tels quels ---"
@@ -911,9 +911,9 @@ C_opt_v=( $'WINDOW\t#WINDOW=7200' $'BAN_TIMEOUT\t#BAN_TIMEOUT=172800' $'TAIL_LIN
 C_cidr_v=( $'WHITELIST_CIDR\t#WHITELIST_CIDR="10.0.0.0/8|192.168.0.0/16"' )
 C_vhosts_v=( $'EXCLUDE_VHOSTS\t#EXCLUDE_VHOSTS="staging.exemple.com|interne.exemple.com"' )
 C_notif_v=( $'SERVER_NICKNAME\t#SERVER_NICKNAME=""' $'WEBHOOK_URL\t#WEBHOOK_URL=""' $'NOTIFY_EMAIL\t#NOTIFY_EMAIL=""' $'NOTIFY_FROM\t#NOTIFY_FROM=""' $'NOTIFY_MIN_BANS\t#NOTIFY_MIN_BANS=1' $'NOTIFY_BANS\t#NOTIFY_BANS=false' $'DAILY_SUMMARY\t#DAILY_SUMMARY=false' )
-C_health_v=( $'HEALTH_CHECKS\t#HEALTH_CHECKS=true' $'HEALTH_LOAD_WARN\t#HEALTH_LOAD_WARN=2' $'HEALTH_MEM_WARN\t#HEALTH_MEM_WARN=10' $'HEALTH_DISK_WARN\t#HEALTH_DISK_WARN=90' $'HEALTH_MAILQ_WARN\t#HEALTH_MAILQ_WARN=50' $'HEALTH_IO_WARN\t#HEALTH_IO_WARN=25' )
+C_health_v=( $'HEALTH_CHECKS\t#HEALTH_CHECKS=true' $'HEALTH_LOAD_WARN\t#HEALTH_LOAD_WARN=2' $'HEALTH_MEM_WARN\t#HEALTH_MEM_WARN=10' $'HEALTH_DISK_WARN\t#HEALTH_DISK_WARN=90' $'HEALTH_MAILQ_WARN\t#HEALTH_MAILQ_WARN=50' $'HEALTH_IO_WARN\t#HEALTH_IO_WARN=25' $'HEALTH_LOAD_CRIT\t#HEALTH_LOAD_CRIT=4' $'HEALTH_MEM_CRIT\t#HEALTH_MEM_CRIT=5' $'HEALTH_DISK_CRIT\t#HEALTH_DISK_CRIT=95' $'HEALTH_MAILQ_CRIT\t#HEALTH_MAILQ_CRIT=500' $'HEALTH_IO_CRIT\t#HEALTH_IO_CRIT=50' )
 C_motifs_v=( $'HONEYPOT_PATTERN\t#HONEYPOT_PATTERN='\''\.env|wp-config\.php|phpmyadmin|config\.json|setup\.php|actuator|xmlrpc\.php'\''' $'NOISE_PATTERN\t#NOISE_PATTERN='\''\.(jpg|jpeg|png|gif|webp|ico|css|js|svg|woff2?|map)$|apple-touch-icon|favicon|browserconfig\.xml|mstile|autodiscover\.xml|sitemap\.xml|robots\.txt|ads\.txt|\.well-known/(security\.txt|pki-validation)'\''' $'SECURITY_PATTERN\t#SECURITY_PATTERN='\''etc(/|%2f)passwd|\.\./\.\.|%2e%2e%2f|\.\.%2f|%00|vendor/phpunit|eval-stdin\.php|union(\+|%20)select|information_schema|amp%3bamp%3b|resultsperpage=[^& ]*%3f|resultsperpage.*resultsperpage'\''' $'POST_FLOOD_PATTERN\t#POST_FLOOD_PATTERN='\''wp-login\.php|xmlrpc\.php'\''' )
-C_KNOWN=" REPO_RAW WHITELIST_IP BAN404_LANG WINDOW BAN_TIMEOUT TAIL_LINES BAN_THRESHOLD HONEYPOT_SCORE HONEYPOT_BAN_TIMEOUT WHITELIST_CIDR EXCLUDE_VHOSTS SERVER_NICKNAME WEBHOOK_URL NOTIFY_EMAIL NOTIFY_FROM NOTIFY_MIN_BANS NOTIFY_BANS DAILY_SUMMARY RESOLVE_PTR PTR_TIMEOUT HEALTH_CHECKS HEALTH_LOAD_WARN HEALTH_MEM_WARN HEALTH_DISK_WARN HEALTH_MAILQ_WARN HEALTH_IO_WARN HONEYPOT_PATTERN NOISE_PATTERN SECURITY_PATTERN POST_FLOOD_PATTERN POST_FLOOD_THRESHOLD CRON_STEP "
+C_KNOWN=" REPO_RAW WHITELIST_IP BAN404_LANG WINDOW BAN_TIMEOUT TAIL_LINES BAN_THRESHOLD HONEYPOT_SCORE HONEYPOT_BAN_TIMEOUT WHITELIST_CIDR EXCLUDE_VHOSTS SERVER_NICKNAME WEBHOOK_URL NOTIFY_EMAIL NOTIFY_FROM NOTIFY_MIN_BANS NOTIFY_BANS DAILY_SUMMARY RESOLVE_PTR PTR_TIMEOUT HEALTH_CHECKS HEALTH_LOAD_WARN HEALTH_MEM_WARN HEALTH_DISK_WARN HEALTH_MAILQ_WARN HEALTH_IO_WARN HEALTH_LOAD_CRIT HEALTH_MEM_CRIT HEALTH_DISK_CRIT HEALTH_MAILQ_CRIT HEALTH_IO_CRIT HONEYPOT_PATTERN NOISE_PATTERN SECURITY_PATTERN POST_FLOOD_PATTERN POST_FLOOD_THRESHOLD CRON_STEP "
 
 reconcile_conf() {  # $1 = chemin de la conf
     local f="$1" line t var sec entry def tmp pairs

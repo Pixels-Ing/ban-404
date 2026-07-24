@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="1.6.4"
+BAN404_VERSION="1.6.5"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -84,6 +84,13 @@ HEALTH_MEM_WARN=10    # [WARN] si MemAvailable < N % de MemTotal
 HEALTH_DISK_WARN=90   # [WARN] si espace OU inodes > N % (sur / et /var si partition distincte)
 HEALTH_MAILQ_WARN=50  # [WARN] si file postfix > N messages
 HEALTH_IO_WARN=25     # [WARN] si pression IO (PSI some avg60) > N %
+# Seuils « critique » (rouge) : franchis => [FAIL] rouge au lieu du [WARN] orange (coloration graduée
+# vert/orange/rouge des signes vitaux, 1.6.5). Doivent être STRICTEMENT au-delà du seuil WARN.
+HEALTH_LOAD_CRIT=4    # [FAIL] si load 15 min > N x cœurs (> HEALTH_LOAD_WARN)
+HEALTH_MEM_CRIT=5     # [FAIL] si MemAvailable < N % (< HEALTH_MEM_WARN)
+HEALTH_DISK_CRIT=95   # [FAIL] si espace OU inodes > N % (> HEALTH_DISK_WARN)
+HEALTH_MAILQ_CRIT=500 # [FAIL] si file postfix > N messages (> HEALTH_MAILQ_WARN)
+HEALTH_IO_CRIT=50     # [FAIL] si pression IO (PSI some avg60) > N % (> HEALTH_IO_WARN)
 
 # Graduation des triangles de tendance du bloc « Comptage ipset » (tranche = intensité |%| sur la
 # valeur : rien si < flat / ▼▲ modéré / ▼▼▲▲ fort ; couleur = direction, baisse=vert, hausse=rouge).
@@ -1149,11 +1156,11 @@ T_DE[help.conf_postflood]="  POST_FLOOD_THRESHOLD  Sperre bei mehr als N überwa
 T_ES[help.conf_postflood]="  POST_FLOOD_THRESHOLD  Bloqueo al superar N POST vigilados en la ventana (por defecto 20)."
 T_IT[help.conf_postflood]="  POST_FLOOD_THRESHOLD  Blocco oltre N POST sorvegliati nella finestra (predefinito 20)."
 
-T_EN[help.conf_health]="  HEALTH_*         Vital-sign thresholds: HEALTH_LOAD_WARN (x cores, 2), HEALTH_MEM_WARN (%% avail., 10), HEALTH_DISK_WARN (%%, 90), HEALTH_MAILQ_WARN (50), HEALTH_IO_WARN (PSI %%, 25); HEALTH_CHECKS=false disables."
-T_FR[help.conf_health]="  HEALTH_*         Seuils des signes vitaux : HEALTH_LOAD_WARN (x cœurs, 2), HEALTH_MEM_WARN (%% dispo, 10), HEALTH_DISK_WARN (%%, 90), HEALTH_MAILQ_WARN (50), HEALTH_IO_WARN (PSI %%, 25) ; HEALTH_CHECKS=false désactive."
-T_DE[help.conf_health]="  HEALTH_*         Vitalwert-Schwellen: HEALTH_LOAD_WARN (x Kerne, 2), HEALTH_MEM_WARN (%% verfügbar, 10), HEALTH_DISK_WARN (%%, 90), HEALTH_MAILQ_WARN (50), HEALTH_IO_WARN (PSI %%, 25); HEALTH_CHECKS=false deaktiviert."
-T_ES[help.conf_health]="  HEALTH_*         Umbrales de constantes vitales: HEALTH_LOAD_WARN (x núcleos, 2), HEALTH_MEM_WARN (%% disp., 10), HEALTH_DISK_WARN (%%, 90), HEALTH_MAILQ_WARN (50), HEALTH_IO_WARN (PSI %%, 25); HEALTH_CHECKS=false desactiva."
-T_IT[help.conf_health]="  HEALTH_*         Soglie dei segni vitali: HEALTH_LOAD_WARN (x core, 2), HEALTH_MEM_WARN (%% disp., 10), HEALTH_DISK_WARN (%%, 90), HEALTH_MAILQ_WARN (50), HEALTH_IO_WARN (PSI %%, 25); HEALTH_CHECKS=false disattiva."
+T_EN[help.conf_health]="  HEALTH_*         Vital-sign thresholds (WARN=orange, CRIT=red): LOAD (x cores, 2/4), MEM (%% avail., 10/5), DISK (%%, 90/95), MAILQ (50/500), IO (PSI %%, 25/50); HEALTH_CHECKS=false disables."
+T_FR[help.conf_health]="  HEALTH_*         Seuils des signes vitaux (WARN=orange, CRIT=rouge) : LOAD (x cœurs, 2/4), MEM (%% dispo, 10/5), DISK (%%, 90/95), MAILQ (50/500), IO (PSI %%, 25/50) ; HEALTH_CHECKS=false désactive."
+T_DE[help.conf_health]="  HEALTH_*         Vitalwert-Schwellen (WARN=orange, CRIT=rot): LOAD (x Kerne, 2/4), MEM (%% verfügbar, 10/5), DISK (%%, 90/95), MAILQ (50/500), IO (PSI %%, 25/50); HEALTH_CHECKS=false deaktiviert."
+T_ES[help.conf_health]="  HEALTH_*         Umbrales de constantes vitales (WARN=naranja, CRIT=rojo): LOAD (x núcleos, 2/4), MEM (%% disp., 10/5), DISK (%%, 90/95), MAILQ (50/500), IO (PSI %%, 25/50); HEALTH_CHECKS=false desactiva."
+T_IT[help.conf_health]="  HEALTH_*         Soglie dei segni vitali (WARN=arancione, CRIT=rosso): LOAD (x core, 2/4), MEM (%% disp., 10/5), DISK (%%, 90/95), MAILQ (50/500), IO (PSI %%, 25/50); HEALTH_CHECKS=false disattiva."
 
 T_EN[help.conf_advanced]="  Advanced: HONEYPOT_PATTERN / NOISE_PATTERN / SECURITY_PATTERN / POST_FLOOD_PATTERN (awk regex) — override with care."
 T_FR[help.conf_advanced]="  Avancé : HONEYPOT_PATTERN / NOISE_PATTERN / SECURITY_PATTERN / POST_FLOOD_PATTERN (regex awk) — surcharger avec prudence."
@@ -1967,6 +1974,26 @@ paint() {  # colore un glyphe au terminal (ANSI). Mail/chat n'utilisent PAS pain
     fi
 }
 
+# Coloration d'un texte selon la GRAVITÉ d'un signe vital : vert=OK, orange=élevé, rouge=critique.
+# sev_ansi : terminal (OUTPUT_MODE=ansi) seulement ; sinon texte nu (résumé/webhook). sev_hex :
+# #RRGGBB FIXE, pour le mail HTML ET la carte Google Chat (couleurs identiques clair/sombre — un
+# <font color> de carte ne s'adapte pas au thème du client). Les codes ANSI ne contiennent aucun %.
+sev_ansi() {  # $1 = ok|warn|crit ; $2 = texte
+    if [ "$OUTPUT_MODE" = ansi ]; then
+        case "$1" in
+            crit) printf '\033[31m%s\033[0m' "$2" ;;   # critique => rouge
+            warn) printf '\033[33m%s\033[0m' "$2" ;;   # élevé    => orange
+            ok)   printf '\033[32m%s\033[0m' "$2" ;;   # OK       => vert
+            *)    printf '%s' "$2" ;;
+        esac
+    else
+        printf '%s' "$2"
+    fi
+}
+sev_hex() {  # $1 = ok|warn|crit => #RRGGBB (mail HTML + carte chat)
+    case "$1" in crit) printf '#cc3333' ;; warn) printf '#d97a00' ;; ok) printf '#2e9e44' ;; *) printf '' ;; esac
+}
+
 # fmt_pct <pour-mille signé> : évolution en % à une décimale, virgule française (« -0,8 % », « +12,5 % »).
 fmt_pct() {
     local pm=$1 s a
@@ -2173,7 +2200,13 @@ build_stats_text() {
     # Vide (--no-health / HEALTH_CHECKS=false) => le bloc disparaît proprement. ---
     if [ "${#HEALTH_LINES[@]}" -gt 0 ]; then
         printf '\n── %s ──\n' "$(t stats.health_vitals)"
-        printf '%s\n' "${HEALTH_LINES[@]}"
+        # Coloration par gravité : vert=OK, orange=élevé, rouge=critique. sev_ansi ne colore qu'au
+        # terminal (OUTPUT_MODE=ansi) ; en résumé (plain) les lignes sortent nues — le mail/chat ont
+        # leur propre coloration (VITALS_HTML/VITALS_CARD, voir do_summary).
+        local _hi
+        for ((_hi = 0; _hi < ${#HEALTH_LINES[@]}; _hi++)); do
+            sev_ansi "${HEALTH_SEV[_hi]:-ok}" "${HEALTH_LINES[_hi]}"; printf '\n'
+        done
     fi
     # --- Moyennes 24 h (opt-in --avg ; forcé dans le résumé via do_summary) : reflète l'activité
     # RÉELLE des dernières 24 h, là où les signes vitaux ci-dessus ne montrent que l'instant. ---
@@ -2517,6 +2550,7 @@ DIAG_PROBLEMS=0
 DIAG_QUIET=false           # true => diag_line accumule sans imprimer (réutilisé par le résumé)
 declare -a DIAG_ISSUES=()  # lignes "[WARN]/[FAIL] message" accumulées (pour le résumé quotidien)
 declare -a HEALTH_LINES=() # signes vitaux localisés AVEC valeurs (bloc « Signes vitaux » du résumé)
+declare -a HEALTH_SEV=()   # gravité (ok|warn|crit) alignée sur HEALTH_LINES (coloration vert/orange/rouge)
 HEALTH_DONE=false          # garde anti-double-mesure (l'échantillon réseau ~1 s ne tourne qu'une fois)
 diag_line() {  # $1 = ok|warn|fail ; $2 = message déjà localisé
     local tag
@@ -2776,9 +2810,11 @@ run_diag_checks() {
 # build_stats_text imprime en bloc « Signes vitaux » TOUJOURS affiché dans le résumé — les seuils
 # franchis remontent, eux, via DIAG_ISSUES comme n'importe quel [WARN]/[FAIL] de diagnostic.
 # L'accumulation reste hors de diag_line pour ne pas embarquer les ~25 contrôles classiques.
-health_line() {  # $1 = ok|warn|fail ; $2 = message déjà localisé (avec valeurs)
+health_line() {  # $1 = ok|warn|crit ; $2 = message déjà localisé (avec valeurs)
     HEALTH_LINES+=("$2")
-    diag_line "$1" "$2"
+    HEALTH_SEV+=("$1")
+    local dtag="$1"; [ "$1" = crit ] && dtag=fail   # crit => [FAIL] (compte comme anomalie), warn => [WARN]
+    diag_line "$dtag" "$2"
 }
 
 # Occupation espace + inodes d'un point de montage ($1). Inodes « - » (FS sans inodes) => 0.
@@ -2788,7 +2824,9 @@ health_disk_check() {
     case "$pcent" in ''|*[!0-9]*) return 0 ;; esac
     ipcent=$(df -Pi "$mnt" 2>/dev/null | awk 'NR==2{gsub(/%/,"",$5); print $5}')
     case "$ipcent" in ''|*[!0-9]*) ipcent=0 ;; esac
-    if [ "$pcent" -gt "$HEALTH_DISK_WARN" ] || [ "$ipcent" -gt "$HEALTH_DISK_WARN" ]; then
+    if [ "$pcent" -gt "$HEALTH_DISK_CRIT" ] || [ "$ipcent" -gt "$HEALTH_DISK_CRIT" ]; then
+        health_line crit "$(t diag.health_disk_full "$mnt" "$pcent" "$ipcent" "$HEALTH_DISK_CRIT")"
+    elif [ "$pcent" -gt "$HEALTH_DISK_WARN" ] || [ "$ipcent" -gt "$HEALTH_DISK_WARN" ]; then
         health_line warn "$(t diag.health_disk_full "$mnt" "$pcent" "$ipcent" "$HEALTH_DISK_WARN")"
     else
         health_line ok "$(t diag.health_disk "$mnt" "$pcent" "$ipcent")"
@@ -2815,7 +2853,9 @@ run_health_checks() {
         cores=$(nproc 2>/dev/null) || cores=$(grep -c ^processor /proc/cpuinfo 2>/dev/null)
         [ -n "$cores" ] || cores=1
         up=$(awk '{printf "%dd %dh", int($1/86400), int(($1%86400)/3600)}' /proc/uptime 2>/dev/null)
-        if awk -v l="$l15" -v c="$cores" -v m="$HEALTH_LOAD_WARN" 'BEGIN{exit !(l > c*m)}'; then
+        if awk -v l="$l15" -v c="$cores" -v m="$HEALTH_LOAD_CRIT" 'BEGIN{exit !(l > c*m)}'; then
+            health_line crit "$(t diag.health_load_high "$l1" "$l5" "$l15" "$cores" "$HEALTH_LOAD_CRIT" "${up:-?}")"
+        elif awk -v l="$l15" -v c="$cores" -v m="$HEALTH_LOAD_WARN" 'BEGIN{exit !(l > c*m)}'; then
             health_line warn "$(t diag.health_load_high "$l1" "$l5" "$l15" "$cores" "$HEALTH_LOAD_WARN" "${up:-?}")"
         else
             health_line ok "$(t diag.health_load "$l1" "$l5" "$l15" "$cores" "${up:-?}")"
@@ -2830,7 +2870,9 @@ run_health_checks() {
             END{ if (!av) t=0; printf "%d %d %d %s", int(t/1024), int(a/1024), (t>0 ? int(a*100/t) : 0), (st>0 ? int((st-sf)*100/st) : "-") }
         ' /proc/meminfo 2>/dev/null)"
         if [ -n "$mem_total" ] && [ "$mem_total" -gt 0 ]; then
-            if [ "$mem_pct" -lt "$HEALTH_MEM_WARN" ]; then
+            if [ "$mem_pct" -lt "$HEALTH_MEM_CRIT" ]; then
+                health_line crit "$(t diag.health_mem_low "$mem_pct" "$mem_avail" "$mem_total" "$HEALTH_MEM_CRIT" "$swap_pct")"
+            elif [ "$mem_pct" -lt "$HEALTH_MEM_WARN" ]; then
                 health_line warn "$(t diag.health_mem_low "$mem_pct" "$mem_avail" "$mem_total" "$HEALTH_MEM_WARN" "$swap_pct")"
             else
                 health_line ok "$(t diag.health_mem "$mem_pct" "$mem_avail" "$mem_total" "$swap_pct")"
@@ -2857,13 +2899,15 @@ run_health_checks() {
         # pgrep -x master : preuve directe que le démon tourne (l'unité systemd postfix.service,
         # oneshot, peut rester « active » après un crash du master => pas fiable seule).
         if pgrep -x master >/dev/null 2>&1; then
-            if [ "$queue" != "?" ] && [ "$queue" -gt "$HEALTH_MAILQ_WARN" ]; then
+            if [ "$queue" != "?" ] && [ "$queue" -gt "$HEALTH_MAILQ_CRIT" ]; then
+                health_line crit "$(t diag.health_mta_queue "$queue" "$HEALTH_MAILQ_CRIT")"
+            elif [ "$queue" != "?" ] && [ "$queue" -gt "$HEALTH_MAILQ_WARN" ]; then
                 health_line warn "$(t diag.health_mta_queue "$queue" "$HEALTH_MAILQ_WARN")"
             else
                 health_line ok "$(t diag.health_mta "$queue")"
             fi
         else
-            health_line fail "$(t diag.health_mta_down "$queue")"
+            health_line crit "$(t diag.health_mta_down "$queue")"
         fi
     else
         health_line ok "$(t diag.health_mta_none)"
@@ -2873,7 +2917,9 @@ run_health_checks() {
     if [ -r /proc/pressure/io ]; then
         io=$(awk '/^some/{for(i=2;i<=NF;i++) if($i ~ /^avg60=/){sub(/^avg60=/,"",$i); print $i; exit}}' /proc/pressure/io 2>/dev/null)
         if [ -n "$io" ]; then
-            if awk -v v="$io" -v s="$HEALTH_IO_WARN" 'BEGIN{exit !(v > s)}'; then
+            if awk -v v="$io" -v s="$HEALTH_IO_CRIT" 'BEGIN{exit !(v > s)}'; then
+                health_line crit "$(t diag.health_io_high "$io" "$HEALTH_IO_CRIT")"
+            elif awk -v v="$io" -v s="$HEALTH_IO_WARN" 'BEGIN{exit !(v > s)}'; then
                 health_line warn "$(t diag.health_io_high "$io" "$HEALTH_IO_WARN")"
             else
                 health_line ok "$(t diag.health_io "$io")"

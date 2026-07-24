@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="2.0.0"
+BAN404_VERSION="2.0.1"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -808,6 +808,30 @@ T_FR[diag.step_cron_orphan]="Cron de ticks intermédiaires présent alors que CR
 T_DE[diag.step_cron_orphan]="Zwischentakt-Cron vorhanden, obwohl CRON_STEP deaktiviert ist — wird beim nächsten stündlichen Lauf entfernt."
 T_ES[diag.step_cron_orphan]="Cron de ticks intermedios presente aunque CRON_STEP está desactivado — se eliminará en la próxima ejecución horaria."
 T_IT[diag.step_cron_orphan]="Cron dei tick intermedi presente benché CRON_STEP sia disattivato — sarà rimosso alla prossima esecuzione oraria."
+
+T_EN[diag.platform_ok]="Platform: %s (supported)."
+T_FR[diag.platform_ok]="Plateforme : %s (supportée)."
+T_DE[diag.platform_ok]="Plattform: %s (unterstützt)."
+T_ES[diag.platform_ok]="Plataforma: %s (compatible)."
+T_IT[diag.platform_ok]="Piattaforma: %s (supportata)."
+
+T_EN[diag.platform_readonly]="Platform: %s — UNVALIDATED, READ-ONLY mode (no firewall write; force with PLATFORM_VALIDATED)."
+T_FR[diag.platform_readonly]="Plateforme : %s — NON VALIDÉE, mode LECTURE SEULE (aucune écriture pare-feu ; forcer avec PLATFORM_VALIDATED)."
+T_DE[diag.platform_readonly]="Plattform: %s — NICHT VALIDIERT, NUR-LESE-Modus (keine Firewall-Schreibvorgänge; mit PLATFORM_VALIDATED erzwingen)."
+T_ES[diag.platform_readonly]="Plataforma: %s — NO VALIDADA, modo SOLO LECTURA (sin escritura de firewall; forzar con PLATFORM_VALIDATED)."
+T_IT[diag.platform_readonly]="Piattaforma: %s — NON VALIDATA, modalità SOLA LETTURA (nessuna scrittura firewall; forzare con PLATFORM_VALIDATED)."
+
+T_EN[diag.fw_backend]="Firewall: backend in use = %s; available: %s."
+T_FR[diag.fw_backend]="Pare-feu : backend utilisé = %s ; disponibles : %s."
+T_DE[diag.fw_backend]="Firewall: verwendetes Backend = %s; verfügbar: %s."
+T_ES[diag.fw_backend]="Firewall: backend en uso = %s; disponibles: %s."
+T_IT[diag.fw_backend]="Firewall: backend in uso = %s; disponibili: %s."
+
+T_EN[diag.fw_none]="none (read-only)"
+T_FR[diag.fw_none]="aucun (lecture seule)"
+T_DE[diag.fw_none]="keines (nur lesen)"
+T_ES[diag.fw_none]="ninguno (solo lectura)"
+T_IT[diag.fw_none]="nessuno (sola lettura)"
 
 T_EN[diag.ipset_ok]="ipset %s present (%s members)."
 T_FR[diag.ipset_ok]="ipset %s présent (%s membres)."
@@ -2642,6 +2666,15 @@ cadence_adjust() {
     return 0
 }
 
+# Fichier de log candidat pour un dossier <BASE_DIR>/<vhost>/log/ : access.log s'il existe, sinon le
+# plus récent *access.log en écartant yesterday-access.log (symlink ISPConfig périmé, jamais le bon).
+# Vide si aucun. Factorisé : utilisé par discover_valid_logs ET la découverte du diag (anti-divergence ;
+# futur point d'entrée des profils de layout, Phase 2 de l'universalisation).
+candidate_log_for_dir() {  # $1 = dossier terminé par /log/
+    if [ -f "${1}access.log" ]; then printf '%s' "${1}access.log"
+    else ls -1t "${1}"*access.log 2>/dev/null | grep -v '/yesterday-access\.log$' | head -n 1; fi
+}
+
 # Découverte des logs à analyser (factorisée : boucle principale ET sentinelle). Remplit les
 # tableaux globaux FILES_FOUND puis VALID_FILES (lisibles et non vides). On écarte
 # yesterday-access.log (symlink ISPConfig vers le log de la veille, souvent périmé) : jamais
@@ -2656,12 +2689,8 @@ discover_valid_logs() {
             [ "$VERBOSE" = true ] && t verbose.vhost_excluded "$vhost"
             continue
         fi
-        if [ -f "${log_dir}access.log" ]; then
-            FILES_FOUND+=("${log_dir}access.log")
-        else
-            latest=$(ls -1t "${log_dir}"*access.log 2>/dev/null | grep -v '/yesterday-access\.log$' | head -n 1)
-            [ -n "$latest" ] && FILES_FOUND+=("$latest")
-        fi
+        latest=$(candidate_log_for_dir "$log_dir")
+        [ -n "$latest" ] && FILES_FOUND+=("$latest")
     done
     VALID_FILES=()
     for file in "${FILES_FOUND[@]}"; do
@@ -2899,26 +2928,41 @@ run_diag_checks() {
         diag_line warn "$(t diag.step_cron_orphan)"
     fi
 
-    # 4. Pare-feu (lecture ipset/iptables => root requis)
-    if [ "$(id -u)" -eq 0 ]; then
-        if ipset list "$IPSET_NAME" &>/dev/null; then
-            n=$(ipset list "$IPSET_NAME" 2>/dev/null | awk '/^Members:/{m=1;next} m&&NF{c++} END{print c+0}')
-            diag_line ok "$(t diag.ipset_ok "$IPSET_NAME" "$n")"
+    # 4. Pare-feu : d'abord la PLATEFORME + les backends (détection, sans root), puis l'état
+    #    ipset/iptables/persistance (root) UNIQUEMENT si la plateforme est supportée — inutile (et
+    #    bruyant en [FAIL]) de chercher un ipset sur une plateforme en lecture seule.
+    local pf_id pf_avail
+    pf_id=$( . /etc/os-release 2>/dev/null; printf '%s' "${ID:-inconnu}" )
+    pf_avail=""
+    { command -v ipset >/dev/null 2>&1 && { command -v iptables >/dev/null 2>&1 || [ -x /sbin/iptables ]; }; } && pf_avail="iptables+ipset"
+    command -v nft >/dev/null 2>&1 && pf_avail="${pf_avail:+$pf_avail, }nftables"
+    [ -n "$pf_avail" ] || pf_avail="—"
+    if platform_supported; then
+        diag_line ok "$(t diag.platform_ok "$pf_id")"
+        diag_line ok "$(t diag.fw_backend "iptables+ipset" "$pf_avail")"   # seul backend implémenté en 2.0.x (FW_BACKEND arrive en Phase 1)
+        if [ "$(id -u)" -eq 0 ]; then
+            if ipset list "$IPSET_NAME" &>/dev/null; then
+                n=$(ipset list "$IPSET_NAME" 2>/dev/null | awk '/^Members:/{m=1;next} m&&NF{c++} END{print c+0}')
+                diag_line ok "$(t diag.ipset_ok "$IPSET_NAME" "$n")"
+            else
+                diag_line fail "$(t diag.ipset_missing "$IPSET_NAME")"
+            fi
+            if /sbin/iptables -C INPUT -m set --match-set "$IPSET_NAME" src -j DROP &>/dev/null; then
+                diag_line ok "$(t diag.iptables_ok)"
+            else
+                diag_line fail "$(t diag.iptables_missing)"
+            fi
+            if [ -f "$IPSET_SAVE_FILE" ] && [ -f /etc/iptables/rules.v4 ]; then
+                diag_line ok "$(t diag.persist_ok)"
+            else
+                diag_line warn "$(t diag.persist_missing)"
+            fi
         else
-            diag_line fail "$(t diag.ipset_missing "$IPSET_NAME")"
-        fi
-        if /sbin/iptables -C INPUT -m set --match-set "$IPSET_NAME" src -j DROP &>/dev/null; then
-            diag_line ok "$(t diag.iptables_ok)"
-        else
-            diag_line fail "$(t diag.iptables_missing)"
-        fi
-        if [ -f "$IPSET_SAVE_FILE" ] && [ -f /etc/iptables/rules.v4 ]; then
-            diag_line ok "$(t diag.persist_ok)"
-        else
-            diag_line warn "$(t diag.persist_missing)"
+            diag_line warn "$(t diag.root_skip)"
         fi
     else
-        diag_line warn "$(t diag.root_skip)"
+        diag_line warn "$(t diag.platform_readonly "$pf_id")"
+        diag_line ok "$(t diag.fw_backend "$(t diag.fw_none)" "$pf_avail")"
     fi
 
     # 5. Conf & logrotate
@@ -2948,10 +2992,7 @@ run_diag_checks() {
         [ -d "$log_dir" ] || continue
         vhost="${log_dir%/log/}"; vhost="${vhost##*/}"
         if is_excluded_vhost "$vhost"; then excluded=$((excluded + 1)); continue; fi
-        # yesterday-access.log : artefact ISPConfig (symlink vers le log de la veille, souvent
-        # périmé) — jamais le bon fichier à analyser, on l'écarte du fallback.
-        if [ -f "${log_dir}access.log" ]; then f="${log_dir}access.log"
-        else f=$(ls -1t "${log_dir}"*access.log 2>/dev/null | grep -v '/yesterday-access\.log$' | head -n 1); fi
+        f=$(candidate_log_for_dir "$log_dir")   # access.log ou repli *access.log (hors yesterday-access.log)
         if   [ -z "$f" ];   then inactive=$((inactive + 1));     [ "$VERBOSE" = true ] && t diag.log_v_nolog "$vhost"
         elif [ ! -e "$f" ]; then inactive=$((inactive + 1));     [ "$VERBOSE" = true ] && t diag.log_v_broken "$vhost"
         elif [ ! -r "$f" ]; then unreadable=$((unreadable + 1)); [ "$VERBOSE" = true ] && t diag.log_v_unreadable "$vhost"

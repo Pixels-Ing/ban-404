@@ -66,4 +66,11 @@ bash "$ENGINE" unban "$IP" >/dev/null 2>&1 || fail "la sous-commande 'unban' a �
 ipset test ban_404_list "$IP" 2>/dev/null && fail "IP $IP toujours bannie après unban"
 ok "IP débannie proprement"
 
+# ---------------------------------------------------------------------------
+echo "== Test 3 : diag s'exécute et rapporte plateforme + backend pare-feu =="
+# 'iptables+ipset' est un jeton littéral présent dans toutes les langues => assertion robuste.
+DOUT=$(bash "$ENGINE" diag 2>&1 || true)
+printf '%s\n' "$DOUT" | grep -q 'iptables+ipset' || { printf '%s\n' "$DOUT"; fail "diag ne rapporte pas le backend pare-feu"; }
+ok "diag rapporte le backend pare-feu (iptables+ipset)"
+
 echo "== INTÉGRATION OK =="

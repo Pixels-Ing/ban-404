@@ -11,6 +11,13 @@
 # URL raw del repository (senza slash finale), usata dal self-updater.
 REPO_RAW="https://raw.githubusercontent.com/Pixels-Ing/ban-404/main"
 
+# Platform fail-safe: empty = auto-detect (known distro + iptables/ipset); true = force enforcement on an unrecognized platform (you accept the risk); false = force read-only.
+# Fail-safe plateforme : vide = auto-détection (distro connue + iptables/ipset) ; true = forcer l'application sur une plateforme non reconnue (vous assumez le risque) ; false = forcer la lecture seule.
+# Plattform-Fail-safe: leer = automatische Erkennung; true = Durchsetzung auf nicht erkannter Plattform erzwingen (auf eigenes Risiko); false = Nur-Lese-Modus erzwingen.
+# Fail-safe de plataforma: vacío = autodetección; true = forzar la aplicación en una plataforma no reconocida (asume el riesgo); false = forzar solo lectura.
+# Fail-safe piattaforma: vuoto = rilevamento automatico; true = forzare l'applicazione su una piattaforma non riconosciuta (a proprio rischio); false = forzare la sola lettura.
+#PLATFORM_VALIDATED=""
+
 # IPs to NEVER ban (exact match, separated by | ).
 # IP à ne JAMAIS bannir (correspondance exacte, séparées par | ).
 # Niemals zu sperrende IPs (exakte Übereinstimmung, durch | getrennt).

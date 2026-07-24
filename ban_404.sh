@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="1.6.5"
+BAN404_VERSION="1.6.6"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -2079,6 +2079,24 @@ ipset_summary_html() {
     if [ -n "$base_epoch" ]; then local sp=$((now - base_epoch)); [ "$sp" -lt 82800 ] 2>/dev/null && IPSET_HTML+="<div style=\"font-size:12px;color:#888;margin-top:3px\">$(html_escape "$(t stats.avg24_window "$(metrics_fmt_span "$sp")")")</div>"; fi
 }
 
+# Représentations du bloc « Signes vitaux » POUR LES NOTIFICATIONS (dérivées de HEALTH_LINES +
+# HEALTH_SEV). PLAIN = neutre (chat + partie text/plain du mail) ; HTML = lignes colorées par
+# gravité (vert=OK, orange=élevé, rouge=critique) pour la partie text/html du mail. Même mécanique
+# de jeton que le bloc ipset (voir build_stats_text / do_summary).
+vitals_prose() {
+    local i
+    VITALS_PLAIN=$'\n── '"$(t stats.health_vitals)"' ──'   # \n initial => ligne vide avant le titre
+    for ((i=0; i<${#HEALTH_LINES[@]}; i++)); do VITALS_PLAIN+=$'\n'"${HEALTH_LINES[i]}"; done
+}
+vitals_html() {
+    local i col rows=""
+    for ((i=0; i<${#HEALTH_LINES[@]}; i++)); do
+        col=$(sev_hex "${HEALTH_SEV[i]:-ok}")
+        rows+="<div${col:+ style=\"color:$col\"}>$(html_escape "${HEALTH_LINES[i]}")</div>"
+    done
+    VITALS_HTML="<div style=\"margin:12px 0 4px;font-weight:bold\">$(html_escape "$(t stats.health_vitals)")</div>$rows"
+}
+
 # Sous-bloc « Comptage ipset (évol. + tendance 24 h) » : pour CHAQUE ipset de la machine + un total,
 # le nb d'entrées COURANT (mesuré live), son évolution sur 24 h (+X/-Y) et une sparkline de tendance.
 # Historique horaire dans IPSET_COUNTS_FILE (posé par ipset_counts_sample, comme les métriques). La
@@ -2199,14 +2217,20 @@ build_stats_text() {
     # run_health_checks ; aucune re-mesure — l'échantillon réseau 1 s n'a tourné qu'une fois).
     # Vide (--no-health / HEALTH_CHECKS=false) => le bloc disparaît proprement. ---
     if [ "${#HEALTH_LINES[@]}" -gt 0 ]; then
-        printf '\n── %s ──\n' "$(t stats.health_vitals)"
-        # Coloration par gravité : vert=OK, orange=élevé, rouge=critique. sev_ansi ne colore qu'au
-        # terminal (OUTPUT_MODE=ansi) ; en résumé (plain) les lignes sortent nues — le mail/chat ont
-        # leur propre coloration (VITALS_HTML/VITALS_CARD, voir do_summary).
-        local _hi
-        for ((_hi = 0; _hi < ${#HEALTH_LINES[@]}; _hi++)); do
-            sev_ansi "${HEALTH_SEV[_hi]:-ok}" "${HEALTH_LINES[_hi]}"; printf '\n'
-        done
+        if [ "${SUMMARY_NOTIFY:-}" = 1 ]; then
+            # Notification : jeton remplacé par do_summary selon le canal (VITALS_PLAIN neutre pour
+            # text/plain + chat, VITALS_HTML coloré par gravité pour le mail HTML).
+            vitals_prose; vitals_html
+            printf '\001VITALSBLOCK\002\n'
+        else
+            printf '\n── %s ──\n' "$(t stats.health_vitals)"
+            # Coloration par gravité au terminal : vert=OK, orange=élevé, rouge=critique (sev_ansi ne
+            # colore qu'en OUTPUT_MODE=ansi ; en 'plain' les lignes sortent nues).
+            local _hi
+            for ((_hi = 0; _hi < ${#HEALTH_LINES[@]}; _hi++)); do
+                sev_ansi "${HEALTH_SEV[_hi]:-ok}" "${HEALTH_LINES[_hi]}"; printf '\n'
+            done
+        fi
     fi
     # --- Moyennes 24 h (opt-in --avg ; forcé dans le résumé via do_summary) : reflète l'activité
     # RÉELLE des dernières 24 h, là où les signes vitaux ci-dessus ne montrent que l'instant. ---
@@ -2302,7 +2326,7 @@ do_list() {
 do_summary() {
     case "$DAILY_SUMMARY" in true|1|yes|on) ;; *) exit 0 ;; esac
     [ -z "$WEBHOOK_URL" ] && [ -z "$NOTIFY_EMAIL" ] && exit 0
-    local host tmp body body_plain body_html subj tok before after; host=$(server_label)
+    local host tmp body body_plain body_html subj vtok itok seg; host=$(server_label)
     # Résumé DESTINÉ À L'ENVOI : on neutralise --verbose afin que le détail par dossier
     # (lignes verbose de run_diag_checks, rejoué par build_stats_text) ne soit PAS injecté dans
     # le corps notifié. L'affichage direct de --stats (sans cette neutralisation) le conserve.
@@ -2315,26 +2339,29 @@ do_summary() {
     # perdrait dans son sous-shell). On peut ainsi FLAGGER le sujet — mail ET webhook, ce dernier
     # recevant « sujet\ncorps » (cf. notify) — quand le résumé contient au moins un [WARN]/[FAIL].
     DIAG_PROBLEMS=0
-    SUMMARY_NOTIFY=1; IPSET_PROSE=""; IPSET_HTML=""   # build_ipset_counts => jeton + IPSET_PROSE/IPSET_HTML
+    SUMMARY_NOTIFY=1; IPSET_PROSE=""; IPSET_HTML=""; VITALS_PLAIN=""; VITALS_HTML=""  # build_stats_text => jetons + variantes PROSE/HTML
     tmp=$(mktemp 2>/dev/null) || tmp=""
     if [ -n "$tmp" ]; then
         build_stats_text > "$tmp"; body=$(cat "$tmp"); rm -f "$tmp"
     else
-        body=$(build_stats_text)          # repli : sous-shell => sujet non flaggé ET IPSET_PROSE/HTML perdus (dégradation propre)
+        body=$(build_stats_text)          # repli : sous-shell => sujet non flaggé ET variantes PROSE/HTML perdues (dégradation propre)
     fi
     SUMMARY_NOTIFY=
-    tok=$'\001IPSETBLOCK\002'
-    if [ -n "$IPSET_PROSE" ] && [[ "$body" == *"$tok"* ]]; then
-        body_plain="${body/$tok/$IPSET_PROSE}"                     # chat + partie text/plain : bloc ipset en PROSE (pas de chasse fixe)
-        before="${body%%"$tok"*}"; after="${body#*"$tok"}"        # partie text/html : sections proportionnelles + TABLEAU au milieu
-        body_html="<!DOCTYPE html><html><body style=\"font-family:sans-serif;font-size:13px;color:#1a1a1a;margin:8px\">"
-        body_html+="<div>$(html_text "$before")</div>"
-        body_html+="$IPSET_HTML"
-        body_html+="<div>$(html_text "$after")</div></body></html>"
-    else
-        body_plain="${body//$tok/}"                               # repli : jeton retiré (bloc ipset absent, dégradation propre)
-        body_html="<!DOCTYPE html><html><body style=\"font-family:sans-serif;font-size:13px;color:#1a1a1a;margin:8px\"><div>$(html_text "$body_plain")</div></body></html>"
+    vtok=$'\001VITALSBLOCK\002'; itok=$'\001IPSETBLOCK\002'
+    # text/plain (+ chat) : chaque jeton => sa variante PROSE (vide si non produite => jeton retiré proprement).
+    body_plain="${body//$vtok/$VITALS_PLAIN}"; body_plain="${body_plain//$itok/$IPSET_PROSE}"
+    # text/html : on découpe le corps autour des jetons (ordre d'apparition VITALS puis IPSET) et on
+    # intercale les blocs HTML colorés ; les segments de texte passent par html_text (proportionnel).
+    seg="$body"
+    body_html="<!DOCTYPE html><html><body style=\"font-family:sans-serif;font-size:13px;color:#1a1a1a;margin:8px\">"
+    if [ -n "$VITALS_HTML" ] && [[ "$seg" == *"$vtok"* ]]; then
+        body_html+="<div>$(html_text "${seg%%"$vtok"*}")</div>$VITALS_HTML"; seg="${seg#*"$vtok"}"
     fi
+    if [ -n "$IPSET_HTML" ] && [[ "$seg" == *"$itok"* ]]; then
+        body_html+="<div>$(html_text "${seg%%"$itok"*}")</div>$IPSET_HTML"; seg="${seg#*"$itok"}"
+    fi
+    seg="${seg//$vtok/}"; seg="${seg//$itok/}"                    # filet : purge tout jeton résiduel (repli sous-shell) avant html_text
+    body_html+="<div>$(html_text "$seg")</div></body></html>"
     if [ "${DIAG_PROBLEMS:-0}" -gt 0 ]; then
         subj=$(t summary.subject_warn "$host" "$DIAG_PROBLEMS")
     else

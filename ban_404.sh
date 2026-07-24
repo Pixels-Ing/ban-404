@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="2.1.2"
+BAN404_VERSION="2.1.3"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -1752,13 +1752,16 @@ nft_flush()      { "$NFT_BIN" flush set "$NFT_TABLE_FAMILY" "$NFT_TABLE" "$IPSET
 nft_list_members() { "$NFT_BIN" list set "$NFT_TABLE_FAMILY" "$NFT_TABLE" "$IPSET_NAME" 2>/dev/null | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}'; }
 nft_count() { "$NFT_BIN" list set "$NFT_TABLE_FAMILY" "$NFT_TABLE" "$1" 2>/dev/null | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' | wc -l | tr -d ' '; }
 nft_list_sets()  { nft_set_exists && printf '%s\n' "$IPSET_NAME"; }   # portée = NOTRE table (pas d'inventaire des tables tierces)
-# expires nft humain (1d23h59m30s) -> secondes (pour le tri de « list ») ; '?' si absent/illisible.
+# expires nft humain (1d23h59m30s812ms) -> secondes (pour le tri de « list ») ; '?' si illisible.
+# Le « m » d'un « <n>ms » (millisecondes) est distingué du « m » des minutes en regardant le
+# caractère suivant : « ms » => on jette la fraction (pas de sous-seconde), sinon minutes.
 nft_dur_to_secs() {
     printf '%s' "${1:-}" | awk '{ s=0; n=""; ok=0
         for(i=1;i<=length($0);i++){ c=substr($0,i,1)
             if(c ~ /[0-9]/){n=n c}
             else if(c=="d"){s+=n*86400;n="";ok=1} else if(c=="h"){s+=n*3600;n="";ok=1}
-            else if(c=="m"){s+=n*60;n="";ok=1}   else if(c=="s"){s+=n;n="";ok=1} }
+            else if(c=="m"){ if(substr($0,i+1,1)=="s"){n="";i++} else {s+=n*60;n="";ok=1} }
+            else if(c=="s"){s+=n;n="";ok=1} }
         if(ok) print s; else print "?" }'
 }
 # Membres « bruts » façon ipset (« ip timeout <secs_résiduelles> ») pour do_list ET la bascule
@@ -1771,7 +1774,7 @@ nft_list_members_raw() {
         | awk '{ ip=""; ev=""
             for(i=1;i<=NF;i++){ if($i ~ /^([0-9]{1,3}\.){3}[0-9]{1,3}$/) ip=$i; if($i=="expires") ev=$(i+1) }
             if(ip!="") print ip, ev }' \
-        | while read -r ip ev; do ev="${ev%%[0-9]*ms}"; printf '%s timeout %s\n' "$ip" "$(nft_dur_to_secs "$ev")"; done
+        | while read -r ip ev; do printf '%s timeout %s\n' "$ip" "$(nft_dur_to_secs "$ev")"; done
 }
 nft_rule_present()    { "$NFT_BIN" list chain "$NFT_TABLE_FAMILY" "$NFT_TABLE" "$NFT_CHAIN" 2>/dev/null | grep -q "@$IPSET_NAME drop"; }
 nft_persist_present() { [ -f "$NFT_SAVE_FILE" ]; }

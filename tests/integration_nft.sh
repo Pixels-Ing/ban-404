@@ -69,10 +69,12 @@ ok "A2 IP bannie dans le set nft inet ban_404 $SET"
 nft_rule || fail "A3 : règle « ip saddr @$SET drop » absente de la chaîne nft input"
 ok "A3 règle DROP nft présente"
 
-# 'list' doit énumérer l'IP bannie (exerce nft_list_members_raw : ce chemin awk avait un bug de
-# collision « exp » invisible sous mawk mais fatal sous gawk — cf. job CI qui force gawk).
-bash "$ENGINE" list 2>&1 | grep -q "$IP" || { bash "$ENGINE" list 2>&1 | head; fail "A3bis : 'list' n'affiche pas l'IP $IP bannie (nft_list_members_raw)"; }
-ok "A3bis 'list' énumère l'IP bannie sous nft"
+# 'list' doit énumérer l'IP bannie AVEC un timeout NUMÉRIQUE (pas « ? ») : exerce nft_list_members_raw
+# + nft_dur_to_secs, dont les bugs (collision awk « exp » fatale sous gawk ; strip glob « %%[0-9]*ms »
+# qui effaçait la durée ; « m » de « ms » compté en minutes) donnaient soit une liste vide soit « ? ».
+LLINE=$(bash "$ENGINE" list 2>&1 | grep -F "$IP")
+printf '%s\n' "$LLINE" | grep -qE 'timeout[^0-9]*[0-9]+' || { bash "$ENGINE" list 2>&1 | head; fail "A3bis : 'list' n'affiche pas l'IP $IP avec un timeout numérique (nft_list_members_raw/dur)"; }
+ok "A3bis 'list' énumère l'IP bannie + timeout numérique sous nft"
 
 bash "$ENGINE" unban "$IP" >/dev/null 2>&1 || fail "A4 : la sous-commande unban a échoué (backend nft)"
 nft_has && fail "A4 : IP $IP toujours dans le set nft après unban"

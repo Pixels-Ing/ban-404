@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="2.1.3"
+BAN404_VERSION="2.2.0"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -50,6 +50,13 @@ WHITELIST_CIDR=""
 # Vhosts à EXCLURE de l'analyse (noms de dossier sous BASE_DIR, séparés par | ),
 # ex: "staging.exemple.com|interne.exemple.com". Vide => tous les vhosts sont analysés.
 EXCLUDE_VHOSTS=""
+
+# Profil de layout des logs (découverte) : auto (défaut = sonder les chemins connus) | ispconfig
+# (défaut historique : ${BASE_DIR}/*/log/access.log) | cpanel (/var/log/apache2/domlogs/<domaine>) |
+# directadmin (/var/log/httpd/domains/<domaine>.log) | plesk (/var/www/vhosts/<domaine>/logs/access*) |
+# nginx (/var/log/nginx/*access*.log) | generic (${BASE_DIR}/**/*access*.log). Le PARSEUR (combiné
+# Apache/nginx) est le même partout : seule la découverte de fichiers change. Valeur inconnue => ispconfig.
+LOG_PROFILE="auto"
 
 # Cadence d'exécution supplémentaire (opt-in) : vide = passage horaire seul (cron.hourly, défaut) ;
 # entier 5-30 = le moteur tourne AUSSI toutes les N minutes ; "auto" = adaptatif — tick toutes les
@@ -896,6 +903,18 @@ T_DE[diag.logs]="Logs: %s aktiv, %s inaktiv/leer, %s nicht lesbar, %s ausgeschlo
 T_ES[diag.logs]="Logs: %s activos, %s inactivos/vacíos, %s ilegibles, %s excluidos."
 T_IT[diag.logs]="Log: %s attivi, %s inattivi/vuoti, %s illeggibili, %s esclusi."
 
+T_EN[diag.log_profile]="Log discovery profile: %s."
+T_FR[diag.log_profile]="Profil de découverte des logs : %s."
+T_DE[diag.log_profile]="Log-Erkennungsprofil: %s."
+T_ES[diag.log_profile]="Perfil de descubrimiento de logs: %s."
+T_IT[diag.log_profile]="Profilo di scoperta dei log: %s."
+
+T_EN[diag.logs_found]="%s log file(s) found for analysis."
+T_FR[diag.logs_found]="%s fichier(s) de log trouvé(s) pour l'analyse."
+T_DE[diag.logs_found]="%s Log-Datei(en) für die Analyse gefunden."
+T_ES[diag.logs_found]="%s archivo(s) de log encontrado(s) para el análisis."
+T_IT[diag.logs_found]="%s file di log trovati per l'analisi."
+
 T_EN[diag.log_v_nolog]="   - %s: no access.log (inactive site)"
 T_FR[diag.log_v_nolog]="   - %s : aucun access.log (site inactif)"
 T_DE[diag.log_v_nolog]="   - %s: kein access.log (inaktive Site)"
@@ -1095,6 +1114,12 @@ T_FR[help.conf_exclude_vhosts]="  EXCLUDE_VHOSTS   Vhosts exclus de l'analyse, n
 T_DE[help.conf_exclude_vhosts]="  EXCLUDE_VHOSTS   Von der Analyse ausgeschlossene Vhosts, Verzeichnisnamen '|'-getrennt (z. B. staging.example.com)."
 T_ES[help.conf_exclude_vhosts]="  EXCLUDE_VHOSTS   Vhosts excluidos del análisis, nombres de carpeta separados por '|' (ej. staging.example.com)."
 T_IT[help.conf_exclude_vhosts]="  EXCLUDE_VHOSTS   Vhost esclusi dall'analisi, nomi di cartella separati da '|' (es. staging.example.com)."
+
+T_EN[help.conf_log_profile]="  LOG_PROFILE      Log layout: auto (default) | ispconfig | cpanel | directadmin | plesk | nginx | generic."
+T_FR[help.conf_log_profile]="  LOG_PROFILE      Layout des logs : auto (défaut) | ispconfig | cpanel | directadmin | plesk | nginx | generic."
+T_DE[help.conf_log_profile]="  LOG_PROFILE      Log-Layout: auto (Standard) | ispconfig | cpanel | directadmin | plesk | nginx | generic."
+T_ES[help.conf_log_profile]="  LOG_PROFILE      Disposición de logs: auto (por defecto) | ispconfig | cpanel | directadmin | plesk | nginx | generic."
+T_IT[help.conf_log_profile]="  LOG_PROFILE      Layout dei log: auto (predefinito) | ispconfig | cpanel | directadmin | plesk | nginx | generic."
 
 T_EN[help.conf_lang]="  BAN404_LANG      Message language: en, fr, de, es, it (default: auto-detected)."
 T_FR[help.conf_lang]="  BAN404_LANG      Langue des messages : en, fr, de, es, it (défaut : auto-détectée)."
@@ -1929,6 +1954,7 @@ show_help() {
     t help.conf_whitelist_ip
     t help.conf_whitelist_cidr
     t help.conf_exclude_vhosts
+    t help.conf_log_profile
     t help.conf_lang
     t help.conf_window
     t help.conf_ban_timeout
@@ -2938,23 +2964,89 @@ candidate_log_for_dir() {  # $1 = dossier terminé par /log/
     else ls -1t "${1}"*access.log 2>/dev/null | grep -v '/yesterday-access\.log$' | head -n 1; fi
 }
 
+# Profil de layout des logs EFFECTIF (echo). Explicite si LOG_PROFILE est un profil connu ; sinon
+# 'auto' => sonde les chemins caractéristiques — ISPConfig D'ABORD (parc inchangé), puis plesk, cpanel,
+# directadmin, nginx ; repli ispconfig (défaut historique). Mémoïsé (une seule sonde par run).
+log_profile() {
+    [ -n "${LOG_PROFILE_ACTIVE:-}" ] && { printf '%s' "$LOG_PROFILE_ACTIVE"; return; }
+    local p
+    case "${LOG_PROFILE:-auto}" in
+        ispconfig|cpanel|directadmin|plesk|nginx|generic) p="$LOG_PROFILE" ;;
+        *) if   ls -d ${BASE_DIR}/*/log/ >/dev/null 2>&1;       then p=ispconfig
+           elif ls -d /var/www/vhosts/*/logs/ >/dev/null 2>&1;  then p=plesk
+           elif [ -d /var/log/apache2/domlogs ];                then p=cpanel
+           elif [ -d /var/log/httpd/domains ];                  then p=directadmin
+           elif ls /var/log/nginx/*access*.log >/dev/null 2>&1; then p=nginx
+           else p=ispconfig; fi ;;
+    esac
+    LOG_PROFILE_ACTIVE="$p"; printf '%s' "$p"
+}
+
 # Découverte des logs à analyser (factorisée : boucle principale ET sentinelle). Remplit les
 # tableaux globaux FILES_FOUND puis VALID_FILES (lisibles et non vides). On écarte
 # yesterday-access.log (symlink ISPConfig vers le log de la veille, souvent périmé) : jamais
 # le bon fichier à analyser. Les vhosts d'EXCLUDE_VHOSTS sont sautés (trace --verbose).
 discover_valid_logs() {
-    local log_dir vhost latest file
+    local log_dir vhost latest file f
     FILES_FOUND=()
-    for log_dir in ${BASE_DIR}/*/log/; do
-        [ -d "$log_dir" ] || continue
-        vhost="${log_dir%/log/}"; vhost="${vhost##*/}"   # nom du dossier vhost sous BASE_DIR
-        if is_excluded_vhost "$vhost"; then
-            [ "$VERBOSE" = true ] && t verbose.vhost_excluded "$vhost"
-            continue
-        fi
-        latest=$(candidate_log_for_dir "$log_dir")
-        [ -n "$latest" ] && FILES_FOUND+=("$latest")
-    done
+    # Énumération des fichiers candidats selon le PROFIL (le parseur awk, lui, est commun). La
+    # dérivation du « vhost » (pour EXCLUDE_VHOSTS/verbose) est propre à chaque layout.
+    case "$(log_profile)" in
+        ispconfig)   # ${BASE_DIR}/<vhost>/log/access.log (défaut historique — verbatim)
+            for log_dir in ${BASE_DIR}/*/log/; do
+                [ -d "$log_dir" ] || continue
+                vhost="${log_dir%/log/}"; vhost="${vhost##*/}"
+                if is_excluded_vhost "$vhost"; then [ "$VERBOSE" = true ] && t verbose.vhost_excluded "$vhost"; continue; fi
+                latest=$(candidate_log_for_dir "$log_dir")
+                [ -n "$latest" ] && FILES_FOUND+=("$latest")
+            done ;;
+        plesk)       # /var/www/vhosts/<domaine>/logs/access_log|access_ssl_log
+            for log_dir in /var/www/vhosts/*/logs/; do
+                [ -d "$log_dir" ] || continue
+                vhost="${log_dir%/logs/}"; vhost="${vhost##*/}"
+                if is_excluded_vhost "$vhost"; then [ "$VERBOSE" = true ] && t verbose.vhost_excluded "$vhost"; continue; fi
+                latest=$(ls -1t "${log_dir}"access*log 2>/dev/null | head -n 1)
+                [ -n "$latest" ] && FILES_FOUND+=("$latest")
+            done ;;
+        cpanel)      # /var/log/apache2/domlogs/<domaine> (+ <domaine>-ssl_log), un fichier par domaine
+            for f in /var/log/apache2/domlogs/*; do
+                [ -f "$f" ] || continue
+                case "$f" in *.offset|*.bkup|*ftpxferlog*) continue ;; esac
+                vhost="${f##*/}"; vhost="${vhost%-ssl_log}"
+                if is_excluded_vhost "$vhost"; then [ "$VERBOSE" = true ] && t verbose.vhost_excluded "$vhost"; continue; fi
+                FILES_FOUND+=("$f")
+            done ;;
+        directadmin) # /var/log/httpd/domains/<domaine>.log (hors .error.log)
+            for f in /var/log/httpd/domains/*.log; do
+                [ -f "$f" ] || continue
+                case "$f" in *.error.log) continue ;; esac
+                vhost="${f##*/}"; vhost="${vhost%.log}"
+                if is_excluded_vhost "$vhost"; then [ "$VERBOSE" = true ] && t verbose.vhost_excluded "$vhost"; continue; fi
+                FILES_FOUND+=("$f")
+            done ;;
+        nginx)       # /var/log/nginx/*access*.log (hors *error*)
+            for f in /var/log/nginx/*access*.log; do
+                [ -f "$f" ] || continue
+                case "$f" in *error*) continue ;; esac
+                vhost="${f##*/}"
+                if is_excluded_vhost "$vhost"; then [ "$VERBOSE" = true ] && t verbose.vhost_excluded "$vhost"; continue; fi
+                FILES_FOUND+=("$f")
+            done ;;
+        generic)     # ${BASE_DIR}/*access*.log et ${BASE_DIR}/*/*access*.log (hors *error*/yesterday)
+            for f in ${BASE_DIR}/*access*.log ${BASE_DIR}/*/*access*.log; do
+                [ -f "$f" ] || continue
+                case "$f" in *error*|*/yesterday-access.log) continue ;; esac
+                vhost="${f##*/}"
+                if is_excluded_vhost "$vhost"; then [ "$VERBOSE" = true ] && t verbose.vhost_excluded "$vhost"; continue; fi
+                FILES_FOUND+=("$f")
+            done ;;
+    esac
+    # Dédup (globs qui se recouvrent en generic, symlinks) en préservant l'ordre.
+    if [ "${#FILES_FOUND[@]}" -gt 0 ]; then
+        local -A _seen=(); local -a _uniq=()
+        for f in "${FILES_FOUND[@]}"; do [ -n "${_seen[$f]:-}" ] && continue; _seen[$f]=1; _uniq+=("$f"); done
+        FILES_FOUND=("${_uniq[@]}")
+    fi
     VALID_FILES=()
     for file in "${FILES_FOUND[@]}"; do
         if [ -r "$file" ] && [ -s "$file" ]; then
@@ -3249,21 +3341,31 @@ run_diag_checks() {
     # ISPConfig où access.log pointe sur le log du jour, absent si le site ne logue plus) du SEUL
     # vrai problème : un log présent mais NON LISIBLE (permission/ACL). --verbose détaille chaque
     # dossier fautif pour repérer un éventuel vrai site mal classé.
-    active=0; inactive=0; unreadable=0; excluded=0
-    for log_dir in ${BASE_DIR}/*/log/; do
-        [ -d "$log_dir" ] || continue
-        vhost="${log_dir%/log/}"; vhost="${vhost##*/}"
-        if is_excluded_vhost "$vhost"; then excluded=$((excluded + 1)); continue; fi
-        f=$(candidate_log_for_dir "$log_dir")   # access.log ou repli *access.log (hors yesterday-access.log)
-        if   [ -z "$f" ];   then inactive=$((inactive + 1));     [ "$VERBOSE" = true ] && t diag.log_v_nolog "$vhost"
-        elif [ ! -e "$f" ]; then inactive=$((inactive + 1));     [ "$VERBOSE" = true ] && t diag.log_v_broken "$vhost"
-        elif [ ! -r "$f" ]; then unreadable=$((unreadable + 1)); [ "$VERBOSE" = true ] && t diag.log_v_unreadable "$vhost"
-        elif [ ! -s "$f" ]; then inactive=$((inactive + 1));     [ "$VERBOSE" = true ] && t diag.log_v_empty "$vhost"
-        else active=$((active + 1)); fi
-    done
-    if   [ "$unreadable" -gt 0 ]; then diag_line warn "$(t diag.logs "$active" "$inactive" "$unreadable" "$excluded")"
-    elif [ "$active" -gt 0 ];     then diag_line ok   "$(t diag.logs "$active" "$inactive" "$unreadable" "$excluded")"
-    else                               diag_line warn "$(t diag.logs "$active" "$inactive" "$unreadable" "$excluded")"; fi
+    diag_line ok "$(t diag.log_profile "$(log_profile)")"
+    if [ "$(log_profile)" = ispconfig ]; then
+        # Classification par dossier PROPRE à ISPConfig (access.log = log du jour, souvent absent
+        # si le site ne logue plus : cas BÉNIN à distinguer du seul vrai problème, un log non lisible).
+        active=0; inactive=0; unreadable=0; excluded=0
+        for log_dir in ${BASE_DIR}/*/log/; do
+            [ -d "$log_dir" ] || continue
+            vhost="${log_dir%/log/}"; vhost="${vhost##*/}"
+            if is_excluded_vhost "$vhost"; then excluded=$((excluded + 1)); continue; fi
+            f=$(candidate_log_for_dir "$log_dir")   # access.log ou repli *access.log (hors yesterday-access.log)
+            if   [ -z "$f" ];   then inactive=$((inactive + 1));     [ "$VERBOSE" = true ] && t diag.log_v_nolog "$vhost"
+            elif [ ! -e "$f" ]; then inactive=$((inactive + 1));     [ "$VERBOSE" = true ] && t diag.log_v_broken "$vhost"
+            elif [ ! -r "$f" ]; then unreadable=$((unreadable + 1)); [ "$VERBOSE" = true ] && t diag.log_v_unreadable "$vhost"
+            elif [ ! -s "$f" ]; then inactive=$((inactive + 1));     [ "$VERBOSE" = true ] && t diag.log_v_empty "$vhost"
+            else active=$((active + 1)); fi
+        done
+        if   [ "$unreadable" -gt 0 ]; then diag_line warn "$(t diag.logs "$active" "$inactive" "$unreadable" "$excluded")"
+        elif [ "$active" -gt 0 ];     then diag_line ok   "$(t diag.logs "$active" "$inactive" "$unreadable" "$excluded")"
+        else                               diag_line warn "$(t diag.logs "$active" "$inactive" "$unreadable" "$excluded")"; fi
+    else
+        # Autres profils : on rejoue la découverte (lecture seule) et on rapporte le nb de logs valides.
+        discover_valid_logs
+        if [ "${#VALID_FILES[@]}" -gt 0 ]; then diag_line ok "$(t diag.logs_found "${#VALID_FILES[@]}")"
+        else diag_line warn "$(t diag.logs_found 0)"; fi
+    fi
 
     # 7. Cohérence des notifications (config seule, aucun envoi)
     chans=""

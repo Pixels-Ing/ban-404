@@ -25,6 +25,13 @@ REPO_RAW="https://raw.githubusercontent.com/Pixels-Ing/ban-404/main"
 # Backend firewall: auto (predefinito = preferire iptables+ipset per coesistenza con script iptables esistenti) | iptables | nftables. Il cambio migra i blocchi esistenti una volta (fail-safe, nessuna falla di protezione).
 #FW_BACKEND="auto"
 
+# Log layout profile (discovery): auto (default = probe known paths) | ispconfig (/var/www/<vhost>/log/access.log) | cpanel (/var/log/apache2/domlogs/<domain>) | directadmin (/var/log/httpd/domains/<domain>.log) | plesk (/var/www/vhosts/<domain>/logs/access*) | nginx (/var/log/nginx/*access*.log) | generic. The parser is the same everywhere; only file discovery differs.
+# Profil de layout des logs (découverte) : auto (défaut = sonder les chemins connus) | ispconfig | cpanel | directadmin | plesk | nginx | generic. Le parseur est identique partout ; seule la découverte des fichiers change.
+# Log-Layout-Profil (Erkennung): auto (Standard) | ispconfig | cpanel | directadmin | plesk | nginx | generic. Der Parser ist überall gleich; nur die Dateierkennung unterscheidet sich.
+# Perfil de disposición de logs (descubrimiento): auto (por defecto) | ispconfig | cpanel | directadmin | plesk | nginx | generic. El analizador es el mismo en todas partes; solo cambia el descubrimiento de archivos.
+# Profilo di layout dei log (scoperta): auto (predefinito) | ispconfig | cpanel | directadmin | plesk | nginx | generic. Il parser è lo stesso ovunque; cambia solo la scoperta dei file.
+#LOG_PROFILE="auto"
+
 # IPs to NEVER ban (exact match, separated by | ).
 # IP à ne JAMAIS bannir (correspondance exacte, séparées par | ).
 # Niemals zu sperrende IPs (exakte Übereinstimmung, durch | getrennt).

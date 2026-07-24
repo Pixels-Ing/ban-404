@@ -40,3 +40,14 @@ jobs:
         run: sudo update-alternatives --set awk /usr/bin/gawk
       - name: Lancer le test d'intégration nft (backend nft + bascule, sous gawk)
         run: sudo bash tests/integration_nft.sh ./ban_404.sh
+
+  # Profils de layout de logs (Phase 2) : découverte cpanel/directadmin/nginx/generic + auto-détection,
+  # en dry-run (pas de pare-feu). gawk forcé (portabilité awk). Voir tests/integration_profiles.sh.
+  integration-profiles:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Forcer gawk comme awk par défaut
+        run: sudo apt-get update && sudo apt-get install -y gawk && sudo update-alternatives --set awk /usr/bin/gawk
+      - name: Lancer le test d'intégration des profils de logs
+        run: sudo bash tests/integration_profiles.sh ./ban_404.sh

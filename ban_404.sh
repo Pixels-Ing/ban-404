@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="2.2.0"
+BAN404_VERSION="2.2.1"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -337,6 +337,12 @@ T_FR[heal.step_cron_removed]="[*] Cron de ticks intermédiaires retiré (CRON_ST
 T_DE[heal.step_cron_removed]="[*] Zwischentakt-Cron entfernt (CRON_STEP deaktiviert): %s"
 T_ES[heal.step_cron_removed]="[*] Cron de ticks intermedios eliminado (CRON_STEP desactivado): %s"
 T_IT[heal.step_cron_removed]="[*] Cron dei tick intermedi rimosso (CRON_STEP disattivato): %s"
+
+T_EN[heal.logrotate_daily]="[*] Log rotation switched to daily (24 h counters no longer truncated): %s"
+T_FR[heal.logrotate_daily]="[*] Rotation du journal passée en quotidien (compteurs 24 h non tronqués) : %s"
+T_DE[heal.logrotate_daily]="[*] Log-Rotation auf täglich umgestellt (24-h-Zähler nicht mehr abgeschnitten): %s"
+T_ES[heal.logrotate_daily]="[*] Rotación del registro cambiada a diaria (contadores de 24 h ya no truncados): %s"
+T_IT[heal.logrotate_daily]="[*] Rotazione del registro passata a giornaliera (contatori 24 h non più troncati): %s"
 
 T_EN[sentinel.triggered]="[i] Sentinel: attack signs since the last full run — full analysis forced."
 T_FR[sentinel.triggered]="[i] Sentinelle : signes d'attaque depuis le dernier run complet — analyse complète forcée."
@@ -2595,8 +2601,52 @@ build_ipset_counts() {
     fi
     return 0
 }
+# --- Flux de lecture du journal pour les compteurs 24 h -------------------------------------
+# logrotate ouvre un fichier NEUF : le matin d'une rotation, $LOG_FILE ne couvre plus que les heures
+# écoulées depuis minuit, et tout ce qui compte sur 24 h (Nouveaux bans, Débans, les deux Top) est
+# amputé d'autant — SANS le dire. Le bloc « Comptage ipset », lui, lit IPSET_COUNTS_FILE que
+# logrotate ne touche pas : la contradiction saute alors aux yeux dans le résumé (incident du
+# 26 juil. 2026 : « Nouveaux bans : 52 » pour 1327 bans réels, face à un delta ipset de +1251).
+# On préfixe donc le flux avec le rotaté le plus récent (.1, ou .1.gz si compress) DÈS QUE la
+# première ligne du log courant est postérieure au début de la fenêtre. Ordre chronologique
+# conservé (rotaté puis courant) ; le filtre de date de l'appelant fait le reste. Sans objet quand
+# aucune rotation n'a coupé la fenêtre : on lit alors le seul log courant, comme avant.
+stats_log_cat() {  # $1 = journal (rotaté ou non) => contenu sur stdout, décompressé au besoin
+    case "$1" in
+        *.gz) zcat -- "$1" 2>/dev/null ;;    # compress (notre conf logrotate)
+        *)    cat  -- "$1" 2>/dev/null ;;    # delaycompress / conf personnalisée
+    esac
+}
+stats_log_rotated() {  # journaux rotatés du PLUS RÉCENT au plus ancien, quel que soit le nommage
+    local i f
+    for ((i = 1; i <= 5; i++)); do          # suffixe numérique (défaut logrotate) : .1, .1.gz, .2…
+        for f in "${LOG_FILE}.$i" "${LOG_FILE}.$i.gz"; do [ -r "$f" ] && { printf '%s\n' "$f"; break; }; done
+    done
+    # dateext (« ban_404.log-20260725[.gz] », actif par défaut sur certaines distros) : la date est
+    # dans le nom, donc un tri décroissant donne bien du plus récent au plus ancien.
+    ls -1 "${LOG_FILE}"-* 2>/dev/null | sort -r
+}
+stats_log_stream() {   # $1 = début de fenêtre « AAAA-MM-JJ HH:MM:SS »
+    local first rot older=()
+    [ -r "$LOG_FILE" ] || return 0
+    first=$(head -n 1 "$LOG_FILE" 2>/dev/null | cut -c1-19)
+    if [ -n "$first" ] && [ -n "$1" ]; then
+        # Tant que le plus ancien fichier retenu DÉBUTE après le début de la fenêtre, il manque des
+        # lignes : on remonte d'un rotaté. S'arrête dès la couverture atteinte (cas courant : un seul
+        # rotaté, souvent aucun) ; borné par stats_log_rotated (5 index + dateext).
+        while [[ "$first" > "$1" ]]; do
+            rot=$(stats_log_rotated | awk -v n="${#older[@]}" 'NR == n+1 { print; exit }')
+            [ -n "$rot" ] || break
+            older=("$rot" "${older[@]}")     # plus ancien en tête => ordre chronologique à l'émission
+            first=$(stats_log_cat "$rot" | head -n 1 | cut -c1-19)
+            [ -n "$first" ] || break
+        done
+    fi
+    for rot in "${older[@]}"; do stats_log_cat "$rot"; done
+    cat -- "$LOG_FILE" 2>/dev/null
+}
 build_stats_text() {
-    local bans unbans cutoff24 cnt ip rdns updater upd_ver issue div kind sc top_raw top404 tophp
+    local bans unbans evt cutoff24 cnt ip rdns updater upd_ver issue div kind sc top_raw top404 tophp
     # Couleur ANSI des triangles seulement au terminal ([ -t 1 ]) ; sinon 'plain'. Le résumé notifié
     # ne colore pas via le terminal : le mail a son propre HTML coloré, le chat sort en prose neutre.
     if [ -t 1 ]; then OUTPUT_MODE=ansi; else OUTPUT_MODE=plain; fi
@@ -2604,8 +2654,11 @@ build_stats_text() {
     cutoff24=$(date -d '24 hours ago' '+%Y-%m-%d %H:%M:%S' 2>/dev/null)
     bans=0; unbans=0
     if [ -r "$LOG_FILE" ] && [ -n "$cutoff24" ]; then
-        bans=$(awk -v c="$cutoff24" '($1" "$2) >= c && /\[\+\]/' "$LOG_FILE" | wc -l)
-        unbans=$(awk -v c="$cutoff24" '($1" "$2) >= c && /\[-\]/' "$LOG_FILE" | wc -l)
+        # Un SEUL passage pour les deux compteurs (le flux peut inclure un rotaté compressé).
+        evt=$(stats_log_stream "$cutoff24" | awk -v c="$cutoff24" '
+            ($1" "$2) >= c { if (/\[\+\]/) b++; else if (/\[-\]/) u++ }
+            END { printf "%d %d\n", b+0, u+0 }')
+        bans=${evt%% *}; unbans=${evt##* }
     fi
     # --- En-tête + filet ---
     t stats.header
@@ -2686,7 +2739,7 @@ build_stats_text() {
         # (score pondéré = 100/hit-honeypot + 1/autre-404 ; 0 sur les vieilles lignes sans score). Le
         # nombre est relu entre parenthèses après l'IP (« (48 … » ou « (score 250) »), robuste aux 5
         # langues ; honeypot reconnu par le mot « honeypot » (présent tel quel dans les 5 langues).
-        top_raw=$(awk -v c="$cutoff24" '
+        top_raw=$(stats_log_stream "$cutoff24" | awk -v c="$cutoff24" '
             ($1" "$2) >= c && /\[\+\]/ {
                 ip=""; ipi=0
                 for(i=3;i<=NF;i++) if($i ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/){ip=$i; ipi=i; break}
@@ -2700,7 +2753,7 @@ build_stats_text() {
                 for(ip in rs) printf "r %d %s\n", R[ip]+0, ip
                 for(ip in hs) printf "h %d %s\n", H[ip]+0, ip
             }
-        ' "$LOG_FILE")
+        ')
         top404=$(printf '%s\n' "$top_raw" | awk '$1=="r"' | sort -k2,2nr | head -n 10)
         tophp=$( printf '%s\n' "$top_raw" | awk '$1=="h"' | sort -k2,2nr | head -n 10)
         if [ -n "$top404" ]; then
@@ -3809,6 +3862,37 @@ self_heal_step_cron() {
     return 0
 }
 
+# Rotation du journal : passage de weekly/rotate 8 (canonique historique de l'installeur) à
+# daily/rotate 14. Motif : une rotation HEBDOMADAIRE coupe la fenêtre 24 h du résumé une fois par
+# semaine, avec un log courant de quelques heures seulement face à un fichier rotaté d'une semaine
+# entière — c'est le pire des cas pour les compteurs (stats_log_stream rattrape désormais le
+# rotaté, mais un fichier quotidien reste plus sain à parcourir et borne la perte à 1 jour).
+# Migration ONE-SHOT et NON DESTRUCTIVE : on ne réécrit que si le fichier correspond exactement à
+# l'ancien canonique (weekly + rotate 8) — une conf personnalisée par l'admin est laissée intacte,
+# et le chemin surveillé est REPRIS du fichier en place (jamais réinventé). Idempotent : une fois
+# en daily, la garde weekly ne matche plus et la fonction ne fait plus rien.
+self_heal_logrotate() {
+    local f="/etc/logrotate.d/ban_404" path
+    [ "$DRY_RUN" = true ] && return 0
+    [ "$(id -u)" -eq 0 ] || return 0
+    [ -f "$f" ] || return 0
+    grep -qE '^[[:space:]]*weekly[[:space:]]*$' "$f" 2>/dev/null || return 0
+    grep -qE '^[[:space:]]*rotate[[:space:]]+8[[:space:]]*$' "$f" 2>/dev/null || return 0
+    path=$(awk -F'{' 'NF>1 { gsub(/^[ \t]+|[ \t]+$/, "", $1); print $1; exit }' "$f" 2>/dev/null)
+    [ -n "$path" ] || path="$LOG_FILE"
+    cat > "$f" <<EOF
+$path {
+    daily
+    rotate 14
+    compress
+    missingok
+    notifempty
+}
+EOF
+    chmod 644 "$f" 2>/dev/null && t_log heal.logrotate_daily "$f"
+    return 0
+}
+
 # --- Filet de sécurité MAJ -----------------------------------------------------
 # Sur certains serveurs, cron.daily (piloté par anacron) cesse de se déclencher
 # silencieusement : l'updater n'est alors JAMAIS appelé et tout fige (moteur +
@@ -3983,6 +4067,10 @@ self_heal_summary_cron
 
 # Réconciliation du cron de ticks intermédiaires sur CRON_STEP (créé/aligné/retiré selon la conf).
 self_heal_step_cron
+
+# Rotation du journal : migration one-shot weekly/8 -> daily/14 (sans effet si déjà migrée ou
+# personnalisée). Une rotation hebdomadaire amputait la fenêtre 24 h du résumé une fois par semaine.
+self_heal_logrotate
 
 # 1-2. Recherche + filtrage des fichiers de logs (factorisés dans discover_valid_logs, partagés
 # avec la sentinelle du mode CRON_STEP=auto). Un run déclenché par la sentinelle refait la

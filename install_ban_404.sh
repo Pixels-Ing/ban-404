@@ -1156,10 +1156,15 @@ EOF
 chmod 755 "$CRON_PATH"
 
 t inst.logrotate "$LOGROTATE_PATH"
+# Rotation QUOTIDIENNE (et non hebdomadaire) : les compteurs 24 h du résumé lisent le journal, et
+# une rotation hebdo laissait, le matin de la rotation, un log courant de quelques heures face à
+# un rotaté d'une semaine entière — les « Nouveaux bans » du résumé étaient alors amputés sans le
+# dire. Le moteur rattrape désormais le rotaté (stats_log_stream), et un fichier quotidien borne
+# la perte à un jour. Le parc existant est migré par self_heal_logrotate.
 cat > "$LOGROTATE_PATH" <<EOF
 $LOG_PATH {
-    weekly
-    rotate 8
+    daily
+    rotate 14
     compress
     missingok
     notifempty

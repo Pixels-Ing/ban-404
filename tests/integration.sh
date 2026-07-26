@@ -73,4 +73,22 @@ DOUT=$(bash "$ENGINE" diag 2>&1 || true)
 printf '%s\n' "$DOUT" | grep -q 'iptables+ipset' || { printf '%s\n' "$DOUT"; fail "diag ne rapporte pas le backend pare-feu"; }
 ok "diag rapporte le backend pare-feu (iptables+ipset)"
 
+# ---------------------------------------------------------------------------
+echo "== Test 4 : compteurs 24 h à cheval sur une rotation logrotate =="
+# Régression du 26 juil. 2026 : logrotate ouvre un fichier neuf, et les compteurs ne lisaient que
+# le log courant => le résumé du matin de rotation annonçait une poignée de bans pour des milliers
+# de bans réels (contradiction visible avec le delta ipset). Le flux doit rattraper le .1.gz.
+TLOG="$FIX/ban_404.log"
+OLD=$(date -d '10 hours ago' '+%Y-%m-%d %H:%M:%S'); NEW=$(date -d '1 hour ago' '+%Y-%m-%d %H:%M:%S')
+: > "$TLOG.1"
+for i in 1 2 3; do printf '%s [+] Block (ipset) of IP: 203.0.113.%d (30 404 errors)\n' "$OLD" "$i" >> "$TLOG.1"; done
+gzip -f "$TLOG.1"                                  # => $TLOG.1.gz, comme logrotate avec compress
+: > "$TLOG"
+for i in 4 5; do printf '%s [+] Block (ipset) of IP: 203.0.113.%d (30 404 errors)\n' "$NEW" "$i" >> "$TLOG"; done
+printf 'LOG_FILE=%s\nBAN404_LANG=en\n' "$TLOG" >> /etc/ban_404.conf
+SOUT=$(bash "$ENGINE" stats --no-health 2>&1 || true)
+printf '%s\n' "$SOUT" | grep -q 'New bans: 5' \
+    || { printf '%s\n' "$SOUT" | head -30; fail "compteur 24 h amputé par la rotation (attendu « New bans: 5 », rotaté .1.gz non lu)"; }
+ok "compteurs 24 h : log courant + rotaté .1.gz agrégés (5 bans)"
+
 echo "== INTÉGRATION OK =="

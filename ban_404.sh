@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="2.2.2"
+BAN404_VERSION="2.2.3"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -1451,17 +1451,17 @@ T_DE[stats.top_hp_header]="Top honeypot (24h)"
 T_ES[stats.top_hp_header]="Top honeypot (24h)"
 T_IT[stats.top_hp_header]="Top honeypot (24h)"
 
-T_EN[stats.top_item]="%s — %s 404 errors"
-T_FR[stats.top_item]="%s — %s erreurs 404"
-T_DE[stats.top_item]="%s — %s 404-Fehler"
-T_ES[stats.top_item]="%s — %s errores 404"
-T_IT[stats.top_item]="%s — %s errori 404"
+T_EN[stats.top_item]="%s — %s errors"
+T_FR[stats.top_item]="%s — %s erreurs"
+T_DE[stats.top_item]="%s — %s Fehler"
+T_ES[stats.top_item]="%s — %s errores"
+T_IT[stats.top_item]="%s — %s errori"
 
-T_EN[stats.top_item_rdns]="%s — %s 404 errors  [%s]"
-T_FR[stats.top_item_rdns]="%s — %s erreurs 404  [%s]"
-T_DE[stats.top_item_rdns]="%s — %s 404-Fehler  [%s]"
-T_ES[stats.top_item_rdns]="%s — %s errores 404  [%s]"
-T_IT[stats.top_item_rdns]="%s — %s errori 404  [%s]"
+T_EN[stats.top_item_rdns]="%s — %s errors  [%s]"
+T_FR[stats.top_item_rdns]="%s — %s erreurs  [%s]"
+T_DE[stats.top_item_rdns]="%s — %s Fehler  [%s]"
+T_ES[stats.top_item_rdns]="%s — %s errores  [%s]"
+T_IT[stats.top_item_rdns]="%s — %s errori  [%s]"
 
 T_EN[stats.top_item_hp]="%s — honeypot"
 T_FR[stats.top_item_hp]="%s — honeypot"

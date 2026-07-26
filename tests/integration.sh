@@ -91,4 +91,12 @@ printf '%s\n' "$SOUT" | grep -q 'New bans: 5' \
     || { printf '%s\n' "$SOUT" | head -30; fail "compteur 24 h amputé par la rotation (attendu « New bans: 5 », rotaté .1.gz non lu)"; }
 ok "compteurs 24 h : log courant + rotaté .1.gz agrégés (5 bans)"
 
+# Log courant VIDE : la rotation tombe à minuit et le résumé part à 06:25 — un serveur sans
+# événement dans cette tranche ne doit PAS afficher 0 en ignorant le rotaté de la journée.
+: > "$TLOG"
+SOUT=$(bash "$ENGINE" stats --no-health 2>&1 || true)
+printf '%s\n' "$SOUT" | grep -q 'New bans: 3' \
+    || { printf '%s\n' "$SOUT" | head -30; fail "log courant vide : rotaté ignoré (attendu « New bans: 3 »)"; }
+ok "compteurs 24 h : log courant vide => le rotaté fait foi (3 bans)"
+
 echo "== INTÉGRATION OK =="

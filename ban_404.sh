@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="2.2.1"
+BAN404_VERSION="2.2.2"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -2627,10 +2627,16 @@ stats_log_rotated() {  # journaux rotatés du PLUS RÉCENT au plus ancien, quel 
     ls -1 "${LOG_FILE}"-* 2>/dev/null | sort -r
 }
 stats_log_stream() {   # $1 = début de fenêtre « AAAA-MM-JJ HH:MM:SS »
-    local first rot older=()
+    local first rot f older=()
     [ -r "$LOG_FILE" ] || return 0
     first=$(head -n 1 "$LOG_FILE" 2>/dev/null | cut -c1-19)
-    if [ -n "$first" ] && [ -n "$1" ]; then
+    # Log courant VIDE : il ne couvre RIEN. Cas tout sauf théorique — la rotation tombe à minuit
+    # (timer systemd) et le résumé part à 06:25 : un serveur sans le moindre événement dans cette
+    # tranche aurait, sinon, affiché des compteurs à zéro en ignorant le rotaté qui porte la journée
+    # entière. On force donc la remontée en partant de « maintenant ». Idem pour un rotaté vide :
+    # on continue de remonter (la liste des candidats est bornée, donc la boucle termine).
+    [ -n "$first" ] || first=$(date '+%Y-%m-%d %H:%M:%S')
+    if [ -n "$1" ]; then
         # Tant que le plus ancien fichier retenu DÉBUTE après le début de la fenêtre, il manque des
         # lignes : on remonte d'un rotaté. S'arrête dès la couverture atteinte (cas courant : un seul
         # rotaté, souvent aucun) ; borné par stats_log_rotated (5 index + dateext).
@@ -2638,8 +2644,8 @@ stats_log_stream() {   # $1 = début de fenêtre « AAAA-MM-JJ HH:MM:SS »
             rot=$(stats_log_rotated | awk -v n="${#older[@]}" 'NR == n+1 { print; exit }')
             [ -n "$rot" ] || break
             older=("$rot" "${older[@]}")     # plus ancien en tête => ordre chronologique à l'émission
-            first=$(stats_log_cat "$rot" | head -n 1 | cut -c1-19)
-            [ -n "$first" ] || break
+            f=$(stats_log_cat "$rot" | head -n 1 | cut -c1-19)
+            [ -n "$f" ] && first="$f"        # rotaté vide => borne inchangée, on remonte d'un cran de plus
         done
     fi
     for rot in "${older[@]}"; do stats_log_cat "$rot"; done

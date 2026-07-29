@@ -150,4 +150,19 @@ TO=$(ipset_timeout "$HPIP")
     || fail "clamp ipset : timeout attendu ~2147483, obtenu « ${TO:-absent — ban refusé en silence} »"
 ok "timeout > 24 j borné à $TO s (l'IP est bien bannie)"
 
+# ---------------------------------------------------------------------------
+echo "== Test 6 : le score POST-flood reflète l'INTENSITÉ (100 forfaitaires + 1/POST) =="
+# Avant 2.3.1 le forfait était seul : 3000 POST scoraient comme 21, donc même palier d'escalade et
+# dernière place au Top honeypot du résumé. Le statut est volontairement 200 : xmlrpc/wp-login
+# répondent 200 même quand l'authentification échoue, le compteur ne doit pas filtrer là-dessus.
+PFIP=203.0.113.88
+for i in $(seq 1 25); do
+    printf '%s - - [%s] "POST /wp-login.php HTTP/1.1" 200 512 "-" "bot/1.0"\n' "$PFIP" "$TS" >> "$LOG"
+done
+rm -f "$OFF"
+bash "$ENGINE" >/dev/null 2>&1 || true
+grep -q "$PFIP (score 125)" "$TLOG" \
+    || { grep -a "$PFIP" "$TLOG" | tail -3; fail "score attendu 125 (100 + 25 POST) pour $PFIP"; }
+ok "25 POST en 200 => score 125 (forfait + volume), et non 100"
+
 echo "== INTÉGRATION OK =="

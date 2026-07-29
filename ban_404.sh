@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="2.3.0"
+BAN404_VERSION="2.3.1"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -38,7 +38,8 @@ BAN_ESCALATION="604800 1209600 2073600"
 # paliers. Défaut 24 j = la durée du ban maximal.
 ESCALATION_MEMORY=2073600
 # Score (count) au-delà duquel une IP démarre un palier plus haut dès son PREMIER ban : 500 = un
-# flood de 500 x 404 dans la fenêtre, ou 5 chemins-pièges touchés (100/hit). 0 => désactivé.
+# flood de 500 x 404 dans la fenêtre, ou 5 chemins-pièges touchés (100/hit), ou ~400 POST de
+# brute-force (100 forfaitaires + 1/POST). 0 => désactivé.
 AGGRESSIVE_SCORE=500
 HONEYPOT_PATTERN='\.env|wp-config\.php|phpmyadmin|config\.json|setup\.php|actuator|xmlrpc\.php'
 NOISE_PATTERN='\.(jpg|jpeg|png|gif|webp|ico|css|js|svg|woff2?|map)$|apple-touch-icon|favicon|browserconfig\.xml|mstile|autodiscover\.xml|sitemap\.xml|robots\.txt|ads\.txt|\.well-known/(security\.txt|pki-validation)'
@@ -4413,7 +4414,13 @@ BEGIN {
     }
 }
 END {
-    for (x in post) if (post[x] > pf_thr) { count[x] += hp; flag[x]=1 }
+    # Le score intègre le NOMBRE de POST (et pas seulement le forfait +HONEYPOT_SCORE) : sans lui,
+    # un brute-force de 3000 POST scorait comme celui de 21 — même durée de ban, et surtout dernier
+    # du « Top honeypot » du résumé, sous une IP ayant tapé 3 chemins-pièges. Un POST vaut 1 point,
+    # comme un 404 ordinaire. Ne change AUCUNE décision de ban (le forfait dépasse déjà le seuil),
+    # seulement le classement du Top honeypot et le palier atteint (AGGRESSIVE_SCORE, 2.3.0).
+    # NB : aucune apostrophe dans ce bloc, il vit dans une chaine awk en quotes simples.
+    for (x in post) if (post[x] > pf_thr) { count[x] += hp + post[x]; flag[x]=1 }
     # 3e champ = drapeau honeypot/sécurité/POST-flood : consommé par la boucle pour SAUTER le
     # FCrDNS (un crawler légitime ne déclenche jamais ces motifs) — voir is_legit_crawler.
     for (ip in count) if (count[ip] > thr) print count[ip], (flag[ip] ? 1 : 0), ip

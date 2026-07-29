@@ -99,4 +99,55 @@ printf '%s\n' "$SOUT" | grep -q 'New bans: 3' \
     || { printf '%s\n' "$SOUT" | head -30; fail "log courant vide : rotaté ignoré (attendu « New bans: 3 »)"; }
 ok "compteurs 24 h : log courant vide => le rotaté fait foi (3 bans)"
 
+# ---------------------------------------------------------------------------
+echo "== Test 5 : bannissement gradué (récidive) et clamp du timeout ipset =="
+# Pas besoin de voyager dans le temps : on SÈME le fichier d'état, puis on observe le timeout
+# réellement posé dans l'ipset. OFFENDERS_FILE reste au chemin par défaut (test en root).
+OFF=/var/lib/ban_404/offenders
+HPIP=203.0.113.77       # TEST-NET-3 — déclenche le circuit honeypot
+
+# timeout résiduel d'une IP dans le set (« <ip> timeout <secs> »), vide si absente
+ipset_timeout() { ipset list ban_404_list 2>/dev/null | awk -v ip="$1" '$1==ip {for(i=1;i<=NF;i++) if($i=="timeout"){print $(i+1); exit}}'; }
+
+# 5a. Non-régression : IP inconnue => BAN_TIMEOUT (172800), inchangé depuis 2.2.3.
+rm -f "$OFF"
+bash "$ENGINE" >/dev/null 2>&1 || true
+TO=$(ipset_timeout "$IP")
+[ -n "$TO" ] && [ "$TO" -gt 172000 ] && [ "$TO" -le 172800 ] \
+    || fail "1er ban : timeout attendu ~172800 (BAN_TIMEOUT), obtenu « ${TO:-absent} »"
+ok "1er ban d'une IP inconnue : timeout $TO s (BAN_TIMEOUT, non-régression)"
+
+grep -qE "^$IP 1 [0-9]+$" "$OFF" 2>/dev/null \
+    || { cat "$OFF" 2>/dev/null; fail "fichier d'état : ligne « $IP 1 <epoch> » attendue"; }
+ok "mémoire des récidives alimentée ($IP, 1 ban)"
+
+# 5b. Deux bans mémorisés => niveau 2 => 3e palier de BAN_ESCALATION (1209600 = 14 j).
+bash "$ENGINE" unban "$IP" >/dev/null 2>&1 || fail "unban a échoué (préparation 5b)"
+printf '%s 2 %s\n' "$IP" "$(date +%s)" > "$OFF"
+bash "$ENGINE" >/dev/null 2>&1 || true
+TO=$(ipset_timeout "$IP")
+[ -n "$TO" ] && [ "$TO" -gt 1209000 ] && [ "$TO" -le 1209600 ] \
+    || fail "récidiviste (2 bans) : timeout attendu ~1209600 (14 j), obtenu « ${TO:-absent} »"
+ok "récidiviste : ban allongé à $TO s (14 j)"
+
+grep -qE "^$IP 3 [0-9]+$" "$OFF" 2>/dev/null \
+    || { cat "$OFF"; fail "le compteur de récidive doit passer à 3"; }
+ok "compteur de récidive incrémenté (3 bans)"
+
+# 5c. Déban manuel = verdict d'innocence : l'entrée disparaît du fichier d'état.
+bash "$ENGINE" unban "$IP" >/dev/null 2>&1 || fail "la sous-commande 'unban' a échoué"
+grep -q "^$IP " "$OFF" 2>/dev/null && { cat "$OFF"; fail "unban doit purger l'entrée de $IP"; }
+ok "unban remet le compteur de récidive à zéro"
+
+# 5d. Clamp ipset : un HONEYPOT_BAN_TIMEOUT > 2147483 s faisait échouer l'ajout EN SILENCE
+# (aucune IP bannie). Le timeout doit être borné, pas refusé.
+printf '%s - - [%s] "GET /.env HTTP/1.1" 404 200 "-" "bot/1.0"\n' "$HPIP" "$TS" >> "$LOG"
+printf 'HONEYPOT_BAN_TIMEOUT=2592000\n' >> /etc/ban_404.conf     # 30 j : au-delà de la limite ipset
+rm -f "$OFF"
+bash "$ENGINE" >/dev/null 2>&1 || true
+TO=$(ipset_timeout "$HPIP")
+[ -n "$TO" ] && [ "$TO" -gt 2147000 ] && [ "$TO" -le 2147483 ] \
+    || fail "clamp ipset : timeout attendu ~2147483, obtenu « ${TO:-absent — ban refusé en silence} »"
+ok "timeout > 24 j borné à $TO s (l'IP est bien bannie)"
+
 echo "== INTÉGRATION OK =="

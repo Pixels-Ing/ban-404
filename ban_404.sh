@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="2.2.3"
+BAN404_VERSION="2.3.0"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -19,6 +19,7 @@ UPDATE_STAMP_FILE="/var/lib/ban_404/last_update"   # repère « l'updater a tour
 RUN_STAMP_FILE="/var/lib/ban_404/last_run"         # repère « le moteur a fini un run réel » (lu par --diag/--summary)
 METRICS_FILE="/var/lib/ban_404/metrics"            # historique horaire load/IO/réseau/mémoire (moyennes 24 h du résumé)
 IPSET_COUNTS_FILE="/var/lib/ban_404/ipset_counts"  # historique horaire du nb d'entrées par ipset (évol. + tendance 24 h du résumé)
+OFFENDERS_FILE="/var/lib/ban_404/offenders"        # mémoire des récidives : « ip nb_bans epoch_fin_du_dernier_ban »
 PLATFORM_VALIDATED=""   # fail-safe plateforme : vide = auto-détection (os-release distro + backend iptables/ipset) ;
                         # true = forcer l'application même sur plateforme non reconnue (l'admin assume le risque) ; false = forcer la lecture seule
 
@@ -26,6 +27,19 @@ PLATFORM_VALIDATED=""   # fail-safe plateforme : vide = auto-détection (os-rele
 BAN_THRESHOLD=10     # Ban si le score dépasse ce seuil dans la fenêtre.
 HONEYPOT_SCORE=100   # Score ajouté par hit honeypot (>= ce score => ban immédiat).
 HONEYPOT_BAN_TIMEOUT=604800   # Timeout du ban honeypot (s) : 7 j, plus long que BAN_TIMEOUT (flood 404).
+# Bannissement gradué des IP agressives et RÉCIDIVISTES (depuis 2.3.0). Paliers de récidive (s),
+# séparés par des espaces : 7 j, 14 j, 24 j. Le palier 0 de chaque circuit reste la variable
+# existante (BAN_TIMEOUT pour un flood 404, HONEYPOT_BAN_TIMEOUT pour le circuit honeypot) => une
+# IP vue pour la 1re fois est traitée EXACTEMENT comme avant. Vide => escalade désactivée
+# (comportement historique strict). Plafond dur : 2147483 s (limite ipset), cf. ipt_ban_ip_ttl.
+BAN_ESCALATION="604800 1209600 2073600"
+# Période d'épreuve APRÈS LIBÉRATION (s) : au-delà de ce délai sans le moindre ban, le compteur de
+# récidive de l'IP est oublié. Datée sur la FIN du ban (et non sa pose) => sens constant à tous les
+# paliers. Défaut 24 j = la durée du ban maximal.
+ESCALATION_MEMORY=2073600
+# Score (count) au-delà duquel une IP démarre un palier plus haut dès son PREMIER ban : 500 = un
+# flood de 500 x 404 dans la fenêtre, ou 5 chemins-pièges touchés (100/hit). 0 => désactivé.
+AGGRESSIVE_SCORE=500
 HONEYPOT_PATTERN='\.env|wp-config\.php|phpmyadmin|config\.json|setup\.php|actuator|xmlrpc\.php'
 NOISE_PATTERN='\.(jpg|jpeg|png|gif|webp|ico|css|js|svg|woff2?|map)$|apple-touch-icon|favicon|browserconfig\.xml|mstile|autodiscover\.xml|sitemap\.xml|robots\.txt|ads\.txt|\.well-known/(security\.txt|pki-validation)'
 # Signatures sécurité testées sur la requête ($7) QUEL QUE SOIT le statut HTTP (contrairement aux
@@ -433,6 +447,40 @@ T_FR[ban.add]="[+] Blocage (ipset) de l'IP : %s (%s erreurs 404)"
 T_DE[ban.add]="[+] Sperre (ipset) der IP: %s (%s 404-Fehler)"
 T_ES[ban.add]="[+] Bloqueo (ipset) de la IP: %s (%s errores 404)"
 T_IT[ban.add]="[+] Blocco (ipset) dell'IP: %s (%s errori 404)"
+
+# Variantes « escaladées » : mêmes lignes, complétées par le rang du ban et sa durée. CONTRAINTE —
+# le parsing des Top 24 h relit le PREMIER nombre situé après l'IP, donc tout ajout doit rester en
+# FIN de ligne, après le groupe entre parenthèses (voir build_stats_text).
+T_EN[ban.add_esc]="[+] Block (ipset) of IP: %s (%s 404 errors) — ban no. %s, duration %s"
+T_FR[ban.add_esc]="[+] Blocage (ipset) de l'IP : %s (%s erreurs 404) — ban n°%s, durée %s"
+T_DE[ban.add_esc]="[+] Sperre (ipset) der IP: %s (%s 404-Fehler) — Sperre Nr. %s, Dauer %s"
+T_ES[ban.add_esc]="[+] Bloqueo (ipset) de la IP: %s (%s errores 404) — bloqueo n.º %s, duración %s"
+T_IT[ban.add_esc]="[+] Blocco (ipset) dell'IP: %s (%s errori 404) — blocco n. %s, durata %s"
+
+T_EN[ban.honeypot_esc]="[+] IMMEDIATE block (honeypot) of IP: %s (score %s) — ban no. %s, duration %s"
+T_FR[ban.honeypot_esc]="[+] Blocage IMMÉDIAT (honeypot) de l'IP : %s (score %s) — ban n°%s, durée %s"
+T_DE[ban.honeypot_esc]="[+] SOFORTIGE Sperre (Honeypot) der IP: %s (Score %s) — Sperre Nr. %s, Dauer %s"
+T_ES[ban.honeypot_esc]="[+] Bloqueo INMEDIATO (honeypot) de la IP: %s (puntuación %s) — bloqueo n.º %s, duración %s"
+T_IT[ban.honeypot_esc]="[+] Blocco IMMEDIATO (honeypot) dell'IP: %s (punteggio %s) — blocco n. %s, durata %s"
+
+T_EN[sim.ban_escalated]="[SIMULATION]     escalation: ban no. %s, duration %s"
+T_FR[sim.ban_escalated]="[SIMULATION]     escalade : ban n°%s, durée %s"
+T_DE[sim.ban_escalated]="[SIMULATION]     Eskalation: Sperre Nr. %s, Dauer %s"
+T_ES[sim.ban_escalated]="[SIMULATION]     escalada: bloqueo n.º %s, duración %s"
+T_IT[sim.ban_escalated]="[SIMULATION]     escalation: blocco n. %s, durata %s"
+
+# Unités de durée (fmt_duration) — utilisées sans saut de ligne via $(t …).
+T_EN[unit.hours]="h"
+T_FR[unit.hours]="h"
+T_DE[unit.hours]="Std."
+T_ES[unit.hours]="h"
+T_IT[unit.hours]="h"
+
+T_EN[unit.days]="d"
+T_FR[unit.days]="j"
+T_DE[unit.days]="T"
+T_ES[unit.days]="d"
+T_IT[unit.days]="g"
 
 T_EN[verbose.result_header]="\n=[ Result ]="
 T_FR[verbose.result_header]="\n=[ Résultat ]="
@@ -867,6 +915,18 @@ T_DE[diag.fw_set_ok]="Firewall-Set %s vorhanden (%s Einträge)."
 T_ES[diag.fw_set_ok]="Set del firewall %s presente (%s miembros)."
 T_IT[diag.fw_set_ok]="Set del firewall %s presente (%s membri)."
 
+T_EN[diag.escalation_on]="Graduated ban active: tiers %s, %s probation — %s IP(s) tracked, %s repeat offender(s)."
+T_FR[diag.escalation_on]="Ban gradué actif : paliers %s, épreuve %s — %s IP suivie(s), %s récidiviste(s)."
+T_DE[diag.escalation_on]="Gestufte Sperre aktiv: Stufen %s, Bewährung %s — %s IP(s) erfasst, %s Wiederholungstäter."
+T_ES[diag.escalation_on]="Bloqueo graduado activo: niveles %s, prueba %s — %s IP monitorizada(s), %s reincidente(s)."
+T_IT[diag.escalation_on]="Blocco graduale attivo: livelli %s, prova %s — %s IP monitorate, %s recidivi."
+
+T_EN[diag.escalation_off]="Graduated ban disabled (BAN_ESCALATION empty) — fixed durations only."
+T_FR[diag.escalation_off]="Ban gradué désactivé (BAN_ESCALATION vide) — durées fixes uniquement."
+T_DE[diag.escalation_off]="Gestufte Sperre deaktiviert (BAN_ESCALATION leer) — nur feste Dauern."
+T_ES[diag.escalation_off]="Bloqueo graduado desactivado (BAN_ESCALATION vacío) — solo duraciones fijas."
+T_IT[diag.escalation_off]="Blocco graduale disattivato (BAN_ESCALATION vuoto) — solo durate fisse."
+
 T_EN[diag.fw_set_missing]="Firewall set %s missing — no bans are enforced."
 T_FR[diag.fw_set_missing]="Set pare-feu %s absent — aucun ban n'est appliqué."
 T_DE[diag.fw_set_missing]="Firewall-Set %s fehlt — keine Sperren aktiv."
@@ -1168,6 +1228,24 @@ T_FR[help.conf_honeypot_timeout]="  HONEYPOT_BAN_TIMEOUT  Durée du ban (s) pour
 T_DE[help.conf_honeypot_timeout]="  HONEYPOT_BAN_TIMEOUT  Sperrdauer (s) für Honeypot-Treffer (Standard 604800 = 7 Tage)."
 T_ES[help.conf_honeypot_timeout]="  HONEYPOT_BAN_TIMEOUT  Duración del bloqueo (s) para hits honeypot (por defecto 604800 = 7 días)."
 T_IT[help.conf_honeypot_timeout]="  HONEYPOT_BAN_TIMEOUT  Durata del blocco (s) per gli hit honeypot (predefinito 604800 = 7 giorni)."
+
+T_EN[help.conf_ban_escalation]="  BAN_ESCALATION   Repeat-offence tiers in seconds, space separated (default \"604800 1209600 2073600\"); empty disables."
+T_FR[help.conf_ban_escalation]="  BAN_ESCALATION   Paliers de récidive en secondes, séparés par des espaces (défaut « 604800 1209600 2073600 ») ; vide => désactivé."
+T_DE[help.conf_ban_escalation]="  BAN_ESCALATION   Wiederholungsstufen in Sekunden, durch Leerzeichen getrennt (Standard \"604800 1209600 2073600\"); leer = aus."
+T_ES[help.conf_ban_escalation]="  BAN_ESCALATION   Niveles de reincidencia en segundos, separados por espacios (por defecto «604800 1209600 2073600»); vacío = desactivado."
+T_IT[help.conf_ban_escalation]="  BAN_ESCALATION   Livelli di recidiva in secondi, separati da spazi (predefinito «604800 1209600 2073600»); vuoto = disattivato."
+
+T_EN[help.conf_escalation_memory]="  ESCALATION_MEMORY  Probation after release (s): no ban for that long resets the counter (default 2073600 = 24 days)."
+T_FR[help.conf_escalation_memory]="  ESCALATION_MEMORY  Épreuve après libération (s) : sans ban pendant ce délai, le compteur repart de zéro (défaut 2073600 = 24 j)."
+T_DE[help.conf_escalation_memory]="  ESCALATION_MEMORY  Bewährung nach Freigabe (s): ohne Sperre in dieser Zeit wird der Zähler zurückgesetzt (Standard 2073600 = 24 Tage)."
+T_ES[help.conf_escalation_memory]="  ESCALATION_MEMORY  Prueba tras la liberación (s): sin bloqueo durante ese plazo, el contador vuelve a cero (por defecto 2073600 = 24 días)."
+T_IT[help.conf_escalation_memory]="  ESCALATION_MEMORY  Prova dopo il rilascio (s): senza blocchi per tale periodo, il contatore riparte da zero (predefinito 2073600 = 24 giorni)."
+
+T_EN[help.conf_aggressive_score]="  AGGRESSIVE_SCORE  Score from which an IP starts one tier higher on its first ban (default 500; 0 disables)."
+T_FR[help.conf_aggressive_score]="  AGGRESSIVE_SCORE  Score à partir duquel une IP démarre un palier plus haut dès son 1er ban (défaut 500 ; 0 => désactivé)."
+T_DE[help.conf_aggressive_score]="  AGGRESSIVE_SCORE  Score, ab dem eine IP schon bei der ersten Sperre eine Stufe höher startet (Standard 500; 0 = aus)."
+T_ES[help.conf_aggressive_score]="  AGGRESSIVE_SCORE  Puntuación a partir de la cual una IP empieza un nivel más alto en su primer bloqueo (por defecto 500; 0 = desactivado)."
+T_IT[help.conf_aggressive_score]="  AGGRESSIVE_SCORE  Punteggio dal quale un IP parte da un livello più alto già al primo blocco (predefinito 500; 0 = disattivato)."
 
 T_EN[help.conf_nickname]="  SERVER_NICKNAME  Friendly server name shown with the hostname in notifications (empty = hostname only)."
 T_FR[help.conf_nickname]="  SERVER_NICKNAME  Nom convivial affiché avec le hostname dans les notifications (vide = hostname seul)."
@@ -1487,6 +1565,25 @@ T_DE[stats.top_item_hp_score_rdns]="%s — Score %s  [%s]"
 T_ES[stats.top_item_hp_score_rdns]="%s — puntuación %s  [%s]"
 T_IT[stats.top_item_hp_score_rdns]="%s — punteggio %s  [%s]"
 
+# Bloc « Récidivistes » : lu dans OFFENDERS_FILE (donc insensible à la rotation du journal).
+T_EN[stats.recidivists_header]="Repeat offenders (%s probation)"
+T_FR[stats.recidivists_header]="Récidivistes (épreuve %s)"
+T_DE[stats.recidivists_header]="Wiederholungstäter (Bewährung %s)"
+T_ES[stats.recidivists_header]="Reincidentes (prueba %s)"
+T_IT[stats.recidivists_header]="Recidivi (prova %s)"
+
+T_EN[stats.recidivist_item]="%s — %s bans, latest until %s"
+T_FR[stats.recidivist_item]="%s — %s bans, dernier jusqu'au %s"
+T_DE[stats.recidivist_item]="%s — %s Sperren, letzte bis %s"
+T_ES[stats.recidivist_item]="%s — %s bloqueos, el último hasta %s"
+T_IT[stats.recidivist_item]="%s — %s blocchi, l'ultimo fino al %s"
+
+T_EN[stats.recidivist_item_rdns]="%s — %s bans, latest until %s  [%s]"
+T_FR[stats.recidivist_item_rdns]="%s — %s bans, dernier jusqu'au %s  [%s]"
+T_DE[stats.recidivist_item_rdns]="%s — %s Sperren, letzte bis %s  [%s]"
+T_ES[stats.recidivist_item_rdns]="%s — %s bloqueos, el último hasta %s  [%s]"
+T_IT[stats.recidivist_item_rdns]="%s — %s blocchi, l'ultimo fino al %s  [%s]"
+
 T_EN[cidr.unban]="[-] Unbanning IP (whitelisted CIDR): %s (score %s)"
 T_FR[cidr.unban]="[-] Déblocage de l'IP (CIDR en liste blanche) : %s (score %s)"
 T_DE[cidr.unban]="[-] Entsperrung der IP (CIDR auf Whitelist): %s (Score %s)"
@@ -1721,10 +1818,20 @@ fw_init() {
 fw_backend_label() { case "$FW_ACTIVE" in nftables) printf 'nftables' ;; *) printf 'iptables+ipset' ;; esac; }
 
 # ---------- Backend iptables + ipset (DÉFAUT, comportement historique verbatim) ----------
+# LIMITE DURE d'ipset : le timeout (du set comme d'une entrée) est stocké en millisecondes sur
+# 31 bits => toute valeur > 2147483 s (~24 j 20 h) fait ÉCHOUER la commande. Un ipset add refusé
+# ne bannit PAS l'IP, et l'échec est silencieux dans le flux du moteur : un HONEYPOT_BAN_TIMEOUT
+# de 30 j posé en conf locale suffisait à ne plus bannir un seul honeypot. On borne donc à la
+# source. Limite propre à ipset : le backend nftables n'en a pas.
+IPSET_MAX_TIMEOUT=2147483
+ipt_ttl_clamp() {  # $1 = ttl(s) ; echo la valeur bornée (non numérique => BAN_TIMEOUT)
+    case "${1:-}" in ''|*[!0-9]*) printf '%s' "$BAN_TIMEOUT"; return ;; esac
+    if [ "$1" -gt "$IPSET_MAX_TIMEOUT" ]; then printf '%s' "$IPSET_MAX_TIMEOUT"; else printf '%s' "$1"; fi
+}
 ipt_set_exists()       { ipset list "$IPSET_NAME" &>/dev/null; }
 ipt_is_banned()        { ipset test "$IPSET_NAME" "$1" &>/dev/null; }        # $1=ip
 ipt_ban_ip()           { ipset -exist add "$IPSET_NAME" "$1"; }              # $1=ip (timeout du set)
-ipt_ban_ip_ttl()       { ipset -exist add "$IPSET_NAME" "$1" timeout "$2"; } # $1=ip $2=ttl(s)
+ipt_ban_ip_ttl()       { ipset -exist add "$IPSET_NAME" "$1" timeout "$(ipt_ttl_clamp "$2")"; } # $1=ip $2=ttl(s)
 ipt_unban_ip()         { ipset del "$IPSET_NAME" "$1" 2>/dev/null; }         # $1=ip
 ipt_flush()            { ipset flush "$IPSET_NAME" 2>/dev/null; }
 ipt_list_members()     { ipset list "$IPSET_NAME" 2>/dev/null | awk '/^Members:/{m=1;next} m&&NF{print $1}'; }
@@ -1742,7 +1849,7 @@ ipt_grow_set() {
     if [ -n "$cur_max" ] && [ "$cur_max" -lt 1048576 ]; then
         tmp_set="${IPSET_NAME}_grow"
         ipset destroy "$tmp_set" 2>/dev/null
-        if ipset create "$tmp_set" hash:ip timeout $BAN_TIMEOUT maxelem 1048576 hashsize 65536 2>/dev/null; then
+        if ipset create "$tmp_set" hash:ip timeout "$(ipt_ttl_clamp "$BAN_TIMEOUT")" maxelem 1048576 hashsize 65536 2>/dev/null; then
             ipset save "$IPSET_NAME" 2>/dev/null | awk -v t="$tmp_set" '/^add /{$2=t; print}' | ipset restore -exist 2>/dev/null
             if ipset swap "$tmp_set" "$IPSET_NAME" 2>/dev/null; then
                 ipset destroy "$tmp_set" 2>/dev/null
@@ -1756,7 +1863,7 @@ ipt_grow_set() {
 }
 ipt_ensure_infra() {
     if ! ipset list "$IPSET_NAME" &>/dev/null; then
-        ipset create "$IPSET_NAME" hash:ip timeout $BAN_TIMEOUT maxelem 1048576 hashsize 65536
+        ipset create "$IPSET_NAME" hash:ip timeout "$(ipt_ttl_clamp "$BAN_TIMEOUT")" maxelem 1048576 hashsize 65536
     else
         ipt_grow_set
     fi
@@ -1968,6 +2075,9 @@ show_help() {
     t help.conf_threshold
     t help.conf_honeypot_score
     t help.conf_honeypot_timeout
+    t help.conf_ban_escalation
+    t help.conf_escalation_memory
+    t help.conf_aggressive_score
     t help.conf_nickname
     t help.conf_webhook
     t help.conf_chatcard
@@ -2074,6 +2184,7 @@ enforce_whitelist_unban() {
                 fw_is_banned "$w" && t wl.sim_unban "$w"
             elif fw_unban_ip "$w"; then
                 t_log wl.unban "$w"; removed=true
+                escalation_forget "$w"   # whitelistée => son passé de récidiviste n'a plus de sens
             fi
         done
     fi
@@ -2087,6 +2198,7 @@ enforce_whitelist_unban() {
                 t wl.sim_unban "$ip"
             elif fw_unban_ip "$ip"; then
                 t_log wl.unban "$ip"; removed=true
+                escalation_forget "$ip"
             fi
         done < <(fw_list_members)
     fi
@@ -2651,6 +2763,29 @@ stats_log_stream() {   # $1 = début de fenêtre « AAAA-MM-JJ HH:MM:SS »
     for rot in "${older[@]}"; do stats_log_cat "$rot"; done
     cat -- "$LOG_FILE" 2>/dev/null
 }
+# --- Bloc « Récidivistes » ---------------------------------------------------------------------
+# Top 10 des IP par nombre de bans mémorisés, lu DIRECTEMENT dans OFFENDERS_FILE : contrairement
+# aux Top 24 h (qui relisent le journal), ce bloc est insensible à la rotation de logrotate et
+# couvre toute la période d'épreuve, pas 24 h. Design d'alerte comme le bloc ipset : le bloc est
+# ABSENT tant qu'aucune IP n'a au moins 2 bans — muet au calme, visible dès qu'un habitué s'installe.
+build_recidivists() {
+    [ -r "$OFFENDERS_FILE" ] || return 0
+    local rows n ip exp rdns endts
+    rows=$(awk -v cut="$(date +%s)" -v mem="${ESCALATION_MEMORY:-0}" '
+        NF>=3 && $2 ~ /^[0-9]+$/ && $3 ~ /^[0-9]+$/ && $2+0 >= 2 && $3+mem >= cut { print $2+0, $1, $3 }
+    ' "$OFFENDERS_FILE" 2>/dev/null | sort -k1,1nr -k2,2V | head -n 10)
+    [ -n "$rows" ] || return 0
+    printf '\n── %s ──\n' "$(t stats.recidivists_header "$(fmt_duration "${ESCALATION_MEMORY:-0}")")"
+    while read -r n ip exp; do
+        [ -z "$ip" ] && continue
+        endts=$(date -d "@$exp" '+%Y-%m-%d %H:%M' 2>/dev/null) || endts="$exp"
+        rdns=""; if resolve_ptr_on; then rdns=$(reverse_dns "$ip"); fi
+        [ -n "$rdns" ] && t stats.recidivist_item_rdns "$ip" "$n" "$endts" "$rdns" \
+                       || t stats.recidivist_item      "$ip" "$n" "$endts"
+    done <<< "$rows"
+    return 0
+}
+
 build_stats_text() {
     local bans unbans evt cutoff24 cnt ip rdns updater upd_ver issue div kind sc top_raw top404 tophp
     # Couleur ANSI des triangles seulement au terminal ([ -t 1 ]) ; sinon 'plain'. Le résumé notifié
@@ -2783,6 +2918,8 @@ build_stats_text() {
             done <<< "$tophp"
         fi
     fi
+    # --- Récidivistes (fenêtre d'épreuve, source = fichier d'état) : muet s'il n'y en a aucun ---
+    build_recidivists
 }
 do_list() {
     local members ip rest to_raw to fam key ipkey
@@ -3012,6 +3149,111 @@ cadence_adjust() {
     chmod 644 "$tmp" 2>/dev/null
     mv -f "$tmp" "$CADENCE_FILE" 2>/dev/null || rm -f "$tmp" 2>/dev/null
     return 0
+}
+
+# --- Bannissement gradué : mémoire des récidives (depuis 2.3.0) -------------------------------
+# Fichier d'état OFFENDERS_FILE : une ligne par IP, « ip nb_bans epoch_fin_du_dernier_ban ». Même
+# patron que metrics_sample / ipset_counts_sample / cadence_adjust : purge-on-write, écriture
+# atomique mktemp + mv, return 0 EN TOUTES CIRCONSTANCES — ce fichier ne doit JAMAIS faire échouer
+# un run (il ne porte qu'un raffinement de durée, la protection elle-même n'en dépend pas).
+#
+# Une entrée est PÉRIMÉE quand « epoch_fin + ESCALATION_MEMORY < maintenant » : la période
+# d'épreuve court donc à partir de la LIBÉRATION de l'IP, pas de la pose du ban. Datée sur la pose,
+# une mémoire égale au ban maximal remettrait le compteur à zéro à l'instant précis où l'IP sort du
+# set — le pire récidiviste redeviendrait primo-délinquant grâce au ban qu'il a mérité.
+#
+# Défini ICI (et non près de metrics_sample) parce que escalation_forget est appelée par do_unban,
+# lui-même invoqué DEPUIS la boucle de parsing des arguments : les définitions doivent la précéder.
+
+# Nb de bans déjà mémorisés pour les IP passées sur stdin (une par ligne). Émet « ip nb_bans » pour
+# les seules IP connues ET non périmées. UN SEUL passage awk quel que soit le nombre de candidates
+# (pas de grep par IP, pas de chargement du fichier entier en tableau Bash).
+escalation_lookup() {
+    [ -r "$OFFENDERS_FILE" ] || return 0
+    awk -v cut="$(date +%s)" -v mem="${ESCALATION_MEMORY:-0}" '
+        NR==FNR { if ($0 != "") want[$0]=1; next }
+        NF>=3 && ($1 in want) && $2 ~ /^[0-9]+$/ && $3 ~ /^[0-9]+$/ && $3+mem >= cut { print $1, $2+0 }
+    ' - "$OFFENDERS_FILE" 2>/dev/null
+    return 0
+}
+
+# TTL (s) et NIVEAU du ban à poser — fonction PURE, aucun effet de bord, testable isolément.
+#   $1 = count (score awk)   $2 = hp (1 = circuit honeypot/SECURITY/POST-flood)   $3 = récidives
+# Émet « ttl niveau ». niveau = récidives + circuit honeypot + bonus d'agressivité, borné au nombre
+# de paliers ; niveau 0 => la base du circuit, soit le comportement historique EXACT d'un 1er ban.
+# max(ttl, base) : ne raccourcit JAMAIS le ban par rapport au réglage explicite de l'admin (un
+# HONEYPOT_BAN_TIMEOUT durci en conf locale reste souverain). BAN_ESCALATION vide => escalade off.
+escalation_ttl() {
+    local count="${1:-0}" hp="${2:-0}" rec="${3:-0}" base level n ttl
+    local -a tiers
+    case "$hp" in 1) base="$HONEYPOT_BAN_TIMEOUT" ;; *) base="$BAN_TIMEOUT" ;; esac
+    read -r -a tiers <<< "${BAN_ESCALATION:-}"
+    n=${#tiers[@]}
+    if [ "$n" -eq 0 ]; then printf '%s 0' "$base"; return 0; fi
+    case "$rec" in ''|*[!0-9]*) rec=0 ;; esac
+    level=$rec
+    [ "$hp" = 1 ] && level=$((level + 1))
+    if [ "${AGGRESSIVE_SCORE:-0}" -gt 0 ] 2>/dev/null && [ "${count:-0}" -ge "${AGGRESSIVE_SCORE}" ] 2>/dev/null; then
+        level=$((level + 1))
+    fi
+    [ "$level" -gt "$n" ] && level=$n
+    if [ "$level" -le 0 ]; then ttl="$base"; else ttl="${tiers[level-1]}"; fi
+    case "$ttl" in ''|*[!0-9]*) ttl="$base" ;; esac
+    [ "$ttl" -lt "$base" ] 2>/dev/null && ttl="$base"
+    printf '%s %s' "$ttl" "$level"
+    return 0
+}
+
+# Enregistre les bans du run (tableau esc_records, lignes « ip epoch_fin_du_ban ») ET purge les
+# entrées périmées, en un seul awk + bascule atomique. Le compteur est INCRÉMENTÉ si l'IP était
+# connue et encore dans sa période d'épreuve ; il repart à 1 si l'entrée était périmée (l'IP a
+# purgé sa peine puis est restée sage : c'est une nouvelle primo-délinquance).
+escalation_record() {
+    { [ "$DRY_RUN" = false ] && [ "$(id -u)" -eq 0 ]; } || return 0
+    [ "${#esc_records[@]}" -gt 0 ] || return 0
+    local now dir tmp src
+    now=$(date +%s)
+    src="$OFFENDERS_FILE"; [ -r "$src" ] || src=/dev/null   # 1re écriture : awk ne doit pas échouer
+    dir=$(dirname "$OFFENDERS_FILE"); mkdir -p "$dir" 2>/dev/null
+    tmp=$(mktemp "$dir/.offenders.XXXXXX" 2>/dev/null) || return 0
+    printf '%s\n' "${esc_records[@]}" | awk -v cut="$now" -v mem="${ESCALATION_MEMORY:-0}" '
+        NR==FNR { if (NF>=2) newexp[$1]=$2; next }
+        NF>=3 && $2 ~ /^[0-9]+$/ && $3 ~ /^[0-9]+$/ {
+            if ($1 in newexp) {
+                print $1, ($3+mem >= cut ? $2+1 : 1), newexp[$1]
+                delete newexp[$1]
+            } else if ($3+mem >= cut) print $1, $2+0, $3
+        }
+        END { for (ip in newexp) print ip, 1, newexp[ip] }
+    ' - "$src" > "$tmp" 2>/dev/null
+    chmod 644 "$tmp" 2>/dev/null
+    mv -f "$tmp" "$OFFENDERS_FILE" 2>/dev/null || rm -f "$tmp" 2>/dev/null
+    return 0
+}
+
+# Oubli du compteur : déban manuel (verdict d'innocence de l'admin) ou déban whitelist. « all »
+# vide le fichier. Neutre en dry-run et hors root.
+escalation_forget() {  # $1 = IP | all
+    { [ "${DRY_RUN:-false}" = false ] && [ "$(id -u)" -eq 0 ]; } || return 0
+    [ -f "$OFFENDERS_FILE" ] || return 0
+    local dir tmp
+    if [ "${1,,}" = all ]; then : > "$OFFENDERS_FILE" 2>/dev/null; return 0; fi
+    [ -n "${1:-}" ] || return 0
+    dir=$(dirname "$OFFENDERS_FILE")
+    tmp=$(mktemp "$dir/.offenders.XXXXXX" 2>/dev/null) || return 0
+    awk -v ip="$1" '$1 != ip' "$OFFENDERS_FILE" > "$tmp" 2>/dev/null
+    chmod 644 "$tmp" 2>/dev/null
+    mv -f "$tmp" "$OFFENDERS_FILE" 2>/dev/null || rm -f "$tmp" 2>/dev/null
+    return 0
+}
+
+# Durée lisible pour les messages (« 14 j », « 36 h ») — unité TRADUITE, valeur non numérique
+# rendue telle quelle. Utilisé sans saut de ligne, via $(fmt_duration …).
+fmt_duration() {  # $1 = secondes
+    local s="${1:-0}"
+    case "$s" in ''|*[!0-9]*) printf '%s' "$s"; return 0 ;; esac
+    if [ "$s" -ge 86400 ]; then printf '%s %s' "$((s / 86400))" "$(t unit.days)"
+    else                        printf '%s %s' "$((s / 3600))"  "$(t unit.hours)"; fi
 }
 
 # Fichier de log candidat pour un dossier <BASE_DIR>/<vhost>/log/ : access.log s'il existe, sinon le
@@ -3370,6 +3612,23 @@ run_diag_checks() {
             else
                 diag_line warn "$(t diag.persist_missing)"
             fi
+            # Ban gradué : état + volumétrie de la mémoire des récidives. Informatif ([ OK ] dans
+            # les deux cas) — désactiver l'escalade est un choix d'admin légitime, pas une anomalie.
+            if [ -n "${BAN_ESCALATION// /}" ]; then
+                local esc_tiers="" esc_tracked esc_rep _s
+                local -a esc_t=()
+                read -r -a esc_t <<< "$BAN_ESCALATION"
+                for _s in "${esc_t[@]}"; do esc_tiers+="$(fmt_duration "$_s") "; done
+                # IP suivies (dans leur période d'épreuve) et, parmi elles, celles qui ont DÉJÀ
+                # récidivé (>= 2 bans). On ne compte pas « au palier maxi » : le palier dépend aussi
+                # du circuit (honeypot = +1), que le fichier d'état ne mémorise pas.
+                read -r esc_tracked esc_rep < <(awk -v cut="$(date +%s)" -v mem="${ESCALATION_MEMORY:-0}" '
+                    NF>=3 && $2 ~ /^[0-9]+$/ && $3 ~ /^[0-9]+$/ && $3+mem >= cut { k++; if ($2+0 >= 2) m++ }
+                    END { print k+0, m+0 }' "$OFFENDERS_FILE" 2>/dev/null)
+                diag_line ok "$(t diag.escalation_on "${esc_tiers% }" "$(fmt_duration "${ESCALATION_MEMORY:-0}")" "${esc_tracked:-0}" "${esc_rep:-0}")"
+            else
+                diag_line ok "$(t diag.escalation_off)"
+            fi
         else
             diag_line warn "$(t diag.root_skip)"
         fi
@@ -3628,9 +3887,12 @@ do_unban() {  # $1 = IP | all  (valeur requise, pas de défaut)
         n=$(fw_count "$IPSET_NAME")
         fw_flush || { t unban.fail "all"; exit 1; }
         t_log unban.all_done "$n"
+        escalation_forget all
     elif fw_is_banned "$target"; then
         fw_unban_ip "$target" || { t unban.fail "$target"; exit 1; }
         t_log unban.done "$target"
+        # Déban MANUEL = verdict d'innocence de l'admin : le compteur de récidive repart de zéro.
+        escalation_forget "$target"
     else
         t unban.notfound "$target"; exit 0
     fi
@@ -4166,6 +4428,17 @@ fi
 changes_made=false
 rules_simulated=0
 new_bans=()   # accumulés pour la notification (format : "ip|score|honeypot")
+# Tableau PARALLÈLE à new_bans (format : "ip epoch_fin_du_ban"), consommé par escalation_record.
+# Volontairement séparé : le format de new_bans est lu ailleurs par la fin (${b##*|} = le drapeau
+# honeypot, cf. finish_run) et par maybe_notify_new_bans — y ajouter des champs casserait les deux.
+esc_records=()
+esc_now=$(date +%s)   # base commune des dates de fin de ban du run
+# Récidives connues pour les seules IP candidates : UN passage awk sur le fichier d'état, avant la
+# boucle (et non une lecture par IP). Table associative « ip -> nb de bans antérieurs ».
+declare -A ESC_SEEN=()
+while read -r _esc_ip _esc_n; do
+    [ -n "$_esc_ip" ] && ESC_SEEN["$_esc_ip"]="$_esc_n"
+done < <(printf '%s\n' "$ips_data" | awk '{print $3}' | escalation_lookup)
 [ "$VERBOSE" = true ] && t verbose.processing
 
 # 4. Boucle de traitement
@@ -4214,27 +4487,41 @@ while read -r count hpflag ip; do
     if fw_is_banned "$ip"; then
         [ "$SHOW_BLOCKED" = true ] && t already.banned "$ip" "$count"
     else
+        # Durée du ban : base du circuit au 1er ban (comportement historique EXACT), palier plus
+        # long dès la 1re récidive ou d'emblée pour un score >= AGGRESSIVE_SCORE. Le niveau
+        # « nominal » (celui d'une IP inconnue et non agressive) vaut 1 sur le circuit honeypot et
+        # 0 sur un flood : au-delà, on journalise la variante qui porte le rang et la durée.
+        [ "$count" -ge "$HONEYPOT_SCORE" ] && hp=1 || hp=0
+        esc_rec="${ESC_SEEN[$ip]:-0}"
+        read -r esc_ttl esc_level <<< "$(escalation_ttl "$count" "$hp" "$esc_rec")"
         if [ "$DRY_RUN" = true ]; then
-            if [ "$count" -ge "$HONEYPOT_SCORE" ]; then
+            if [ "$hp" = 1 ]; then
                 t sim.ban_honeypot "$ip" "$count"
             else
                 t sim.ban_add "$ip" "$count"
             fi
+            [ "$esc_level" -gt "$hp" ] && t sim.ban_escalated "$((esc_rec + 1))" "$(fmt_duration "$esc_ttl")"
             rules_simulated=$((rules_simulated + 1))
         else
-            if [ "$count" -ge "$HONEYPOT_SCORE" ]; then
-                t_log ban.honeypot "$ip" "$count"; hp=1
-                # Ban honeypot : timeout différencié (plus long que le défaut du set).
-                fw_ban_ip_ttl "$ip" "$HONEYPOT_BAN_TIMEOUT"
+            if [ "$hp" = 1 ]; then
+                if [ "$esc_level" -gt 1 ]; then t_log ban.honeypot_esc "$ip" "$count" "$((esc_rec + 1))" "$(fmt_duration "$esc_ttl")"
+                else                            t_log ban.honeypot     "$ip" "$count"; fi
             else
-                t_log ban.add "$ip" "$count"; hp=0
-                fw_ban_ip "$ip"
+                if [ "$esc_level" -gt 0 ]; then t_log ban.add_esc "$ip" "$count" "$((esc_rec + 1))" "$(fmt_duration "$esc_ttl")"
+                else                            t_log ban.add     "$ip" "$count"; fi
             fi
+            # Toujours un timeout PAR ENTRÉE : au niveau nominal d'un flood il vaut exactement
+            # BAN_TIMEOUT, soit le défaut du set — aucun changement observable.
+            fw_ban_ip_ttl "$ip" "$esc_ttl"
             changes_made=true
             new_bans+=("$ip|$count|$hp")
+            esc_records+=("$ip $((esc_now + esc_ttl))")   # mémoire datée sur la FIN du ban
         fi
     fi
 done <<< "$ips_data"
+
+# Mémoire des récidives : un seul awk (fusion + purge) + bascule atomique, jamais en dry-run.
+escalation_record
 
 # 5. Sauvegarde
 [ "$VERBOSE" = true ] && t verbose.result_header

@@ -57,6 +57,31 @@ WHITELIST_IP="127.0.0.1"
 #BAN_THRESHOLD=10
 #HONEYPOT_SCORE=100
 #HONEYPOT_BAN_TIMEOUT=604800
+# Graduated ban for aggressive / repeat offenders. BAN_ESCALATION = repeat-offence tiers in seconds
+#   (7 d, 14 d, 24 d); the first ban of an unknown IP keeps BAN_TIMEOUT / HONEYPOT_BAN_TIMEOUT.
+#   ESCALATION_MEMORY = probation AFTER release: no ban for that long and the counter resets.
+#   AGGRESSIVE_SCORE = score from which an IP starts one tier higher on its very first ban.
+#   Hard ceiling: 2147483 s (ipset limit). BAN_ESCALATION="" disables escalation entirely.
+# Ban gradué des IP agressives / récidivistes. BAN_ESCALATION = paliers de récidive en secondes
+#   (7 j, 14 j, 24 j) ; le 1er ban d'une IP inconnue garde BAN_TIMEOUT / HONEYPOT_BAN_TIMEOUT.
+#   ESCALATION_MEMORY = épreuve APRÈS libération : sans ban pendant ce délai, le compteur repart à zéro.
+#   AGGRESSIVE_SCORE = score à partir duquel une IP démarre un palier plus haut dès son 1er ban.
+#   Plafond dur : 2147483 s (limite ipset). BAN_ESCALATION="" désactive totalement l'escalade.
+# Gestufte Sperre für aggressive / wiederholt auffällige IPs. BAN_ESCALATION = Wiederholungsstufen
+#   in Sekunden (7 T, 14 T, 24 T); die erste Sperre einer unbekannten IP behält BAN_TIMEOUT /
+#   HONEYPOT_BAN_TIMEOUT. ESCALATION_MEMORY = Bewährung NACH Freigabe. AGGRESSIVE_SCORE = Score,
+#   ab dem eine IP schon bei der ersten Sperre eine Stufe höher startet. Obergrenze: 2147483 s.
+# Bloqueo graduado de IP agresivas / reincidentes. BAN_ESCALATION = niveles de reincidencia en
+#   segundos (7 d, 14 d, 24 d); el primer bloqueo de una IP desconocida conserva BAN_TIMEOUT /
+#   HONEYPOT_BAN_TIMEOUT. ESCALATION_MEMORY = prueba TRAS la liberación. AGGRESSIVE_SCORE =
+#   puntuación desde la que una IP empieza un nivel más alto ya en su primer bloqueo. Tope: 2147483 s.
+# Blocco graduale degli IP aggressivi / recidivi. BAN_ESCALATION = livelli di recidiva in secondi
+#   (7 g, 14 g, 24 g); il primo blocco di un IP sconosciuto mantiene BAN_TIMEOUT /
+#   HONEYPOT_BAN_TIMEOUT. ESCALATION_MEMORY = prova DOPO il rilascio. AGGRESSIVE_SCORE = punteggio
+#   dal quale un IP parte da un livello più alto già al primo blocco. Tetto massimo: 2147483 s.
+#BAN_ESCALATION="604800 1209600 2073600"
+#ESCALATION_MEMORY=2073600
+#AGGRESSIVE_SCORE=500
 #POST_FLOOD_THRESHOLD=20
 #RESOLVE_PTR=false
 #PTR_TIMEOUT=2

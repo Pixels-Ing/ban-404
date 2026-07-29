@@ -84,6 +84,9 @@ sudo /usr/local/sbin/update_ban_404.sh --force   # redéploie même si le conten
 | `TAIL_LINES`      | `50000`     | Lignes analysées par log (borne le coût sur gros sites). |
 | `BAN_THRESHOLD`   | `10`        | Ban si le score dépasse ce seuil dans la fenêtre. |
 | `HONEYPOT_SCORE`  | `100`       | Score ajouté par hit honeypot (≥ ce score ⇒ ban immédiat). |
+| `BAN_ESCALATION`  | `604800 1209600 2073600` | **Ban gradué** des récidivistes : paliers en secondes (7 j, 14 j, 24 j). Le **1er ban** d'une IP inconnue garde `BAN_TIMEOUT` (flood) ou `HONEYPOT_BAN_TIMEOUT` (honeypot) ; chaque récidive monte d'un palier. Vide ⇒ escalade désactivée. Plafond dur : `2147483` s (limite ipset). |
+| `ESCALATION_MEMORY` | `2073600` | Période d'épreuve **après libération** (s) : sans le moindre ban pendant ce délai, le compteur de récidive de l'IP repart de zéro. |
+| `AGGRESSIVE_SCORE` | `500`      | Score à partir duquel une IP démarre **un palier plus haut dès son 1er ban** (500 = 500 × 404 en 2 h, ou 5 chemins-pièges touchés). `0` ⇒ désactivé. |
 | `WHITELIST_CIDR`  | (vide)      | Sous-réseaux jamais bannis (CIDR séparés par `\|`, ex. `10.0.0.0/8`). |
 | `EXCLUDE_VHOSTS`  | (vide)      | Vhosts exclus de l'analyse (noms de dossier sous `/var/www`, séparés par `\|`). Leurs 404 ne génèrent aucun ban. |
 | `SERVER_NICKNAME` | (vide)      | Nom convivial ajouté **à côté** du hostname dans les notifications (mail/webhook), pour repérer le serveur sans perdre l'identifiant technique. Ex. `Boutique (prod) [srv-web-01]`. Vide ⇒ hostname seul. |

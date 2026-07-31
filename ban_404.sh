@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="2.3.1"
+BAN404_VERSION="2.3.2"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -55,6 +55,21 @@ SECURITY_PATTERN='etc(/|%2f)passwd|\.\./\.\.|%2e%2e%2f|\.\.%2f|%00|vendor/phpuni
 # tolère plusieurs utilisateurs légitimes derrière un même NAT. Motif vide => désactivé.
 POST_FLOOD_PATTERN='wp-login\.php|xmlrpc\.php'
 POST_FLOOD_THRESHOLD=20
+
+# Plages d'où PEUT provenir un crawler légitime (Googlebot, Bingbot, Yandex, Baidu, Apple), sous
+# forme de préfixes d'IP séparés par des espaces. PRÉ-FILTRE BON MARCHÉ, rien d'autre : il décide
+# si l'on paie le FCrDNS (deux lookups DNS) sur un ban du circuit honeypot/sécurité et lors du
+# balayage à froid de l'ipset. La décision reste TOUJOURS au FCrDNS (PTR + re-résolution) : cette
+# liste n'épargne aucune IP par elle-même, une IP louée dans une de ces plages est bannie comme
+# les autres. Née d'un cas réel (31 juil. 2026) : Googlebot et Bingbot bannis 7 j sur la signature
+# « paramètre resultsPerPage dupliqué » — que PrestaShop produit lui-même dans ses liens de
+# facettes — car le circuit honeypot sautait purement et simplement le contrôle crawler.
+# Constante de tête : définie AVANT le sourcing de la conf, donc surchargeable localement
+# (même statut que CADENCE_CALM_SECS), sans être réconciliée par l'updater.
+CRAWLER_HINT_PREFIXES="66.249. 64.233. 66.102. 72.14. 74.125. 209.85. 216.239. 40.77. 13.66. 157.55. 207.46. 20.191. 52.167. 199.30. 40.88. 5.45. 37.9. 37.140. 77.88. 84.252. 87.250. 90.156. 93.158. 95.108. 141.8. 178.154. 213.180. 180.76. 220.181. 123.125. 17."
+# Nb max d'IP soumises au FCrDNS lors du balayage à froid (borne le coût DNS d'un run). En pratique
+# jamais atteint : sur un set de 23 694 membres, le pré-filtre ne retenait que 9 candidats.
+CRAWLER_SCAN_MAX=100
 
 # Whitelist des IPs à ne JAMAIS bannir (séparées par | ) -- correspondance EXACTE
 WHITELIST_IP="127.0.0.1"
@@ -406,6 +421,14 @@ T_FR[unban.crawler]="[-] Déblocage de l'IP (crawler légitime) : %s (%s | %s 40
 T_DE[unban.crawler]="[-] Entsperrung der IP (legitimer Crawler): %s (%s | %s 404)"
 T_ES[unban.crawler]="[-] Desbloqueo de la IP (crawler legítimo): %s (%s | %s 404)"
 T_IT[unban.crawler]="[-] Sblocco dell'IP (crawler legittimo): %s (%s | %s 404)"
+
+# Déban à froid : l'IP n'était plus candidate (une IP droppée n'émet plus de requêtes), elle a
+# donc été rattrapée par le balayage de l'ipset — d'où l'absence de compteur de 404.
+T_EN[unban.crawler_cold]="[-] Unbanning IP (legitimate crawler, cold sweep): %s (%s)"
+T_FR[unban.crawler_cold]="[-] Déblocage de l'IP (crawler légitime, balayage à froid) : %s (%s)"
+T_DE[unban.crawler_cold]="[-] Entsperrung der IP (legitimer Crawler, Kaltdurchlauf): %s (%s)"
+T_ES[unban.crawler_cold]="[-] Desbloqueo de la IP (crawler legítimo, barrido en frío): %s (%s)"
+T_IT[unban.crawler_cold]="[-] Sblocco dell'IP (crawler legittimo, scansione a freddo): %s (%s)"
 
 T_EN[sim.unban]="[SIMULATION] [-] IP %s would be UNBANNED (real bot: %s)."
 T_FR[sim.unban]="[SIMULATION] [-] L'IP %s aurait été DÉBANNIE (vrai robot : %s)."
@@ -1597,6 +1620,18 @@ T_DE[cidr.sim_unban]="[SIMULATION] [-] IP %s würde ENTSPERRT (CIDR auf Whitelis
 T_ES[cidr.sim_unban]="[SIMULATION] [-] La IP %s sería DESBLOQUEADA (CIDR en lista blanca)."
 T_IT[cidr.sim_unban]="[SIMULATION] [-] L'IP %s verrebbe SBLOCCATO (CIDR in whitelist)."
 
+T_EN[crawler.sim_cold_unban]="[SIMULATION] [-] IP %s would be UNBANNED (legitimate crawler: %s)."
+T_FR[crawler.sim_cold_unban]="[SIMULATION] [-] L'IP %s aurait été DÉBANNIE (crawler légitime : %s)."
+T_DE[crawler.sim_cold_unban]="[SIMULATION] [-] IP %s würde ENTSPERRT (legitimer Crawler: %s)."
+T_ES[crawler.sim_cold_unban]="[SIMULATION] [-] La IP %s sería DESBLOQUEADA (crawler legítimo: %s)."
+T_IT[crawler.sim_cold_unban]="[SIMULATION] [-] L'IP %s verrebbe SBLOCCATO (crawler legittimo: %s)."
+
+T_EN[crawler.scan_capped]="    (cold crawler sweep stopped at %s IPs — DNS cost cap)"
+T_FR[crawler.scan_capped]="    (balayage crawler à froid arrêté à %s IP — plafond de coût DNS)"
+T_DE[crawler.scan_capped]="    (Kalter Crawler-Durchlauf bei %s IPs gestoppt — DNS-Kostengrenze)"
+T_ES[crawler.scan_capped]="    (barrido en frío de crawlers detenido en %s IP — límite de coste DNS)"
+T_IT[crawler.scan_capped]="    (scansione a freddo dei crawler fermata a %s IP — limite di costo DNS)"
+
 T_EN[cidr.skip]="[SKIP] Whitelisted CIDR, not blocked: %s"
 T_FR[cidr.skip]="[SKIP] CIDR en liste blanche, non bloqué : %s"
 T_DE[cidr.skip]="[SKIP] CIDR auf Whitelist, nicht gesperrt: %s"
@@ -1906,8 +1941,8 @@ nft_dur_to_secs() {
 # Membres « bruts » façon ipset (« ip timeout <secs_résiduelles> ») pour do_list ET la bascule
 # inverse nft->iptables (transfert des bans). La variable awk s'appelle « ev » (JAMAIS « exp » :
 # c'est une fonction intégrée de gawk => « exp= » est une erreur de syntaxe sous gawk, silencieuse
-# sous mawk — incident constaté en production). On retire la fraction « <n>ms » de la durée « expires » avant
-# conversion (sinon le « m » de « ms » serait compté comme des minutes).
+# sous mawk — incident constaté en production). On retire la fraction « <n>ms » de la durée
+# « expires » avant conversion (sinon le « m » de « ms » serait compté comme des minutes).
 nft_list_members_raw() {
     "$NFT_BIN" list set "$NFT_TABLE_FAMILY" "$NFT_TABLE" "$IPSET_NAME" 2>/dev/null | tr ',' '\n' \
         | awk '{ ip=""; ev=""
@@ -2171,7 +2206,7 @@ in_whitelist_ip() {  # $1=ip ; correspondance EXACTE dans WHITELIST_IP (séparé
 # Perf : les IP EXACTES sont retirées par `ipset del` DIRECT (O(whitelist)), SANS énumérer le
 # set. On ne balaie les membres (O(membres)) QUE s'il existe au moins un CIDR whitelisté — seul
 # cas où l'appartenance ne se teste pas par simple égalité. Sur un gros set post-incident
-# (ex. un serveur ex-cible de botnet : ~106k entrées, WHITELIST_CIDR vide), l'ancien balayage systématique coûtait
+# (ex-cible de botnet : ~106k entrées, WHITELIST_CIDR vide), l'ancien balayage systématique coûtait
 # ~30 min À CHAQUE passage horaire ; désormais il ne tourne plus du tout dans ce cas.
 enforce_whitelist_unban() {
     local ip removed=false w
@@ -4033,6 +4068,58 @@ is_legit_crawler() {
     return 0
 }
 
+# L'IP tombe-t-elle dans une plage d'où PEUT venir un crawler légitime ? Test PUREMENT local
+# (comparaisons de préfixes en Bash, aucun fork, aucun DNS) : il ne dit PAS que l'IP est un
+# crawler, seulement qu'il vaut la peine de payer le FCrDNS pour le vérifier. Voir
+# CRAWLER_HINT_PREFIXES.
+crawler_hint() {  # $1 = IP
+    local p
+    [ -n "${CRAWLER_HINT_PREFIXES// /}" ] || return 1
+    for p in $CRAWLER_HINT_PREFIXES; do
+        case "$1" in "$p"*) return 0 ;; esac
+    done
+    return 1
+}
+
+# Même liste, sous forme de regex ancrée, pour filtrer un FLUX de membres en un seul grep (le
+# balayage à froid ci-dessous traite des dizaines de milliers de lignes : une boucle Bash par
+# membre y coûterait des secondes, un grep quelques millisecondes). Construite à la demande.
+crawler_hint_re() {
+    local p re=""
+    for p in $CRAWLER_HINT_PREFIXES; do re="$re|^${p//./\\.}"; done
+    printf '%s' "${re#|}"
+}
+
+# --- Débannissement à froid des crawlers légitimes ---------------------------
+# Pendant du enforce_whitelist_unban, pour le cas symétrique : une IP de crawler bannie À TORT
+# n'est JAMAIS libérée toute seule, car une IP droppée ne produit plus de requêtes -> elle ne
+# réapparaît plus dans les candidats -> le FCrDNS de la boucle ne la revoit jamais. Elle purge
+# donc son ban entier (7 j sur le circuit honeypot). Ce balayage la rattrape à froid.
+# Coût maîtrisé : un seul grep pré-filtre les membres (aucun DNS pour l'écrasante majorité), et
+# seuls les rares candidats retenus paient le FCrDNS, dans la limite de CRAWLER_SCAN_MAX.
+enforce_crawler_unban() {
+    local ip dom removed=false n=0 re
+    re=$(crawler_hint_re)
+    [ -n "$re" ] || return 0
+    while read -r ip; do
+        [ -z "$ip" ] && continue
+        if [ "$n" -ge "${CRAWLER_SCAN_MAX:-100}" ]; then
+            [ "$VERBOSE" = true ] && t crawler.scan_capped "$CRAWLER_SCAN_MAX"
+            break
+        fi
+        n=$((n + 1))
+        dom=$(is_legit_crawler "$ip") || continue
+        if [ "$DRY_RUN" = true ]; then
+            t crawler.sim_cold_unban "$ip" "$dom"
+        elif fw_unban_ip "$ip"; then
+            t_log unban.crawler_cold "$ip" "$dom"; removed=true
+            escalation_forget "$ip"   # acquitté par FCrDNS => son passé de récidiviste n'a plus de sens
+        fi
+    done < <(fw_list_members | grep -E "$re")
+    [ "$removed" = true ] && fw_persist
+    return 0
+}
+
 # --- Auto-guérison de l'updater "legacy" -------------------------------------
 # Certains serveurs portent un ancien updater qui ne met à jour QUE ban_404.sh
 # (jamais lui-même) : il ne se modernisera donc jamais seul. Or le moteur, lui,
@@ -4328,6 +4415,10 @@ fi
 # pour s'appliquer même s'il n'y a aucun nouveau suspect ce passage-ci).
 enforce_whitelist_unban
 
+# Idem pour les crawlers légitimes bannis à tort : eux ne reviennent JAMAIS dans les candidats
+# (une IP droppée ne produit plus de requêtes), donc seul un balayage à froid peut les libérer.
+enforce_crawler_unban
+
 # Auto-guérison éventuelle de l'updater legacy (one-shot ; sans effet si déjà moderne).
 self_heal_updater
 
@@ -4452,12 +4543,16 @@ done < <(printf '%s\n' "$ips_data" | awk '{print $3}' | escalation_lookup)
 while read -r count hpflag ip; do
     [ -z "$ip" ] && continue
 
-    # FCrDNS (épargne des crawlers légitimes) réservé aux bans « volume 404 » : le lookup PTR
-    # (borné à PTR_TIMEOUT) est coûteux, et un vrai crawler n'atteint JAMAIS un honeypot, une
-    # signature sécurité ou un POST-flood (hpflag=1) — inutile de payer le lookup pour ces bans.
-    # Sur un ex-serveur botnet (des centaines d'IP sans PTR à 2 s chacune), ça fait passer un
-    # run de ~30 min à quelques secondes.
-    if [ "$hpflag" = 1 ]; then
+    # FCrDNS (épargne des crawlers légitimes). Le lookup PTR (borné à PTR_TIMEOUT) est coûteux :
+    # sur un ex-serveur botnet (des centaines d'IP sans PTR à 2 s chacune), le payer pour tout le
+    # monde faisait passer un run de quelques secondes à ~30 min. On le paie donc toujours pour un
+    # ban « volume 404 », et pour un ban du circuit honeypot/sécurité (hpflag=1) SEULEMENT si
+    # l'IP tombe dans une plage de crawler connue (crawler_hint, test local sans DNS).
+    # Le postulat d'origine — « un vrai crawler n'atteint JAMAIS une signature sécurité » — est
+    # FAUX : PrestaShop empile lui-même le paramètre resultsPerPage dans ses liens de facettes, et
+    # Googlebot/Bingbot suivent ces URL. Sans ce garde-fou, 7 IP Googlebot et 1 Bingbot ont été
+    # bannies 7 j sur le parc (constaté le 31 juil. 2026), sans aucun moyen d'en sortir.
+    if [ "$hpflag" = 1 ] && ! crawler_hint "$ip"; then
         crawler_domain=""; is_crawler=1
     else
         crawler_domain=$(is_legit_crawler "$ip"); is_crawler=$?
@@ -4466,6 +4561,7 @@ while read -r count hpflag ip; do
         if [ "$DRY_RUN" = false ] && fw_is_banned "$ip"; then
             t_log unban.crawler "$ip" "$crawler_domain" "$count"
             fw_unban_ip "$ip"
+            escalation_forget "$ip"   # acquitté par FCrDNS => son passé de récidiviste n'a plus de sens
             changes_made=true
         elif [ "$DRY_RUN" = true ] && fw_is_banned "$ip"; then
             t sim.unban "$ip" "$crawler_domain"
@@ -4481,6 +4577,7 @@ while read -r count hpflag ip; do
         if [ "$DRY_RUN" = false ] && fw_is_banned "$ip"; then
             t_log cidr.unban "$ip" "$count"
             fw_unban_ip "$ip"
+            escalation_forget "$ip"   # whitelistée => son passé de récidiviste n'a plus de sens
             changes_made=true
         elif [ "$DRY_RUN" = true ] && fw_is_banned "$ip"; then
             t cidr.sim_unban "$ip"

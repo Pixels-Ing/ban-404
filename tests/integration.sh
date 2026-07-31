@@ -165,4 +165,46 @@ grep -q "$PFIP (score 125)" "$TLOG" \
     || { grep -a "$PFIP" "$TLOG" | tail -3; fail "score attendu 125 (100 + 25 POST) pour $PFIP"; }
 ok "25 POST en 200 => score 125 (forfait + volume), et non 100"
 
+# ---------------------------------------------------------------------------
+echo "== Test 7 : un crawler légitime n'est jamais banni par le circuit honeypot =="
+# Régression du 31 juil. 2026 : le circuit honeypot/sécurité sautait le FCrDNS, au motif qu'un vrai
+# crawler n'atteint jamais ces motifs. Faux — PrestaShop empile lui-même le paramètre resultsPerPage
+# dans ses liens de facettes et Googlebot suit ces URL : 7 IP Googlebot et 1 Bingbot bannies 7 j sur
+# le parc, sans aucun moyen d'en sortir. Le FCrDNS est ici servi par /etc/hosts (PTR ET
+# re-résolution), donc sans réseau ni dépendance au DNS du runner.
+CRIP=203.0.113.99
+printf '%s crawl-test.googlebot.com\n' "$CRIP" >> /etc/hosts
+printf '%s - - [%s] "GET /.env HTTP/1.1" 404 200 "-" "bot/1.0"\n' "$CRIP" "$TS" >> "$LOG"
+
+# 7a. Hors des plages connues : le pré-filtre n'engage aucun DNS, l'IP est bannie (coût maîtrisé —
+# c'est ce qui évite de repayer les ~30 min de lookups d'un run de rattrapage sous botnet).
+rm -f "$OFF"
+bash "$ENGINE" >/dev/null 2>&1 || true
+[ -n "$(ipset_timeout "$CRIP")" ] \
+    || fail "hors plage crawler : aucun lookup ne doit être payé, l'IP devait être bannie"
+ok "hors plage connue : pas de lookup, ban honeypot normal"
+
+# 7b. Plage déclarée : le FCrDNS est payé malgré hpflag=1, le crawler est reconnu et épargné.
+bash "$ENGINE" unban "$CRIP" >/dev/null 2>&1 || fail "unban a échoué (préparation 7b)"
+printf 'CRAWLER_HINT_PREFIXES="203.0.113."\n' >> /etc/ban_404.conf
+bash "$ENGINE" >/dev/null 2>&1 || true
+[ -z "$(ipset_timeout "$CRIP")" ] \
+    || fail "crawler légitime (FCrDNS confirmé) : l'IP n'aurait jamais dû être bannie"
+ok "crawler légitime épargné sur le circuit honeypot"
+
+# 7c. Balayage à froid : une IP droppée n'émet plus de requêtes, donc ne revient JAMAIS dans les
+# candidats — seul enforce_crawler_unban peut la libérer. Et l'acquittement vaut amnistie.
+COLDIP=203.0.113.150
+printf '%s crawl-cold.googlebot.com\n' "$COLDIP" >> /etc/hosts
+ipset add ban_404_list "$COLDIP" timeout 604800 2>/dev/null
+printf '%s 2 %s\n' "$COLDIP" "$(date +%s)" >> "$OFF"
+[ -n "$(ipset_timeout "$COLDIP")" ] || fail "préparation 7c : $COLDIP devait être dans le set"
+bash "$ENGINE" >/dev/null 2>&1 || true
+[ -z "$(ipset_timeout "$COLDIP")" ] \
+    || fail "balayage à froid : $COLDIP (crawler absent des logs) devait être libéré"
+ok "balayage à froid : crawler banni à tort libéré sans réapparaître dans les logs"
+
+grep -q "^$COLDIP " "$OFF" 2>/dev/null && { cat "$OFF"; fail "l'acquittement FCrDNS doit purger la mémoire des récidives"; }
+ok "déban crawler = amnistie (compteur de récidive purgé)"
+
 echo "== INTÉGRATION OK =="

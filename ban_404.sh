@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="2.3.3"
+BAN404_VERSION="2.3.4"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -111,6 +111,10 @@ NOTIFY_MIN_BANS=1     # ne notifier que si AU MOINS N nouveaux bans dans le run
 NOTIFY_BANS=false     # alerte à chaque run quand des IP sont bannies (true pour activer)
 DAILY_SUMMARY=false   # résumé quotidien (opt-in) : --summary n'envoie que si =true ET canal configuré
 SERVER_NICKNAME=""    # nom convivial ajouté au hostname dans les notifs (vide => hostname seul). Ex: "Boutique (prod)"
+# Google Chat borne la taille d'un message (~4096 car.) : au-delà, l'API répond 400 et le résumé est
+# PERDU. Plutôt que de dégrader, on DÉCOUPE en plusieurs messages (cf. webhook_split/send_webhook).
+WEBHOOK_CHAT_MAXLEN=3800   # taille max d'un morceau (marge pour l'enveloppe JSON et le titre)
+WEBHOOK_CHAT_MAXPARTS=4    # garde-fou anti-rafale : au-delà, le surplus est tronqué (jamais N messages)
 
 # Reverse DNS (PTR) des IP affichées par --list/--stats/--summary (opt-in ; le flag --resolve force)
 RESOLVE_PTR=false     # true => résoudre le PTR des IP ; borné par PTR_TIMEOUT pour ne pas bloquer
@@ -2307,10 +2311,10 @@ encode_header() {
 build_webhook_payload() {
     case "$WEBHOOK_URL" in
         *chat.googleapis.com*)
-            # Repli vers {text} si la carte dépasserait ~la limite de taille de Google Chat : sans ce
-            # garde, un corps trop long => 400 silencieux (curl -f + || true) => résumé perdu. Le texte
-            # simple, plus court (sans balises), passe alors sans couleur mais SANS perte.
-            if [ -n "${2:-}" ] && [ "${#2}" -lt 3800 ] && diag_is_on "${WEBHOOK_CHAT_CARD:-true}"; then
+            # Le dépassement de taille est traité EN AMONT par send_webhook (découpe en plusieurs
+            # messages) ; la garde ci-dessous n'est qu'un filet pour un appel direct (check_webhook) :
+            # un corps carte trop long partirait en {text}, sans couleur mais sans 400 silencieux.
+            if [ -n "${2:-}" ] && [ "${#2}" -le "${WEBHOOK_CHAT_MAXLEN:-3800}" ] && diag_is_on "${WEBHOOK_CHAT_CARD:-true}"; then
                 printf '{"cardsV2":[{"cardId":"ban404","card":{"header":{"title":"%s"},"sections":[{"widgets":[{"textParagraph":{"text":"%s"}}]}]}}]}' \
                        "$(json_escape "${3:-$(server_label)}")" "$(json_escape "$2")"
             else
@@ -2319,11 +2323,62 @@ build_webhook_payload() {
         *) local esc; esc=$(json_escape "$1"); printf '{"text":"%s","content":"%s"}' "$esc" "$esc" ;;
     esac
 }
+# Découpe un corps en morceaux d'au plus $2 caractères, résultat dans le tableau global SPLIT_PARTS
+# (les fonctions bash ne renvoient pas de tableau — même idiome que HEALTH_LINES/IPSET_PROSE).
+# La coupe se fait TOUJOURS sur une frontière de ligne ($3 = « <br> » pour la carte, saut de ligne
+# pour le texte) : on n'ampute donc jamais une balise, car card_text/vitals_card/ipset_card ouvrent
+# ET ferment chaque <font>/<b> à l'intérieur d'une même ligne. Accumulation gloutonne => nombre de
+# morceaux minimal. Une ligne plus longue que la limite (cas théorique) part seule. Au-delà de
+# WEBHOOK_CHAT_MAXPARTS morceaux, on ARRÊTE d'accumuler (garde-fou anti-rafale : mieux vaut un
+# résumé tronqué qu'une avalanche de messages ; jamais atteint par un résumé normal).
+webhook_split() {  # $1 = corps, $2 = limite, $3 = séparateur de lignes
+    local body="$1" lim="$2" sep="$3" cur="" line max
+    max=${WEBHOOK_CHAT_MAXPARTS:-4}
+    SPLIT_PARTS=()
+    [ -z "$body" ] && return 0
+    while [ -n "$body" ]; do
+        case "$body" in
+            *"$sep"*) line="${body%%"$sep"*}"; body="${body#*"$sep"}" ;;
+            *)        line="$body"; body="" ;;
+        esac
+        if [ -z "$cur" ]; then
+            cur="$line"
+        elif [ "$(( ${#cur} + ${#sep} + ${#line} ))" -le "$lim" ]; then
+            cur+="$sep$line"
+        else
+            SPLIT_PARTS+=("$cur"); cur="$line"
+            [ "${#SPLIT_PARTS[@]}" -ge "$max" ] && { cur=""; break; }   # cap atteint : on jette le reste
+        fi
+    done
+    [ -n "$cur" ] && SPLIT_PARTS+=("$cur")
+    return 0
+}
+webhook_post() { curl -fsS -m 15 -H 'Content-Type: application/json; charset=UTF-8' -X POST -d "$1" "$WEBHOOK_URL" >/dev/null 2>&1 || true; }
 send_webhook() {  # $1 = texte plain ; $2 = corps carte (optionnel) ; $3 = titre carte (optionnel)
     [ -z "$WEBHOOK_URL" ] && return 0
     command -v curl >/dev/null 2>&1 || return 0
-    curl -fsS -m 15 -H 'Content-Type: application/json; charset=UTF-8' \
-         -X POST -d "$(build_webhook_payload "$1" "${2:-}" "${3:-}")" "$WEBHOOK_URL" >/dev/null 2>&1 || true
+    local i n title
+    case "$WEBHOOK_URL" in
+        *chat.googleapis.com*)
+            # Google Chat rejette (400) un message trop long : on DÉCOUPE plutôt que de perdre le
+            # résumé — en cartes si elles sont actives (couleur préservée sur TOUS les morceaux, le
+            # titre porte « (i/n) »), en texte simple sinon. Envois séquentiels => ordre respecté.
+            if [ -n "${2:-}" ] && diag_is_on "${WEBHOOK_CHAT_CARD:-true}"; then
+                webhook_split "$2" "${WEBHOOK_CHAT_MAXLEN:-3800}" '<br>'
+                n=${#SPLIT_PARTS[@]}
+                for ((i=0; i<n; i++)); do
+                    title="${3:-$(server_label)}"; [ "$n" -gt 1 ] && title="$title ($((i+1))/$n)"
+                    webhook_post "$(build_webhook_payload "$1" "${SPLIT_PARTS[i]}" "$title")"
+                done
+            else
+                webhook_split "$1" "${WEBHOOK_CHAT_MAXLEN:-3800}" $'\n'
+                for ((i=0; i<${#SPLIT_PARTS[@]}; i++)); do
+                    webhook_post "$(build_webhook_payload "${SPLIT_PARTS[i]}")"
+                done
+            fi
+            SPLIT_PARTS=() ;;
+        *) webhook_post "$(build_webhook_payload "$1" "${2:-}" "${3:-}")" ;;
+    esac
 }
 send_email() {  # $1 = sujet, $2 = corps texte, $3 = corps HTML (optionnel)
     [ -z "$NOTIFY_EMAIL" ] && return 0

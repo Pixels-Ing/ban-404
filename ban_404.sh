@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="2.3.2"
+BAN404_VERSION="2.3.3"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -2068,6 +2068,7 @@ DO_DIAG=false
 DO_HEALTH=false
 LIST_BY_TIMEOUT=false
 SHOW_AVG24=false     # --avg : ajoute le sous-bloc « Moyennes 24 h » à diag/stats (toujours dans le résumé)
+RECID_PTR=false      # résumé : PTR du bloc « Récidivistes » (≤ 10 IP) même sans RESOLVE_PTR
 LOG_EVENTS=true      # écriture des événements dans LOG_FILE (--no-log ou dry-run => false)
 
 show_help() {
@@ -2804,6 +2805,10 @@ stats_log_stream() {   # $1 = début de fenêtre « AAAA-MM-JJ HH:MM:SS »
 # aux Top 24 h (qui relisent le journal), ce bloc est insensible à la rotation de logrotate et
 # couvre toute la période d'épreuve, pas 24 h. Design d'alerte comme le bloc ipset : le bloc est
 # ABSENT tant qu'aucune IP n'a au moins 2 bans — muet au calme, visible dès qu'un habitué s'installe.
+# PTR : contrairement aux Top 24 h et à --list (opt-in RESOLVE_PTR/--resolve, car --list peut porter
+# des milliers d'IP), le RÉSUMÉ force ici la résolution (drapeau RECID_PTR posé par do_summary) : le
+# bloc est plafonné à 10 IP et chaque lookup est borné par PTR_TIMEOUT, donc le coût reste borné —
+# et savoir QUI est l'habitué (hébergeur, exit Tor, plage cloud) est le premier réflexe de lecture.
 build_recidivists() {
     [ -r "$OFFENDERS_FILE" ] || return 0
     local rows n ip exp rdns endts
@@ -2815,7 +2820,7 @@ build_recidivists() {
     while read -r n ip exp; do
         [ -z "$ip" ] && continue
         endts=$(date -d "@$exp" '+%Y-%m-%d %H:%M' 2>/dev/null) || endts="$exp"
-        rdns=""; if resolve_ptr_on; then rdns=$(reverse_dns "$ip"); fi
+        rdns=""; if resolve_ptr_on || [ "$RECID_PTR" = true ]; then rdns=$(reverse_dns "$ip"); fi
         [ -n "$rdns" ] && t stats.recidivist_item_rdns "$ip" "$n" "$endts" "$rdns" \
                        || t stats.recidivist_item      "$ip" "$n" "$endts"
     done <<< "$rows"
@@ -3003,6 +3008,9 @@ do_summary() {
     # Moyennes 24 h affichées PAR DÉFAUT dans le résumé (sauf santé désactivée : cohérent avec le
     # bloc « Signes vitaux »). En interactif, stats/diag exigent --avg ; ici on force le flag.
     diag_is_on "${HEALTH_CHECKS:-true}" && SHOW_AVG24=true
+    # Récidivistes : PTR forcé (bloc borné à 10 IP, lookups bornés par PTR_TIMEOUT) — identifier
+    # l'habitué vaut son coût sur un envoi quotidien. Les Top 24 h restent en opt-in RESOLVE_PTR.
+    RECID_PTR=true
     # On construit le corps via REDIRECTION fichier (pas $(...)) : build_stats_text tourne alors dans
     # le shell COURANT et laisse DIAG_PROBLEMS/DIAG_ISSUES renseignés (une command substitution les
     # perdrait dans son sous-shell). On peut ainsi FLAGGER le sujet — mail ET webhook, ce dernier

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="2.3.4"
+BAN404_VERSION="2.3.5"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -2864,12 +2864,17 @@ stats_log_stream() {   # $1 = début de fenêtre « AAAA-MM-JJ HH:MM:SS »
 # des milliers d'IP), le RÉSUMÉ force ici la résolution (drapeau RECID_PTR posé par do_summary) : le
 # bloc est plafonné à 10 IP et chaque lookup est borné par PTR_TIMEOUT, donc le coût reste borné —
 # et savoir QUI est l'habitué (hébergeur, exit Tor, plage cloud) est le premier réflexe de lecture.
+# TRI : nb de bans décroissant, puis FIN DU DERNIER BAN décroissante (le plus récemment actif
+# d'abord), puis l'IP en dernier recours. Départager par l'IP -- ce que faisait la 2.3.0 -- rendait
+# le bloc inerte dès qu'une majorité d'habitués partage le même nombre de bans : sur un serveur à
+# 126 récidivistes dont 125 à 2 bans, les 10 places allaient aux IP numériquement les plus BASSES,
+# toujours les mêmes, pendant que les scanners actifs du jour restaient invisibles.
 build_recidivists() {
     [ -r "$OFFENDERS_FILE" ] || return 0
     local rows n ip exp rdns endts
     rows=$(awk -v cut="$(date +%s)" -v mem="${ESCALATION_MEMORY:-0}" '
         NF>=3 && $2 ~ /^[0-9]+$/ && $3 ~ /^[0-9]+$/ && $2+0 >= 2 && $3+mem >= cut { print $2+0, $1, $3 }
-    ' "$OFFENDERS_FILE" 2>/dev/null | sort -k1,1nr -k2,2V | head -n 10)
+    ' "$OFFENDERS_FILE" 2>/dev/null | sort -k1,1nr -k3,3nr -k2,2V | head -n 10)
     [ -n "$rows" ] || return 0
     printf '\n── %s ──\n' "$(t stats.recidivists_header "$(fmt_duration "${ESCALATION_MEMORY:-0}")")"
     while read -r n ip exp; do

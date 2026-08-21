@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="2.3.5"
+BAN404_VERSION="2.3.6"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -55,6 +55,16 @@ SECURITY_PATTERN='etc(/|%2f)passwd|\.\./\.\.|%2e%2e%2f|\.\.%2f|%00|vendor/phpuni
 # tolère plusieurs utilisateurs légitimes derrière un même NAT. Motif vide => désactivé.
 POST_FLOOD_PATTERN='wp-login\.php|xmlrpc\.php'
 POST_FLOOD_THRESHOLD=20
+# Nombre minimal de chemins DISTINCTS en 404 exigé pour un ban de VOLUME (1 => désactivé,
+# comportement historique strict). Un scanner balaie des chemins VARIÉS ; un navigateur bloqué sur
+# un asset manquant martèle UNE SEULE URL — 11 fois le même 404 en 56 s ont suffi à bannir 48 h
+# l'IP publique d'un client légitime (incident du 20 août 2026 : fichier de langue absent du
+# déploiement, réclamé par 25 templates). Ne touche NI au score (donc ni aux paliers d'escalade, ni
+# aux Top 24 h), NI aux autres circuits : une IP ayant touché un honeypot, une signature
+# SECURITY_PATTERN ou un flood POST reste bannie quoi qu'il arrive. Seules changent de sort les IP
+# dont TOUTES les 404 portent sur une seule et même URL — exactement la classe de faux positifs
+# visée. Mesuré sur le parc (5 serveurs, 21 août 2026) : aucune IP réellement bannie n'y échappe.
+DISTINCT_PATH_MIN=2
 
 # Plages d'où PEUT provenir un crawler légitime (Googlebot, Bingbot, Yandex, Baidu, Apple), sous
 # forme de préfixes d'IP séparés par des espaces. PRÉ-FILTRE BON MARCHÉ, rien d'autre : il décide
@@ -1244,6 +1254,11 @@ T_FR[help.conf_threshold]="  BAN_THRESHOLD    Ban si le score dépasse ce seuil 
 T_DE[help.conf_threshold]="  BAN_THRESHOLD    Sperre, wenn der Score dies im Fenster überschreitet (Standard 10)."
 T_ES[help.conf_threshold]="  BAN_THRESHOLD    Bloquear si el score supera este umbral en la ventana (por defecto 10)."
 T_IT[help.conf_threshold]="  BAN_THRESHOLD    Blocco se il punteggio supera questa soglia nella finestra (predefinito 10)."
+T_EN[help.conf_distinct]="  DISTINCT_PATH_MIN  Distinct 404 paths required for a volume ban (default 2; 1 disables)."
+T_FR[help.conf_distinct]="  DISTINCT_PATH_MIN  Chemins 404 distincts exigés pour un ban de volume (défaut 2 ; 1 => désactivé)."
+T_DE[help.conf_distinct]="  DISTINCT_PATH_MIN  Verschiedene 404-Pfade für eine Mengensperre nötig (Standard 2; 1 = aus)."
+T_ES[help.conf_distinct]="  DISTINCT_PATH_MIN  Rutas 404 distintas exigidas para un bloqueo por volumen (por defecto 2; 1 = desactivado)."
+T_IT[help.conf_distinct]="  DISTINCT_PATH_MIN  Percorsi 404 distinti richiesti per un blocco di volume (predefinito 2; 1 = disattivato)."
 
 T_EN[help.conf_honeypot_score]="  HONEYPOT_SCORE   Score per honeypot hit; >= this means instant ban (default 100)."
 T_FR[help.conf_honeypot_score]="  HONEYPOT_SCORE   Score par hit honeypot ; >= ce score => ban immédiat (défaut 100)."
@@ -2114,6 +2129,7 @@ show_help() {
     t help.conf_ban_timeout
     t help.conf_tail
     t help.conf_threshold
+    t help.conf_distinct
     t help.conf_honeypot_score
     t help.conf_honeypot_timeout
     t help.conf_ban_escalation
@@ -4532,7 +4548,7 @@ ips_data=$(tail -n "$TAIL_LINES" -q "${VALID_FILES[@]}" | \
     HONEYPOT_RE="$HONEYPOT_PATTERN" NOISE_RE="$NOISE_PATTERN" \
     SECURITY_RE="$SECURITY_PATTERN" POSTFLOOD_RE="$POST_FLOOD_PATTERN" \
     awk -v wl="$WHITELIST_IP" -v cutoff="$CUTOFF" -v thr="$BAN_THRESHOLD" -v hp="$HONEYPOT_SCORE" \
-        -v pf_thr="$POST_FLOOD_THRESHOLD" '
+        -v pf_thr="$POST_FLOOD_THRESHOLD" -v dmin="$DISTINCT_PATH_MIN" '
 BEGIN {
     split("Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec", M, " ")
     for (i=1;i<=12;i++) mon[M[i]]=i
@@ -4570,6 +4586,16 @@ BEGIN {
         count[$1] += hp; flag[$1]=1
     } else {
         count[$1]++
+        # Diversite des chemins (DISTINCT_PATH_MIN) : un scanner balaie des chemins VARIES, un
+        # navigateur bloque sur un asset manquant martele UNE SEULE URL. La query est retiree,
+        # sinon un cache-buster (?v=123) fabriquerait un chemin neuf a chaque hit et masquerait la
+        # repetition. On cesse de memoriser des que dmin est atteint : la reponse ne peut plus
+        # changer, et la memoire de awk reste bornee a dmin entrees par IP, meme sous botnet.
+        if (dmin > 1 && dpath[$1] < dmin) {
+            b = p; sub(/\?.*/, "", b)
+            k = $1 SUBSEP b
+            if (!(k in seenp)) { seenp[k] = 1; dpath[$1]++ }
+        }
     }
 }
 END {
@@ -4582,7 +4608,7 @@ END {
     for (x in post) if (post[x] > pf_thr) { count[x] += hp + post[x]; flag[x]=1 }
     # 3e champ = drapeau honeypot/sécurité/POST-flood : consommé par la boucle pour SAUTER le
     # FCrDNS (un crawler légitime ne déclenche jamais ces motifs) — voir is_legit_crawler.
-    for (ip in count) if (count[ip] > thr) print count[ip], (flag[ip] ? 1 : 0), ip
+    for (ip in count) if (count[ip] > thr && (flag[ip] || dmin <= 1 || dpath[ip] >= dmin)) print count[ip], (flag[ip] ? 1 : 0), ip
 }' | sort -k1,1rn -k3,3V)
 
 if [ -z "$ips_data" ]; then

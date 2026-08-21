@@ -207,4 +207,48 @@ ok "balayage à froid : crawler banni à tort libéré sans réapparaître dans 
 grep -q "^$COLDIP " "$OFF" 2>/dev/null && { cat "$OFF"; fail "l'acquittement FCrDNS doit purger la mémoire des récidives"; }
 ok "déban crawler = amnistie (compteur de récidive purgé)"
 
+
+# ---------------------------------------------------------------------------
+echo "== Test 8 : un asset manquant martelé sur UNE seule URL ne bannit plus (DISTINCT_PATH_MIN) =="
+# Incident du 20 août 2026 : l'IP publique d'un client bannie 48 h pour 11 x LE MÊME 404 en 56 s —
+# un fichier de langue absent du déploiement, réclamé par 25 templates. Un scanner balaie des
+# chemins VARIÉS ; un navigateur bloqué sur un asset mort martèle UNE URL. Ce test verrouille les
+# trois versants : l'épargne, la non-régression du scanner, et la primauté du circuit honeypot.
+MISS=198.51.100.77    # navigateur légitime coincé sur un asset absent (1 seul chemin)
+SCAN=198.51.100.88    # scanner : autant de hits, chemins tous différents
+DUO=198.51.100.99     # 2 chemins distincts : doit rester banni (comportement historique)
+for i in $(seq 1 12); do
+    printf '%s - - [%s] "GET /assets/i18n/fr.json HTTP/1.1" 404 200 "-" "Mozilla/5.0"\n' "$MISS" "$TS" >> "$LOG"
+    printf '%s - - [%s] "GET /probe-%d/index.php HTTP/1.1" 404 200 "-" "bot/1.0"\n' "$SCAN" "$TS" "$i" >> "$LOG"
+done
+for i in $(seq 1 6); do
+    printf '%s - - [%s] "GET /wp-json/batch/v1 HTTP/1.1" 404 200 "-" "python-requests/2.34"\n' "$DUO" "$TS" >> "$LOG"
+    printf '%s - - [%s] "GET / HTTP/1.1" 404 200 "-" "python-requests/2.34"\n' "$DUO" "$TS" >> "$LOG"
+done
+OUT=$(bash "$ENGINE" --dry-run 2>&1 || true)
+printf '%s\n' "$OUT" | grep -q "$MISS" && { printf '%s\n' "$OUT"; fail "faux positif : $MISS (12 x la même URL) ne doit plus être candidat"; }
+ok "asset manquant : 12 x le même 404 sur UN chemin ne bannit plus"
+printf '%s\n' "$OUT" | grep -q "$SCAN" || { printf '%s\n' "$OUT"; fail "régression : $SCAN (12 chemins distincts) devait rester détecté"; }
+ok "non-régression : scanner à chemins variés toujours détecté"
+printf '%s\n' "$OUT" | grep -q "$DUO" || { printf '%s\n' "$OUT"; fail "régression : $DUO (2 chemins distincts) devait rester détecté"; }
+ok "non-régression : 2 chemins distincts suffisent toujours (cas mesuré sur le parc)"
+
+# 8d. Le circuit honeypot prime : une URL unique + un chemin-piège = ban malgré la diversité nulle.
+HPIP=198.51.100.111
+for i in $(seq 1 12); do
+    printf '%s - - [%s] "GET /assets/i18n/fr.json HTTP/1.1" 404 200 "-" "Mozilla/5.0"\n' "$HPIP" "$TS" >> "$LOG"
+done
+printf '%s - - [%s] "GET /.env HTTP/1.1" 404 200 "-" "Mozilla/5.0"\n' "$HPIP" "$TS" >> "$LOG"
+OUT=$(bash "$ENGINE" --dry-run 2>&1 || true)
+printf '%s\n' "$OUT" | grep -q "$HPIP" || { printf '%s\n' "$OUT"; fail "le circuit honeypot doit bannir quelle que soit la diversité des chemins"; }
+ok "honeypot : ban maintenu malgré une diversité de chemins nulle"
+
+# 8e. Réversibilité : DISTINCT_PATH_MIN=1 restaure exactement le comportement d'avant 2.3.6.
+printf 'DISTINCT_PATH_MIN=1\n' >> /etc/ban_404.conf
+OUT=$(bash "$ENGINE" --dry-run 2>&1 || true)
+printf '%s\n' "$OUT" | grep -q "$MISS" \
+    || { printf '%s\n' "$OUT"; fail "DISTINCT_PATH_MIN=1 doit rendre le comportement historique"; }
+ok "DISTINCT_PATH_MIN=1 restaure le comportement historique"
+sed -i '/^DISTINCT_PATH_MIN=1$/d' /etc/ban_404.conf
+
 echo "== INTÉGRATION OK =="

@@ -55,6 +55,20 @@ WHITELIST_IP="127.0.0.1"
 #BAN_TIMEOUT=172800
 #TAIL_LINES=50000
 #BAN_THRESHOLD=10
+# DISTINCT_PATH_MIN = distinct 404 paths required before a VOLUME ban. Scanners sweep VARIED paths;
+#   a browser stuck on a missing asset hammers a SINGLE URL. Scores are untouched, and honeypots /
+#   SECURITY_PATTERN / POST-flood still ban on sight. 1 restores the historical behaviour.
+# DISTINCT_PATH_MIN = chemins 404 DISTINCTS exigés avant un ban de VOLUME. Un scanner balaie des
+#   chemins VARIÉS ; un navigateur bloqué sur un asset manquant martèle UNE SEULE URL. Les scores
+#   sont inchangés, et honeypots / SECURITY_PATTERN / flood POST bannissent toujours à vue.
+#   1 => comportement historique.
+# DISTINCT_PATH_MIN = verschiedene 404-Pfade, die eine Mengensperre voraussetzt. Scanner
+#   durchsuchen VIELE Pfade; ein Browser mit fehlendem Asset ruft EINE URL immer wieder ab. 1 = wie bisher.
+# DISTINCT_PATH_MIN = rutas 404 distintas exigidas para un bloqueo por VOLUMEN. Un escáner barre
+#   rutas VARIADAS; un navegador con un recurso ausente insiste en UNA sola URL. 1 = como antes.
+# DISTINCT_PATH_MIN = percorsi 404 distinti richiesti per un blocco di VOLUME. Uno scanner spazza
+#   percorsi VARI; un browser con un asset mancante martella UNA sola URL. 1 = come prima.
+#DISTINCT_PATH_MIN=2
 #HONEYPOT_SCORE=100
 #HONEYPOT_BAN_TIMEOUT=604800
 # Graduated ban for aggressive / repeat offenders. BAN_ESCALATION = repeat-offence tiers in seconds

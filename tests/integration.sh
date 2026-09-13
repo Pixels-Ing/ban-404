@@ -252,3 +252,50 @@ ok "DISTINCT_PATH_MIN=1 restaure le comportement historique"
 sed -i '/^DISTINCT_PATH_MIN=1$/d' /etc/ban_404.conf
 
 echo "== INTÉGRATION OK =="
+
+# ---------------------------------------------------------------------------
+echo "== Test 9 : une IPv6 candidate ne peut pas être bannie — et n'est plus comptée comme telle =="
+# Les deux backends ne savent stocker que de l'IPv4 (ipset créé « family inet » par défaut, set
+# nftables en ipv4_addr). Jusqu'en 2.3.6 le code d'erreur de l'ajout était IGNORÉ : la ligne [+]
+# partait au journal, la mémoire de récidive était alimentée, mais l'IP n'était JAMAIS bloquée —
+# et comme `ipset test` la disait libre, elle était « re-bannie » à chaque passage. Sur le parc,
+# deux IPv6 avaient ainsi accumulé 25 et 26 bans fictifs (constaté le 13 sept. 2026).
+V6=2001:db8::66          # RFC 3849 (documentation) — jamais une vraie IP
+LOGF="$TLOG"          # journal redirigé vers la fixture par le test 4
+rm -f "$OFF"
+: > "$LOGF"
+for i in $(seq 1 15); do
+    printf '%s - - [%s] "GET /v6-probe-%d/index.php HTTP/1.1" 404 200 "-" "bot/1.0"\n' "$V6" "$TS" "$i" >> "$LOG"
+done
+
+# 9a. Le parsing n'est pas en cause : le run DIT qu'il a vu une candidate qu'il ne sait pas bannir
+# (le récapitulatif sort aussi en dry-run, t_log imprimant toujours sur stdout). Et l'IPv6 ne doit
+# plus être annoncée comme bannissable, en simulation comme en réel.
+OUT=$(bash "$ENGINE" --dry-run 2>&1 || true)
+printf '%s\n' "$OUT" | grep -q 'IPv6' \
+    || { printf '%s\n' "$OUT"; fail "le dry-run doit signaler la candidate IPv6 écartée (15 x 404, chemins variés)"; }
+ok "candidate IPv6 vue et signalée (la détection n'est pas masquée)"
+printf '%s\n' "$OUT" | grep -qF "$V6" \
+    && { printf '%s\n' "$OUT"; fail "l'IPv6 ne doit plus être annoncée comme bannissable en simulation"; }
+ok "simulation : aucun ban annoncé pour l'IPv6"
+
+# 9b. Run réel : aucun [+] ne doit être journalisé pour elle (on ne journalise pas un ban fictif).
+bash "$ENGINE" >/dev/null 2>&1 || true
+grep -F "$V6" "$LOGF" 2>/dev/null | grep -q '\[+\]' \
+    && { grep -F "$V6" "$LOGF"; fail "aucune ligne [+] ne doit être journalisée pour une IP non bannissable"; }
+ok "aucun ban fictif journalisé pour l'IPv6"
+
+# 9c. La mémoire de récidive ne doit PAS être alimentée (sinon le compteur enfle sans fin).
+grep -q "^$V6 " "$OFF" 2>/dev/null \
+    && { cat "$OFF"; fail "la mémoire de récidive ne doit pas enregistrer un ban qui n'a pas eu lieu"; }
+ok "mémoire de récidive épargnée (pas de récidiviste fantôme)"
+
+# 9d. Le run doit le DIRE : une ligne [i] récapitulative, une seule, quel que soit le nombre d'IPv6.
+grep -q 'IPv6' "$LOGF" 2>/dev/null \
+    || { cat "$LOGF"; fail "le run doit signaler au journal les candidates ignorées faute de support IPv6"; }
+ok "run tracé au journal (candidates IPv6 ignorées, une seule ligne)"
+
+# 9e. Non-régression : l'IPv4 du même run est toujours bannie normalement.
+ipset test ban_404_list "$IP" >/dev/null 2>&1 \
+    || fail "régression : l'IPv4 $IP doit rester bannie dans le même run"
+ok "non-régression : l'IPv4 du même run est bannie normalement"

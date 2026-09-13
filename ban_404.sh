@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="2.3.6"
+BAN404_VERSION="2.3.7"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -500,6 +500,23 @@ T_FR[ban.honeypot_esc]="[+] Blocage IMMÉDIAT (honeypot) de l'IP : %s (score %s)
 T_DE[ban.honeypot_esc]="[+] SOFORTIGE Sperre (Honeypot) der IP: %s (Score %s) — Sperre Nr. %s, Dauer %s"
 T_ES[ban.honeypot_esc]="[+] Bloqueo INMEDIATO (honeypot) de la IP: %s (puntuación %s) — bloqueo n.º %s, duración %s"
 T_IT[ban.honeypot_esc]="[+] Blocco IMMEDIATO (honeypot) dell'IP: %s (punteggio %s) — blocco n. %s, durata %s"
+
+# Ban REFUSÉ par le pare-feu (set plein, erreur ipset…). Marqueur [!] et non [+] : les compteurs
+# 24 h ne lisent que [+]/[-], un ban qui n'a pas eu lieu ne doit donc jamais y entrer.
+T_EN[ban.failed]="[!] Ban of IP %s REFUSED by the firewall — not applied, not counted."
+T_FR[ban.failed]="[!] Bannissement de l'IP %s REFUSÉ par le pare-feu — non appliqué, non comptabilisé."
+T_DE[ban.failed]="[!] Sperre der IP %s von der Firewall ABGELEHNT — nicht angewendet, nicht gezählt."
+T_ES[ban.failed]="[!] Bloqueo de la IP %s RECHAZADO por el cortafuegos — no aplicado, no contabilizado."
+T_IT[ban.failed]="[!] Blocco dell'IP %s RIFIUTATO dal firewall — non applicato, non conteggiato."
+
+# Récapitulatif unique par run (et non une ligne par IP : sous un scan, le journal serait inondé).
+# La chaîne « IPv6 » est volontairement présente dans les 5 langues — c'est un nom propre, et
+# tests/integration.sh s'en sert comme ancre indépendante de la langue.
+T_EN[ban.family_unsupported]="[i] %s candidate IPv6 address(es) ignored: this firewall backend only handles IPv4."
+T_FR[ban.family_unsupported]="[i] %s adresse(s) IPv6 candidate(s) ignorée(s) : ce backend pare-feu ne gère que l'IPv4."
+T_DE[ban.family_unsupported]="[i] %s IPv6-Kandidat(en) ignoriert: dieses Firewall-Backend unterstützt nur IPv4."
+T_ES[ban.family_unsupported]="[i] %s dirección(es) IPv6 candidata(s) ignorada(s): este backend de cortafuegos solo gestiona IPv4."
+T_IT[ban.family_unsupported]="[i] %s indirizzo/i IPv6 candidato/i ignorato/i: questo backend firewall gestisce solo IPv4."
 
 T_EN[sim.ban_escalated]="[SIMULATION]     escalation: ban no. %s, duration %s"
 T_FR[sim.ban_escalated]="[SIMULATION]     escalade : ban n°%s, durée %s"
@@ -2034,6 +2051,17 @@ fw_count()            { case "$FW_ACTIVE" in nftables) nft_count "$1" ;; *) ipt_
 fw_persist()          { case "$FW_ACTIVE" in nftables) nft_persist ;; *) ipt_persist ;; esac; }
 fw_rule_present()     { case "$FW_ACTIVE" in nftables) nft_rule_present ;; *) ipt_rule_present ;; esac; }
 fw_persist_present()  { case "$FW_ACTIVE" in nftables) nft_persist_present ;; *) ipt_persist_present ;; esac; }
+
+# Le backend sait-il STOCKER cette adresse ? Les deux backends sont IPv4 uniquement : l'ipset est
+# créé « family inet » (le défaut) et le set nftables est un ipv4_addr. Passer une IPv6 à
+# `ipset add` ÉCHOUE — et l'échec passait inaperçu : la ligne [+] partait au journal, la mémoire
+# de récidive était alimentée, mais l'IP n'était JAMAIS bloquée ; `ipset test` la disant libre, le
+# passage suivant la « re-bannissait ». Sur le parc, deux IPv6 avaient accumulé 25 et 26 bans
+# fictifs (constaté le 13 sept. 2026 — elles trônaient en tête du bloc Récidivistes, loin devant
+# le meilleur IPv4 à 4 bans, ce qui est la signature du ban qui ne s'applique pas).
+# Le vrai support IPv6 (second set family inet6 + ip6tables, persistance rules.v6) est une
+# FONCTIONNALITÉ à part entière, hors de ce correctif : ici on cesse seulement de mentir.
+fw_addr_supported() { case "$1" in *:*) return 1 ;; *) return 0 ;; esac; }
 
 # Bascule migratoire de backend (one-shot, détectée au run). FAIL-SAFE : on ne retire les artefacts
 # de l'ancien backend qu'APRÈS avoir vérifié que le nouveau applique bien sa règle — sinon on ne
@@ -4634,8 +4662,18 @@ done < <(printf '%s\n' "$ips_data" | awk '{print $3}' | escalation_lookup)
 [ "$VERBOSE" = true ] && t verbose.processing
 
 # 4. Boucle de traitement
+unsupported_addr=0   # candidates écartées faute de support de leur famille d'adresse (IPv6)
 while read -r count hpflag ip; do
     [ -z "$ip" ] && continue
+
+    # Famille d'adresse que le backend ne sait pas stocker (IPv6) : on l'écarte AVANT toute
+    # décision. Sans ce garde-fou, on journalisait un ban et on alimentait la mémoire de récidive
+    # pour une IP qui restait libre (cf. fw_addr_supported). On compte pour un récapitulatif
+    # unique en fin de run plutôt qu'une ligne par IP, qui inonderait le journal sous un scan.
+    if ! fw_addr_supported "$ip"; then
+        unsupported_addr=$((unsupported_addr + 1))
+        continue
+    fi
 
     # FCrDNS (épargne des crawlers légitimes). Le lookup PTR (borné à PTR_TIMEOUT) est coûteux :
     # sur un ex-serveur botnet (des centaines d'IP sans PTR à 2 s chacune), le payer pour tout le
@@ -4701,22 +4739,36 @@ while read -r count hpflag ip; do
             [ "$esc_level" -gt "$hp" ] && t sim.ban_escalated "$((esc_rec + 1))" "$(fmt_duration "$esc_ttl")"
             rules_simulated=$((rules_simulated + 1))
         else
-            if [ "$hp" = 1 ]; then
-                if [ "$esc_level" -gt 1 ]; then t_log ban.honeypot_esc "$ip" "$count" "$((esc_rec + 1))" "$(fmt_duration "$esc_ttl")"
-                else                            t_log ban.honeypot     "$ip" "$count"; fi
-            else
-                if [ "$esc_level" -gt 0 ]; then t_log ban.add_esc "$ip" "$count" "$((esc_rec + 1))" "$(fmt_duration "$esc_ttl")"
-                else                            t_log ban.add     "$ip" "$count"; fi
-            fi
+            # ORDRE CRITIQUE : on bannit D'ABORD, on journalise ENSUITE. Jusqu'en 2.3.6 la ligne
+            # [+] partait avant l'appel et le code de retour était ignoré : un refus du pare-feu
+            # (adresse IPv6 sur un set inet, set plein, erreur ipset) produisait un ban JOURNALISÉ,
+            # COMPTÉ et MÉMORISÉ en récidive, alors qu'aucun paquet n'était bloqué.
             # Toujours un timeout PAR ENTRÉE : au niveau nominal d'un flood il vaut exactement
             # BAN_TIMEOUT, soit le défaut du set — aucun changement observable.
-            fw_ban_ip_ttl "$ip" "$esc_ttl"
-            changes_made=true
-            new_bans+=("$ip|$count|$hp")
-            esc_records+=("$ip $((esc_now + esc_ttl))")   # mémoire datée sur la FIN du ban
+            if fw_ban_ip_ttl "$ip" "$esc_ttl"; then
+                if [ "$hp" = 1 ]; then
+                    if [ "$esc_level" -gt 1 ]; then t_log ban.honeypot_esc "$ip" "$count" "$((esc_rec + 1))" "$(fmt_duration "$esc_ttl")"
+                    else                            t_log ban.honeypot     "$ip" "$count"; fi
+                else
+                    if [ "$esc_level" -gt 0 ]; then t_log ban.add_esc "$ip" "$count" "$((esc_rec + 1))" "$(fmt_duration "$esc_ttl")"
+                    else                            t_log ban.add     "$ip" "$count"; fi
+                fi
+                changes_made=true
+                new_bans+=("$ip|$count|$hp")
+                esc_records+=("$ip $((esc_now + esc_ttl))")   # mémoire datée sur la FIN du ban
+            else
+                t_log ban.failed "$ip"
+            fi
         fi
     fi
 done <<< "$ips_data"
+
+# Candidates écartées faute de support de leur famille d'adresse : une seule ligne [i], et
+# seulement s'il y en a eu (zéro bruit sur un serveur sans trafic IPv6, c'est-à-dire le cas
+# général du parc). Marqueur [i] : informatif, jamais compté par les statistiques 24 h.
+if [ "$unsupported_addr" -gt 0 ]; then
+    t_log ban.family_unsupported "$unsupported_addr"
+fi
 
 # Mémoire des récidives : un seul awk (fusion + purge) + bascule atomique, jamais en dry-run.
 escalation_record

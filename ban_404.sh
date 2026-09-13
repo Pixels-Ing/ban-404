@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="2.3.7"
+BAN404_VERSION="2.3.8"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -1721,6 +1721,14 @@ T_FR[unban.notfound]="L'IP %s n'est pas dans la liste de bannissement."
 T_DE[unban.notfound]="IP %s ist nicht in der Sperrliste."
 T_ES[unban.notfound]="La IP %s no está en la lista de bloqueo."
 T_IT[unban.notfound]="L'IP %s non è nella lista di blocco."
+
+# Amnistie accordée à une IP absente du set mais encore inscrite dans la mémoire de récidive
+# (ban expiré, ou jamais posé faute de support de la famille d'adresse).
+T_EN[unban.forgotten]="[i] Repeat-offence record of IP %s cleared (probation ended by admin)."
+T_FR[unban.forgotten]="[i] Passé de récidiviste de l'IP %s effacé (épreuve levée par l'admin)."
+T_DE[unban.forgotten]="[i] Wiederholungstäter-Eintrag der IP %s gelöscht (Bewährung vom Admin aufgehoben)."
+T_ES[unban.forgotten]="[i] Historial de reincidencia de la IP %s borrado (periodo de prueba levantado por el admin)."
+T_IT[unban.forgotten]="[i] Storico di recidiva dell'IP %s cancellato (periodo di prova revocato dall'admin)."
 
 T_EN[unban.fail]="Failed to unban %s (ipset error)."
 T_FR[unban.fail]="Échec du débannissement de %s (erreur ipset)."
@@ -4042,7 +4050,20 @@ do_unban() {  # $1 = IP | all  (valeur requise, pas de défaut)
         # Déban MANUEL = verdict d'innocence de l'admin : le compteur de récidive repart de zéro.
         escalation_forget "$target"
     else
-        t unban.notfound "$target"; exit 0
+        # L'IP n'est pas dans le set — mais elle peut rester inscrite dans la MÉMOIRE DE RÉCIDIVE :
+        # soit son ban a simplement expiré (l'entrée survit ESCALATION_MEMORY après la libération,
+        # c'est la période d'épreuve), soit le pare-feu n'a jamais su la stocker (IPv6, cf.
+        # fw_addr_supported). Jusqu'en 2.3.7 on sortait ICI, avant escalation_forget : ce passé
+        # était donc INEFFAÇABLE, et l'admin n'avait aucun moyen d'accorder l'amnistie à une IP
+        # dont le ban avait expiré. « unban » vaut verdict d'innocence dans les deux cas.
+        t unban.notfound "$target"
+        # Test d'appartenance sur le CHAMP 1 exactement (même comparaison que escalation_forget) :
+        # un grep sur la ligne confondrait des IP dont l'une est préfixe de l'autre.
+        if [ -f "$OFFENDERS_FILE" ] && awk -v ip="$target" '$1==ip{f=1} END{exit !f}' "$OFFENDERS_FILE" 2>/dev/null; then
+            escalation_forget "$target"
+            t_log unban.forgotten "$target"
+        fi
+        exit 0
     fi
     fw_persist
     exit 0

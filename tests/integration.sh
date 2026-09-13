@@ -299,3 +299,23 @@ ok "run tracé au journal (candidates IPv6 ignorées, une seule ligne)"
 ipset test ban_404_list "$IP" >/dev/null 2>&1 \
     || fail "régression : l'IPv4 $IP doit rester bannie dans le même run"
 ok "non-régression : l'IPv4 du même run est bannie normalement"
+
+# 9f. Amnistie d'une IP ABSENTE du set : jusqu'en 2.3.7, « unban » sortait avant escalation_forget
+# dès que l'IP n'était pas bannie — donc une entrée de récidive dont le ban avait expiré (cas
+# NORMAL : l'épreuve dure ESCALATION_MEMORY après la libération) était INEFFAÇABLE. C'est ce qui
+# empêchait de nettoyer les deux IPv6 fantômes du parc.
+GHOST=203.0.113.201      # jamais bannie, mais inscrite dans la mémoire de récidive
+printf '%s 7 %s\n' "$GHOST" "$(date +%s)" >> "$OFF"
+ipset test ban_404_list "$GHOST" >/dev/null 2>&1 \
+    && fail "préparation 9f : $GHOST ne doit pas être dans le set"
+bash "$ENGINE" unban "$GHOST" >/dev/null 2>&1 || true
+grep -q "^$GHOST " "$OFF" 2>/dev/null \
+    && { cat "$OFF"; fail "unban doit effacer la mémoire de récidive même si l'IP n'est plus dans le set"; }
+ok "amnistie d'une IP hors du set : entrée de récidive effacée"
+
+# 9g. Une IP absente du set ET de la mémoire : unban reste un no-op silencieux (pas de faux [i]).
+: > "$LOGF"
+bash "$ENGINE" unban 203.0.113.202 >/dev/null 2>&1 || true
+grep -q 'unban\|récidiv\|Repeat-offence' "$LOGF" 2>/dev/null \
+    && { cat "$LOGF"; fail "unban sur une IP inconnue ne doit rien journaliser"; }
+ok "unban sur une IP totalement inconnue : aucun effet de bord"

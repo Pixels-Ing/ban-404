@@ -349,6 +349,9 @@ ok "réarmement par conf locale opérationnel (append sur SECURITY_PATTERN)"
 sed -i '/resultsperpage\.\*resultsperpage/d' /etc/ban_404.conf
 
 # 10d. Ligne « bans au score plancher » : muette en dessous du seuil, visible au-dessus.
+# On purge AUSSI les rotatés du test 4 : stats_log_stream les remonte tant que la fenêtre 24 h
+# n'est pas couverte, et leurs 3 bans hors plancher fausseraient le dénominateur (« 40 of 43 »).
+rm -f "$TLOG".1 "$TLOG".1.gz
 : > "$TLOG"
 NOW=$(date '+%Y-%m-%d %H:%M:%S')
 for i in $(seq 1 5); do
@@ -364,10 +367,11 @@ for i in $(seq 6 40); do
 done
 SOUT=$(bash "$ENGINE" stats --no-health 2>&1 || true)
 printf '%s\n' "$SOUT" | grep -q 'single flagged request: 40 of 40 (100 %)' \
-    || { printf '%s\n' "$SOUT" | head -20; fail "40 bans au plancher sur 40 : la ligne doit annoncer 40 of 40 (100 %)"; }
+    || { printf '%s\n' "$SOUT" |  sed -n '/Statistics/,$p' | head -12; fail "40 bans au plancher sur 40 : la ligne doit annoncer « 40 of 40 (100 %) »"; }
 ok "ligne affichée au-dessus du seuil : 40 sur 40 (100 %)"
 
 # 10e. Des bans à score ÉLEVÉ ne déclenchent pas la ligne (cas du scraper réellement intensif).
+rm -f "$TLOG".1 "$TLOG".1.gz
 : > "$TLOG"
 for i in $(seq 1 40); do
     printf '%s [+] IMMEDIATE block (honeypot) of IP: 203.0.113.%d (score 1800)\n' "$NOW" "$i" >> "$TLOG"

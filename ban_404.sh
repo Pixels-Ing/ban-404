@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="2.3.8"
+BAN404_VERSION="2.3.9"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -45,11 +45,21 @@ HONEYPOT_PATTERN='\.env|wp-config\.php|phpmyadmin|config\.json|setup\.php|actuat
 NOISE_PATTERN='\.(jpg|jpeg|png|gif|webp|ico|css|js|svg|woff2?|map)$|apple-touch-icon|favicon|browserconfig\.xml|mstile|autodiscover\.xml|sitemap\.xml|robots\.txt|ads\.txt|\.well-known/(security\.txt|pki-validation)'
 # Signatures sécurité testées sur la requête ($7) QUEL QUE SOIT le statut HTTP (contrairement aux
 # honeypots, limités aux 404) : traversée de répertoires, sondes RCE, SQLi encodées, bots à liens
-# ré-encodés, botnet resultsPerPage (PrestaShop : « ? » encodé dans la valeur du paramètre, ou
-# paramètre dupliqué — jamais produit par un client légitime). Match => +HONEYPOT_SCORE (ban
-# immédiat, timeout HONEYPOT_BAN_TIMEOUT). Critère d'inclusion : aucun client légitime ne
-# produit jamais ces chaînes. Vide => désactivé.
-SECURITY_PATTERN='etc(/|%2f)passwd|\.\./\.\.|%2e%2e%2f|\.\.%2f|%00|vendor/phpunit|eval-stdin\.php|union(\+|%20)select|information_schema|amp%3bamp%3b|resultsperpage=[^& ]*%3f|resultsperpage.*resultsperpage'
+# ré-encodés, « ? » encodé dans la valeur d'un paramètre. Match => +HONEYPOT_SCORE (ban immédiat,
+# timeout HONEYPOT_BAN_TIMEOUT). Vide => désactivé.
+#
+# CRITÈRE D'INCLUSION, strict : aucun client légitime — ni navigateur, ni crawler, NI L'APPLICATION
+# ELLE-MÊME — ne produit jamais la chaîne. C'est ce critère qui a fait SORTIR du défaut, en 2.3.9,
+# la signature du paramètre `resultsPerPage` dupliqué : PrestaShop empile lui-même ce paramètre dans
+# les liens de facettes de son thème, donc la signature décrivait une URL que le site fabrique. Elle
+# a valu un ban de 7 j à Googlebot et Bingbot (juil. 2026), colmaté à grands frais par le mécanisme
+# crawler_hint, puis s'est révélée inopérante à la mesure (13 sept. 2026, les DEUX serveurs
+# PrestaShop du parc) : sur l'un elle représentait 100 % des bans pour des IP n'émettant qu'UNE
+# requête et ne revenant jamais — donc zéro requête empêchée — et sur l'autre elle ne se déclenchait
+# pas une seule fois en 139 575 lignes. Le bon endroit pour ce cas est le serveur web, en amont de
+# PHP : une déduplication 301 y coûte moins et ne blackhole personne. Réactivation possible par
+# conf locale, documentée dans ban_404.conf.example.
+SECURITY_PATTERN='etc(/|%2f)passwd|\.\./\.\.|%2e%2e%2f|\.\.%2f|%00|vendor/phpunit|eval-stdin\.php|union(\+|%20)select|information_schema|amp%3bamp%3b|resultsperpage=[^& ]*%3f'
 # Flood POST (brute-force) : POST dont la requête matche ce motif, comptés dans la fenêtre WINDOW ;
 # au-delà de POST_FLOOD_THRESHOLD => +HONEYPOT_SCORE. Défaut : login/xmlrpc WordPress. Le seuil
 # tolère plusieurs utilisateurs légitimes derrière un même NAT. Motif vide => désactivé.
@@ -1571,6 +1581,15 @@ T_DE[stats.bans_unbans]="Neue Sperren: %s · Entsperrungen: %s"
 T_ES[stats.bans_unbans]="Nuevos bloqueos: %s · Desbloqueos: %s"
 T_IT[stats.bans_unbans]="Nuovi blocchi: %s · Sblocchi: %s"
 
+# Part des bans déclenchés par UNE SEULE requête signalée (score = HONEYPOT_SCORE pile). Une part
+# écrasante révèle une détection qui tire sur un signal isolé : si l'IP ne revient jamais, le ban
+# arrive après coup et n'empêche rien. Le « %% » est un pourcentage littéral (doublé pour printf).
+T_EN[stats.floor_bans]="Bans from a single flagged request: %s of %s (%s %%)"
+T_FR[stats.floor_bans]="Bans sur une seule requête signalée : %s sur %s (%s %%)"
+T_DE[stats.floor_bans]="Sperren durch eine einzige markierte Anfrage: %s von %s (%s %%)"
+T_ES[stats.floor_bans]="Bloqueos por una sola petición señalada: %s de %s (%s %%)"
+T_IT[stats.floor_bans]="Blocchi per una sola richiesta segnalata: %s su %s (%s %%)"
+
 T_EN[stats.bans_only]="New bans: %s"
 T_FR[stats.bans_only]="Nouveaux bans : %s"
 T_DE[stats.bans_only]="Neue Sperren: %s"
@@ -2948,11 +2967,29 @@ build_stats_text() {
     cutoff24=$(date -d '24 hours ago' '+%Y-%m-%d %H:%M:%S' 2>/dev/null)
     bans=0; unbans=0
     if [ -r "$LOG_FILE" ] && [ -n "$cutoff24" ]; then
-        # Un SEUL passage pour les deux compteurs (le flux peut inclure un rotaté compressé).
-        evt=$(stats_log_stream "$cutoff24" | awk -v c="$cutoff24" '
-            ($1" "$2) >= c { if (/\[\+\]/) b++; else if (/\[-\]/) u++ }
-            END { printf "%d %d\n", b+0, u+0 }')
-        bans=${evt%% *}; unbans=${evt##* }
+        # Un SEUL passage pour TOUS les compteurs (le flux peut inclure un rotaté compressé).
+        # On compte aussi les bans du circuit honeypot dont le score vaut EXACTEMENT
+        # HONEYPOT_SCORE : le score étant cumulatif (+100 par chemin-piège ou signature, +1 par
+        # 404 ordinaire), le plancher signifie « UNE seule requête signalée, et rien d'autre ».
+        # Une part écrasante de bans au plancher = la détection tire sur un signal isolé, ce qui
+        # n'empêche rien quand l'IP ne revient jamais (cf. stats.floor_bans plus bas). Le score est
+        # relu comme dans les Top 24 h : PREMIER nombre après l'IP, robuste aux 5 langues.
+        evt=$(stats_log_stream "$cutoff24" | awk -v c="$cutoff24" -v floor="${HONEYPOT_SCORE:-100}" '
+            ($1" "$2) >= c {
+                if (/\[\+\]/) {
+                    b++
+                    if ($0 ~ /[Hh]oneypot/) {
+                        ipi=0
+                        for (i=3; i<=NF; i++) if ($i ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) { ipi=i; break }
+                        if (ipi) for (i=ipi+1; i<=NF; i++) if ($i ~ /[0-9]/) {
+                            s=$i; gsub(/[^0-9]/, "", s)
+                            if (s != "") { if (s+0 == floor+0) fl++; break }
+                        }
+                    }
+                } else if (/\[-\]/) u++
+            }
+            END { printf "%d %d %d\n", b+0, u+0, fl+0 }')
+        read -r bans unbans floor_bans <<< "$evt"
     fi
     # --- En-tête + filet ---
     t stats.header
@@ -3027,6 +3064,14 @@ build_stats_text() {
     # afficher une ligne toujours nulle. ---
     printf '\n── %s ──\n' "$(t stats.sec_stats)"
     if [ "$unbans" -gt 0 ] 2>/dev/null; then t stats.bans_unbans "$bans" "$unbans"; else t stats.bans_only "$bans"; fi
+    # Bans au score PLANCHER : muet tant que ce n'est pas massif — design d'alerte, comme les
+    # Récidivistes ou les Débans. Seuils volontairement hauts (>= 20 bans ET >= 50 %) : un serveur
+    # sain qui bannit trois scanners dans la journée n'a rien à signaler. Mesuré sur le parc le
+    # 13 sept. 2026 : 100 % sur le serveur où la détection tirait à vide, 0 % sur l'autre.
+    if [ "${floor_bans:-0}" -ge 20 ] 2>/dev/null && [ "${bans:-0}" -gt 0 ] 2>/dev/null; then
+        local floor_pct=$(( 100 * floor_bans / bans ))
+        [ "$floor_pct" -ge 50 ] && t stats.floor_bans "$floor_bans" "$bans" "$floor_pct"
+    fi
     # --- Top 404 (24h) PUIS Top honeypot (24h) : deux classements distincts ; débans exclus ---
     if [ -r "$LOG_FILE" ] && [ -n "$cutoff24" ]; then
         # awk émet « kind score ip » : kind r = ban classique (score = nb de 404) ; kind h = honeypot

@@ -319,3 +319,60 @@ bash "$ENGINE" unban 203.0.113.202 >/dev/null 2>&1 || true
 grep -q 'unban\|récidiv\|Repeat-offence' "$LOGF" 2>/dev/null \
     && { cat "$LOGF"; fail "unban sur une IP inconnue ne doit rien journaliser"; }
 ok "unban sur une IP totalement inconnue : aucun effet de bord"
+
+# ---------------------------------------------------------------------------
+echo "== Test 10 : signature resultsPerPage hors du défaut + ligne « bans au score plancher » =="
+# 2.3.9. (a) La signature du paramètre resultsPerPage DUPLIQUÉ ne doit plus bannir par défaut :
+# PrestaShop fabrique lui-même ces URL (mesuré le 13 sept. 2026 : 100 % des bans d'un serveur, pour
+# des IP à UNE requête qui ne reviennent jamais — zéro requête empêchée — et zéro déclenchement sur
+# l'autre). (b) Le %3f encodé, lui, RESTE : aucun client légitime ne le produit.
+PS=198.51.100.150      # suit un lien de facettes PrestaShop (URL légitime du site)
+PSATK=198.51.100.151   # « ? » encodé dans la valeur du paramètre : vraie signature d'attaque
+for i in $(seq 1 4); do
+    printf '%s - - [%s] "GET /c/12-bagues?order=product.name.desc&resultsPerPage=72&resultsPerPage=24 HTTP/1.1" 200 5120 "-" "Mozilla/5.0"\n' "$PS" "$TS" >> "$LOG"
+    printf '%s - - [%s] "GET /c/12-bagues?resultsPerPage=24%%3Fx HTTP/1.1" 200 5120 "-" "Mozilla/5.0"\n' "$PSATK" "$TS" >> "$LOG"
+done
+OUT=$(bash "$ENGINE" --dry-run 2>&1 || true)
+printf '%s\n' "$OUT" | grep -qF "$PS" \
+    && { printf '%s\n' "$OUT"; fail "resultsPerPage dupliqué ne doit plus bannir par défaut (URL générée par PrestaShop)"; }
+ok "resultsPerPage dupliqué : hors du défaut, plus de ban"
+printf '%s\n' "$OUT" | grep -qF "$PSATK" \
+    || { printf '%s\n' "$OUT"; fail "régression : le « ? » encodé (%3f) doit rester une signature de ban"; }
+ok "non-régression : la variante %3f encodée bannit toujours"
+
+# 10c. Réversibilité : la conf locale doit pouvoir réarmer la signature (opt-in documenté).
+printf 'SECURITY_PATTERN="${SECURITY_PATTERN}|resultsperpage.*resultsperpage"\n' >> /etc/ban_404.conf
+OUT=$(bash "$ENGINE" --dry-run 2>&1 || true)
+printf '%s\n' "$OUT" | grep -qF "$PS" \
+    || { printf '%s\n' "$OUT"; fail "l'append en conf locale doit réarmer la signature"; }
+ok "réarmement par conf locale opérationnel (append sur SECURITY_PATTERN)"
+sed -i '/resultsperpage\.\*resultsperpage/d' /etc/ban_404.conf
+
+# 10d. Ligne « bans au score plancher » : muette en dessous du seuil, visible au-dessus.
+: > "$TLOG"
+NOW=$(date '+%Y-%m-%d %H:%M:%S')
+for i in $(seq 1 5); do
+    printf '%s [+] IMMEDIATE block (honeypot) of IP: 203.0.113.%d (score 100)\n' "$NOW" "$i" >> "$TLOG"
+done
+SOUT=$(bash "$ENGINE" stats --no-health 2>&1 || true)
+printf '%s\n' "$SOUT" | grep -q 'single flagged request' \
+    && { printf '%s\n' "$SOUT" | head -20; fail "5 bans au plancher : sous le seuil, la ligne doit rester muette"; }
+ok "ligne muette sous le seuil (design d'alerte, pas de bruit sur un serveur sain)"
+
+for i in $(seq 6 40); do
+    printf '%s [+] IMMEDIATE block (honeypot) of IP: 203.0.113.%d (score 100)\n' "$NOW" "$i" >> "$TLOG"
+done
+SOUT=$(bash "$ENGINE" stats --no-health 2>&1 || true)
+printf '%s\n' "$SOUT" | grep -q 'single flagged request: 40 of 40 (100 %)' \
+    || { printf '%s\n' "$SOUT" | head -20; fail "40 bans au plancher sur 40 : la ligne doit annoncer 40 of 40 (100 %)"; }
+ok "ligne affichée au-dessus du seuil : 40 sur 40 (100 %)"
+
+# 10e. Des bans à score ÉLEVÉ ne déclenchent pas la ligne (cas du scraper réellement intensif).
+: > "$TLOG"
+for i in $(seq 1 40); do
+    printf '%s [+] IMMEDIATE block (honeypot) of IP: 203.0.113.%d (score 1800)\n' "$NOW" "$i" >> "$TLOG"
+done
+SOUT=$(bash "$ENGINE" stats --no-health 2>&1 || true)
+printf '%s\n' "$SOUT" | grep -q 'single flagged request' \
+    && { printf '%s\n' "$SOUT" | head -20; fail "des bans à score 1800 ne sont PAS au plancher : la ligne ne doit pas sortir"; }
+ok "non-régression : un scan intensif (score 1800) ne déclenche pas la ligne"

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="2.3.9"
+BAN404_VERSION="2.3.10"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -121,6 +121,9 @@ CADENCE_SURGE=3            # mode auto : nb de bans RÉELS dans UN MÊME run qui
 SENTINEL_LINES=2000        # lignes survolées par log par la sentinelle (mode auto, tick porté)
 SAMPLE_MIN_INTERVAL=3300   # espacement mini (s) des échantillons metrics/ipset : l'historique reste
                            # ~horaire même quand CRON_STEP fait tourner le moteur toutes les 5-10 min
+WINDOW_NOTE_SECS=72000     # note « fenêtre réelle » des blocs 24 h seulement si l'historique couvre MOINS
+                           # (20 h). Pas 23 h : relevés ~horaires non calés sur l'heure du résumé => jusqu'à
+                           # ~1 h perdue à chaque bout, un serveur sain oscille entre 22 h et 24 h (bruit quotidien)
 
 # Notifications (optionnel ; vides => désactivées). Messages dans la langue BAN404_LANG.
 WEBHOOK_URL=""        # POST JSON des nouveaux bans (Slack/Discord/Teams/n8n...)
@@ -2537,7 +2540,7 @@ metrics_fmt_span() { awk -v s="${1:-0}" 'BEGIN{ s=int(s); h=int(s/3600); m=int((
 # (résumé + stats --avg) et do_diag (diag --avg). IO/réseau = delta de compteurs cumulatifs par
 # intervalle (les intervalles en baisse — reboot/wrap — sont SAUTÉS) ; load/mémoire = relevés
 # discrets moyennés. Pic pour load/IO/réseau, minimum (pire dispo) pour la mémoire. Historique
-# insuffisant (< 2 échantillons) ou fenêtre < 23 h => message / note dédiés (pas de valeur trompeuse).
+# insuffisant (< 2 échantillons) ou fenêtre < WINDOW_NOTE_SECS => message / note dédiés (pas de valeur trompeuse).
 build_metrics_averages() {
     local now cut out n span la lmx ioa iomx rxa txa rxm txm ma mmn iface
     now=$(date +%s); cut=$((now - 86400))
@@ -2581,7 +2584,7 @@ build_metrics_averages() {
         t stats.avg24_net "${iface:-?}" "$(health_rate "$rxa")" "$(health_rate "$rxm")" "$(health_rate "$txa")" "$(health_rate "$txm")"
     fi
     [ "$ma" != na ] && t stats.avg24_mem "$ma" "$mmn"
-    [ "$span" -lt 82800 ] 2>/dev/null && printf '   %s\n' "$(t stats.avg24_window "$(metrics_fmt_span "$span")")"
+    [ "$span" -lt "$WINDOW_NOTE_SECS" ] 2>/dev/null && printf '   %s\n' "$(t stats.avg24_window "$(metrics_fmt_span "$span")")"
     return 0
 }
 # Compte les entrées d'un ipset SANS dumper les membres : `ipset list -t` (terse = en-tête seul,
@@ -2722,7 +2725,7 @@ ipset_summary_prose() {
         else pr=$(t stats.ipset_new); fi
         IPSET_PROSE+=$'\n'"• ${N[i]} : ${C[i]}  ·  $pr"
     done
-    if [ -n "$base_epoch" ]; then local sp=$((now - base_epoch)); [ "$sp" -lt 82800 ] 2>/dev/null && IPSET_PROSE+=$'\n'"  $(t stats.avg24_window "$(metrics_fmt_span "$sp")")"; fi
+    if [ -n "$base_epoch" ]; then local sp=$((now - base_epoch)); [ "$sp" -lt "$WINDOW_NOTE_SECS" ] 2>/dev/null && IPSET_PROSE+=$'\n'"  $(t stats.avg24_window "$(metrics_fmt_span "$sp")")"; fi
 }
 ipset_summary_html() {
     local i tri col vr nm rows="" hc hv
@@ -2746,7 +2749,7 @@ ipset_summary_html() {
     IPSET_HTML+="<tr><th style=\"text-align:left;padding:3px 12px;border-bottom:2px solid #ccc\"></th>"
     IPSET_HTML+="<th style=\"text-align:right;padding:3px 12px;border-bottom:2px solid #ccc\">$(html_escape "$hc")</th>"
     IPSET_HTML+="<th style=\"text-align:right;padding:3px 12px;border-bottom:2px solid #ccc\">$(html_escape "$hv")</th></tr>$rows</table>"
-    if [ -n "$base_epoch" ]; then local sp=$((now - base_epoch)); [ "$sp" -lt 82800 ] 2>/dev/null && IPSET_HTML+="<div style=\"font-size:12px;color:#888;margin-top:3px\">$(html_escape "$(t stats.avg24_window "$(metrics_fmt_span "$sp")")")</div>"; fi
+    if [ -n "$base_epoch" ]; then local sp=$((now - base_epoch)); [ "$sp" -lt "$WINDOW_NOTE_SECS" ] 2>/dev/null && IPSET_HTML+="<div style=\"font-size:12px;color:#888;margin-top:3px\">$(html_escape "$(t stats.avg24_window "$(metrics_fmt_span "$sp")")")</div>"; fi
 }
 
 # Représentations du bloc « Signes vitaux » POUR LES NOTIFICATIONS (dérivées de HEALTH_LINES +
@@ -2792,7 +2795,7 @@ ipset_card() {  # utilise N/C/D/P/M/base_epoch/now par portée dynamique (appel 
         else vr=$(html_escape "$(t stats.ipset_new)"); fi
         IPSET_CARD+="<br>• $(html_escape "${N[i]} : ${C[i]}  ·  ")$vr"
     done
-    if [ -n "$base_epoch" ]; then local sp=$((now - base_epoch)); [ "$sp" -lt 82800 ] 2>/dev/null && IPSET_CARD+="<br>  $(html_escape "$(t stats.avg24_window "$(metrics_fmt_span "$sp")")")"; fi
+    if [ -n "$base_epoch" ]; then local sp=$((now - base_epoch)); [ "$sp" -lt "$WINDOW_NOTE_SECS" ] 2>/dev/null && IPSET_CARD+="<br>  $(html_escape "$(t stats.avg24_window "$(metrics_fmt_span "$sp")")")"; fi
 }
 
 # Sous-bloc « Comptage ipset (évol. + tendance 24 h) » : pour CHAQUE ipset de la machine + un total,
@@ -2869,10 +2872,10 @@ build_ipset_counts() {
         if [ -n "${R[i]}" ]; then trec=$(paint "$(tri_slot "${R[i]}" "$TREND_RECENT_FLAT_PCT" "$TREND_RECENT_STRONG_PCT")" "$(dir_of "${R[i]}" "$TREND_RECENT_FLAT_PCT")"); else trec='  '; fi
         printf '  %-*s  %*s   %s  %s %s\n' "$wN" "${N[i]}" "$wC" "${C[i]}" "$numf" "${S[i]}" "$trec"
     done
-    # Note de fenêtre réelle si l'historique couvre < ~23 h (pas de fausse impression de 24 h pleines).
+    # Note de fenêtre réelle si l'historique couvre < WINDOW_NOTE_SECS (pas de fausse impression de 24 h pleines).
     if [ -n "$base_epoch" ]; then
         span=$((now - base_epoch))
-        [ "$span" -lt 82800 ] 2>/dev/null && printf '   %s\n' "$(t stats.avg24_window "$(metrics_fmt_span "$span")")"
+        [ "$span" -lt "$WINDOW_NOTE_SECS" ] 2>/dev/null && printf '   %s\n' "$(t stats.avg24_window "$(metrics_fmt_span "$span")")"
     fi
     return 0
 }

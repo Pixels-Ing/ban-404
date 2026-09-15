@@ -380,3 +380,42 @@ SOUT=$(bash "$ENGINE" stats --no-health 2>&1 || true)
 printf '%s\n' "$SOUT" | grep -q 'single flagged request' \
     && { printf '%s\n' "$SOUT" | head -20; fail "des bans à score 1800 ne sont PAS au plancher : la ligne ne doit pas sortir"; }
 ok "non-régression : un scan intensif (score 1800) ne déclenche pas la ligne"
+
+# ---------------------------------------------------------------------------
+echo "== Test 11 : la porte de cadence s'ouvre quand le relevé horaire est dû =="
+# 2.3.11. Un run complet hors échéance (sentinelle, cadence resserrée) relance l'horloge last_run
+# sans relever les métriques (garde SAMPLE_MIN_INTERVAL) : le relevé suivant glissait d'un
+# intervalle entier (jusqu'à ~110 min entre deux points). La porte doit désormais laisser passer
+# un tick dès que le relevé est dû. Log vidé => la sentinelle ne peut pas ouvrir la porte à sa place.
+# Entrée/sortie hors terminal : la porte ne s'applique jamais aux runs interactifs.
+: > "$LOG"
+STAMP=/var/lib/ban_404/last_run; METRICS=/var/lib/ban_404/metrics
+printf 'CRON_STEP=auto\n' >> /etc/ban_404.conf
+printf '60 0\n' > /var/lib/ban_404/cadence
+gate_run() { bash "$ENGINE" </dev/null >/dev/null 2>&1 || true; }
+
+# 11a. Relevé récent, dernier run il y a 10 min (intervalle 60) : tick porté, rien n'est écrit.
+touch -d '-10 minutes' "$STAMP"; before=$(stat -c %Y "$STAMP")
+printf '%s - - - - -\n' "$(date +%s)" > "$METRICS"
+gate_run
+[ "$(stat -c %Y "$STAMP")" = "$before" ] || fail "11a : relevé récent, le tick aurait dû être porté (last_run modifié)"
+ok "tick porté quand aucun relevé n'est dû"
+
+# 11b. Même situation, mais relevé vieux de 2 h : la porte s'ouvre, run complet + nouveau relevé.
+old=$(( $(date +%s) - 7200 ))
+printf '%s - - - - -\n' "$old" > "$METRICS"; touch -d "@$old" "$METRICS"
+t0=$(date +%s)
+gate_run
+[ "$(stat -c %Y "$STAMP")" -ge "$t0" ] || fail "11b : relevé dû, la porte aurait dû laisser passer un run complet"
+[ "$(wc -l < "$METRICS")" -eq 2 ] || { cat "$METRICS"; fail "11b : le run forcé doit poser un relevé (sinon chaque tick rouvrirait la porte)"; }
+ok "relevé dû : run complet forcé, relevé posé"
+
+# 11c. Fichier de métriques absent : pas de forçage (le prochain run normal le créera).
+rm -f "$METRICS"
+touch -d '-10 minutes' "$STAMP"; before=$(stat -c %Y "$STAMP")
+gate_run
+[ "$(stat -c %Y "$STAMP")" = "$before" ] || fail "11c : sans fichier de métriques, la porte ne doit pas s'ouvrir à chaque tick"
+ok "fichier de métriques absent : pas de run forcé"
+
+sed -i '/^CRON_STEP=auto$/d' /etc/ban_404.conf
+rm -f /etc/cron.d/ban_404_step /var/lib/ban_404/cadence

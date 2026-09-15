@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="2.3.10"
+BAN404_VERSION="2.3.11"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -120,7 +120,8 @@ CADENCE_CALM_SECS=1800     # mode auto : accalmie (s) sans ban RÉEL (hp=0, hors
 CADENCE_SURGE=3            # mode auto : nb de bans RÉELS dans UN MÊME run qui fait descendre de 2 crans (au lieu d'1)
 SENTINEL_LINES=2000        # lignes survolées par log par la sentinelle (mode auto, tick porté)
 SAMPLE_MIN_INTERVAL=3300   # espacement mini (s) des échantillons metrics/ipset : l'historique reste
-                           # ~horaire même quand CRON_STEP fait tourner le moteur toutes les 5-10 min
+                           # ~horaire même quand CRON_STEP fait tourner le moteur toutes les 5-10 min ;
+                           # en mode auto, la porte de cadence force un run dès qu'un relevé est dû
 WINDOW_NOTE_SECS=72000     # note « fenêtre réelle » des blocs 24 h seulement si l'historique couvre MOINS
                            # (20 h). Pas 23 h : relevés ~horaires non calés sur l'heure du résumé => jusqu'à
                            # ~1 h perdue à chaque bout, un serveur sain oscille entre 22 h et 24 h (bruit quotidien)
@@ -4189,16 +4190,29 @@ fi
 
 # --- Porte de cadence (CRON_STEP=auto) : sauter les ticks intermédiaires arrivés trop tôt. ---
 # Budget minimal exigé (les ticks tournent toutes les 5 min) : un tick « porté » ne fait que
-# conf + verrou + un stat + la sentinelle (tail/awk sur des fins de fichiers en page cache),
+# conf + verrou + deux stat + la sentinelle (tail/awk sur des fins de fichiers en page cache),
 # AUCUNE écriture (ni stamp, ni journal, ni métriques) et ne touche ni ipset ni self-heals.
 # Jamais appliquée aux runs interactifs (tty) ni au dry-run : un humain qui lance le moteur
 # attend une analyse. Marge de 90 s : le jitter cron ne doit pas faire glisser d'un tick un
 # passage arrivant « pile » à l'échéance. La sortie « portée » ne stampe pas last_run (qui
 # reste = dernier run COMPLET, la référence de la porte ET de la sentinelle).
+# Relevé horaire dû => la porte s'ouvre (depuis 2.3.11). Tout run complet — sentinelle, cadence
+# resserrée — relance l'horloge last_run, mais ne relève les métriques que si SAMPLE_MIN_INTERVAL
+# est écoulé depuis le relevé précédent : un run tombant 30-54 min après un relevé n'en posait
+# pas et repoussait le suivant d'un intervalle entier (relevés espacés jusqu'à ~110 min,
+# constaté sur un serveur à sentinelle fréquente le 15 sept. 2026). La date du relevé est le
+# mtime de METRICS_FILE (écrit par metrics_sample seul). Échéance bornée par SAMPLE_MIN_INTERVAL :
+# un run forcé DOIT relever, sinon chaque tick rouvrirait la porte. Fichier absent => pas de
+# forçage (le prochain run normal le crée). Pire cas si l'écriture échoue durablement (disque
+# plein) : un run complet par tick, soit la cadence fixe 5 min — un mode supporté.
 if [ "$DRY_RUN" = false ] && [ ! -t 0 ] && [ ! -t 1 ] && [ "$(cron_step_mode)" = auto ]; then
     LAST_FULL=$(stat -c %Y "$RUN_STAMP_FILE" 2>/dev/null || echo 0)
     if [ "$(date +%s)" -lt $(( LAST_FULL + $(cadence_read) * 60 - 90 )) ]; then
-        if sentinel_hit "$(date -d "@$LAST_FULL" '+%Y%m%d%H%M%S')"; then
+        LAST_SAMPLE=$(stat -c %Y "$METRICS_FILE" 2>/dev/null)
+        SAMPLE_DUE=$(( 3600 - 90 )); [ "${SAMPLE_MIN_INTERVAL:-0}" -gt "$SAMPLE_DUE" ] 2>/dev/null && SAMPLE_DUE=$SAMPLE_MIN_INTERVAL
+        if [[ "$LAST_SAMPLE" =~ ^[0-9]+$ ]] && [ "$(date +%s)" -ge $(( LAST_SAMPLE + SAMPLE_DUE )) ]; then
+            :   # relevé horaire dû : run complet
+        elif sentinel_hit "$(date -d "@$LAST_FULL" '+%Y%m%d%H%M%S')"; then
             t_log sentinel.triggered
         else
             exit 0

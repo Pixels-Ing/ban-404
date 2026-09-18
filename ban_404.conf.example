@@ -133,6 +133,11 @@ WHITELIST_IP="127.0.0.1"
 #NOTIFY_FROM=""
 #NOTIFY_MIN_BANS=1
 #NOTIFY_BANS=false
+# Alertes de ban : destinataire(s) dédié(s) (vide => NOTIFY_EMAIL) et canaux (all | email | webhook).
+# Ex. alertes au client du serveur par e-mail seul, résumé quotidien inchangé :
+#   NOTIFY_BANS=true ; NOTIFY_BANS_EMAIL="securite@client.example" ; NOTIFY_BANS_CHANNELS=email
+#NOTIFY_BANS_EMAIL=""
+#NOTIFY_BANS_CHANNELS="all"
 #DAILY_SUMMARY=false
 
 # --- Server vital signs (shown by diag/health and the daily summary; WARN + CRIT thresholds) ---

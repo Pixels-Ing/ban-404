@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="2.3.11"
+BAN404_VERSION="2.3.12"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -130,9 +130,17 @@ WINDOW_NOTE_SECS=72000     # note « fenêtre réelle » des blocs 24 h seulemen
 WEBHOOK_URL=""        # POST JSON des nouveaux bans (Slack/Discord/Teams/n8n...)
 WEBHOOK_CHAT_CARD=true   # Google Chat : résumé quotidien en CARTE colorée (cardsV2) ; false => texte simple sans couleur
 NOTIFY_EMAIL=""       # e-mail des nouveaux bans (nécessite un MTA : mail/sendmail)
-NOTIFY_FROM=""        # expéditeur e-mail (optionnel)
+NOTIFY_FROM=""        # expéditeur e-mail (optionnel) ; sert AUSSI d'expéditeur d'enveloppe (celui que vérifie le SPF)
 NOTIFY_MIN_BANS=1     # ne notifier que si AU MOINS N nouveaux bans dans le run
 NOTIFY_BANS=false     # alerte à chaque run quand des IP sont bannies (true pour activer)
+# Routage des alertes de ban, indépendant du résumé quotidien : on peut les adresser à un autre
+# destinataire (le client du serveur, par ex.) et les garder hors du canal webhook partagé.
+NOTIFY_BANS_EMAIL=""        # destinataire(s) des alertes de ban ; vide => NOTIFY_EMAIL
+NOTIFY_BANS_CHANNELS="all"  # canaux des alertes de ban : all (défaut) | email | webhook
+# Nb max d'IP détaillées dans UNE alerte (les plus hauts scores d'abord) ; au-delà, une ligne
+# « … et N autres ». Une attaque massive bannit des centaines d'IP dans un même run : sans borne,
+# l'alerte devient illisible. Constante de tête, surchargeable, non réconciliée par l'updater.
+NOTIFY_BANS_LIST_MAX=50
 DAILY_SUMMARY=false   # résumé quotidien (opt-in) : --summary n'envoie que si =true ET canal configuré
 SERVER_NICKNAME=""    # nom convivial ajouté au hostname dans les notifs (vide => hostname seul). Ex: "Boutique (prod)"
 # Google Chat borne la taille d'un message (~4096 car.) : au-delà, l'API répond 400 et le résumé est
@@ -1092,6 +1100,18 @@ T_DE[diag.notify_orphan_bans]="NOTIFY_BANS ist aktiviert, aber kein Kanal konfig
 T_ES[diag.notify_orphan_bans]="NOTIFY_BANS está activado pero no hay ningún canal configurado."
 T_IT[diag.notify_orphan_bans]="NOTIFY_BANS è attivato ma nessun canale è configurato."
 
+T_EN[diag.notify_bans_route]="Ban alerts: %s."
+T_FR[diag.notify_bans_route]="Alertes de ban : %s."
+T_DE[diag.notify_bans_route]="Sperr-Warnungen: %s."
+T_ES[diag.notify_bans_route]="Alertas de bloqueo: %s."
+T_IT[diag.notify_bans_route]="Avvisi di blocco: %s."
+
+T_EN[diag.notify_bans_channels_bad]="NOTIFY_BANS_CHANNELS=%s is not valid (all, email or webhook) — treated as all."
+T_FR[diag.notify_bans_channels_bad]="NOTIFY_BANS_CHANNELS=%s invalide (all, email ou webhook) — traité comme all."
+T_DE[diag.notify_bans_channels_bad]="NOTIFY_BANS_CHANNELS=%s ist ungültig (all, email oder webhook) — wird als all behandelt."
+T_ES[diag.notify_bans_channels_bad]="NOTIFY_BANS_CHANNELS=%s no es válido (all, email o webhook) — se trata como all."
+T_IT[diag.notify_bans_channels_bad]="NOTIFY_BANS_CHANNELS=%s non è valido (all, email o webhook) — trattato come all."
+
 T_EN[diag.notify_orphan_summary]="DAILY_SUMMARY is enabled but no channel is configured."
 T_FR[diag.notify_orphan_summary]="DAILY_SUMMARY est activé mais aucun canal n'est configuré."
 T_DE[diag.notify_orphan_summary]="DAILY_SUMMARY ist aktiviert, aber kein Kanal konfiguriert."
@@ -1345,11 +1365,11 @@ T_DE[help.conf_email]="  NOTIFY_EMAIL     E-Mail neuer Sperren (MTA nötig: mail
 T_ES[help.conf_email]="  NOTIFY_EMAIL     E-mail de nuevos bloqueos (requiere un MTA: mail/sendmail); vacío = inactivo."
 T_IT[help.conf_email]="  NOTIFY_EMAIL     E-mail dei nuovi blocchi (richiede un MTA: mail/sendmail); vuoto = disattivato."
 
-T_EN[help.conf_from]="  NOTIFY_FROM      E-mail sender (optional)."
-T_FR[help.conf_from]="  NOTIFY_FROM      Expéditeur e-mail (optionnel)."
-T_DE[help.conf_from]="  NOTIFY_FROM      E-Mail-Absender (optional)."
-T_ES[help.conf_from]="  NOTIFY_FROM      Remitente del e-mail (opcional)."
-T_IT[help.conf_from]="  NOTIFY_FROM      Mittente e-mail (opzionale)."
+T_EN[help.conf_from]="  NOTIFY_FROM      E-mail sender (optional); also the envelope sender, the one SPF checks."
+T_FR[help.conf_from]="  NOTIFY_FROM      Expéditeur e-mail (optionnel) ; aussi l'expéditeur d'enveloppe, celui que vérifie le SPF."
+T_DE[help.conf_from]="  NOTIFY_FROM      E-Mail-Absender (optional); auch der Envelope-Absender, den SPF prüft."
+T_ES[help.conf_from]="  NOTIFY_FROM      Remitente del e-mail (opcional); también el remitente del sobre, el que verifica SPF."
+T_IT[help.conf_from]="  NOTIFY_FROM      Mittente e-mail (opzionale); anche il mittente della busta, quello verificato da SPF."
 
 T_EN[help.conf_min_bans]="  NOTIFY_MIN_BANS  Notify only if at least N new bans in the run (default 1)."
 T_FR[help.conf_min_bans]="  NOTIFY_MIN_BANS  Notifier seulement si au moins N nouveaux bans dans le run (défaut 1)."
@@ -1362,6 +1382,18 @@ T_FR[help.conf_notify_bans]="  NOTIFY_BANS      Alerte par run quand des IP sont
 T_DE[help.conf_notify_bans]="  NOTIFY_BANS      Pro-Lauf-Warnung, wenn IPs gesperrt werden (Standard false; true zum Aktivieren)."
 T_ES[help.conf_notify_bans]="  NOTIFY_BANS      Alerta por ejecución cuando se bloquean IP (por defecto false; true para activar)."
 T_IT[help.conf_notify_bans]="  NOTIFY_BANS      Avviso a ogni esecuzione quando degli IP vengono bloccati (predefinito false; true per attivare)."
+
+T_EN[help.conf_bans_email]="  NOTIFY_BANS_EMAIL  Recipient(s) of ban alerts; empty = NOTIFY_EMAIL."
+T_FR[help.conf_bans_email]="  NOTIFY_BANS_EMAIL  Destinataire(s) des alertes de ban ; vide = NOTIFY_EMAIL."
+T_DE[help.conf_bans_email]="  NOTIFY_BANS_EMAIL  Empfänger der Sperr-Warnungen; leer = NOTIFY_EMAIL."
+T_ES[help.conf_bans_email]="  NOTIFY_BANS_EMAIL  Destinatario(s) de las alertas de bloqueo; vacío = NOTIFY_EMAIL."
+T_IT[help.conf_bans_email]="  NOTIFY_BANS_EMAIL  Destinatario/i degli avvisi di blocco; vuoto = NOTIFY_EMAIL."
+
+T_EN[help.conf_bans_channels]="  NOTIFY_BANS_CHANNELS  Channels of ban alerts: all (default), email or webhook."
+T_FR[help.conf_bans_channels]="  NOTIFY_BANS_CHANNELS  Canaux des alertes de ban : all (défaut), email ou webhook."
+T_DE[help.conf_bans_channels]="  NOTIFY_BANS_CHANNELS  Kanäle der Sperr-Warnungen: all (Standard), email oder webhook."
+T_ES[help.conf_bans_channels]="  NOTIFY_BANS_CHANNELS  Canales de las alertas de bloqueo: all (por defecto), email o webhook."
+T_IT[help.conf_bans_channels]="  NOTIFY_BANS_CHANNELS  Canali degli avvisi di blocco: all (predefinito), email o webhook."
 
 T_EN[help.conf_daily]="  DAILY_SUMMARY    Daily summary (opt-in, default false), via the configured channel."
 T_FR[help.conf_daily]="  DAILY_SUMMARY    Résumé quotidien (opt-in, défaut false), via le canal configuré."
@@ -1783,6 +1815,12 @@ T_DE[notify.item_hp]="  %s — Score %s (Honeypot)"
 T_ES[notify.item_hp]="  %s — puntuación %s (honeypot)"
 T_IT[notify.item_hp]="  %s — punteggio %s (honeypot)"
 
+T_EN[notify.item_more]="  … and %s more IP(s) (full list: ban_404.sh list)"
+T_FR[notify.item_more]="  … et %s autre(s) IP (liste complète : ban_404.sh list)"
+T_DE[notify.item_more]="  … und %s weitere IP(s) (vollständige Liste: ban_404.sh list)"
+T_ES[notify.item_more]="  … y %s IP más (lista completa: ban_404.sh list)"
+T_IT[notify.item_more]="  … e altri %s IP (elenco completo: ban_404.sh list)"
+
 T_EN[notify.no_mta]="NOTIFY_EMAIL set but no MTA (mail/sendmail) found — email skipped."
 T_FR[notify.no_mta]="NOTIFY_EMAIL défini mais aucun MTA (mail/sendmail) trouvé — e-mail ignoré."
 T_DE[notify.no_mta]="NOTIFY_EMAIL gesetzt, aber kein MTA (mail/sendmail) gefunden — E-Mail übersprungen."
@@ -2201,6 +2239,8 @@ show_help() {
     t help.conf_from
     t help.conf_min_bans
     t help.conf_notify_bans
+    t help.conf_bans_email
+    t help.conf_bans_channels
     t help.conf_daily
     t help.conf_cron_step
     t help.conf_fw_backend
@@ -2455,9 +2495,18 @@ send_webhook() {  # $1 = texte plain ; $2 = corps carte (optionnel) ; $3 = titre
         *) webhook_post "$(build_webhook_payload "$1" "${2:-}" "${3:-}")" ;;
     esac
 }
-send_email() {  # $1 = sujet, $2 = corps texte, $3 = corps HTML (optionnel)
-    [ -z "$NOTIFY_EMAIL" ] && return 0
-    local bnd
+# Adresse d'ENVELOPPE (sendmail -f) tirée de NOTIFY_FROM, forme « Nom <adresse> » tolérée ; vide si
+# NOTIFY_FROM l'est. L'enveloppe est ce que vérifie le SPF du destinataire. Sans -f, sendmail -t la
+# prend du compte local (root@<hostname>) : si ce domaine ne publie aucun SPF alors que l'en-tête
+# From relève d'un domaine en DMARC p=reject, le mail est REFUSÉ — le résumé quotidien d'un serveur
+# du parc rebondissait ainsi chaque jour, sans aucun signe côté serveur. `mail -r` (bsd-mailx) pose
+# déjà l'enveloppe depuis NOTIFY_FROM : les deux chemins d'envoi sont désormais alignés.
+mail_envelope() { local a="${NOTIFY_FROM##*<}"; printf '%s' "${a%%>*}"; }
+send_email() {  # $1 = sujet, $2 = corps texte, $3 = corps HTML (optionnel), $4 = destinataire(s) (défaut NOTIFY_EMAIL)
+    local to="${4:-$NOTIFY_EMAIL}" bnd env
+    local -a envf=()
+    [ -z "$to" ] && return 0
+    env=$(mail_envelope); [ -n "$env" ] && envf=(-f "$env")
     if [ -n "$3" ] && command -v sendmail >/dev/null 2>&1 && command -v base64 >/dev/null 2>&1; then
         # multipart/alternative (texte + HTML) : le client choisit ; mobile/Gmail => HTML (tables +
         # triangles colorés). sendmail -t : en-têtes maîtrisés, portable (fourni par tout MTA). Repli
@@ -2469,7 +2518,7 @@ send_email() {  # $1 = sujet, $2 = corps texte, $3 = corps HTML (optionnel)
         # accentué passe par encode_header (RFC 2047), sinon mojibake dans l'objet.
         bnd="b404_$(date +%s)_$$"
         {
-            printf 'To: %s\n' "$NOTIFY_EMAIL"
+            printf 'To: %s\n' "$to"
             [ -n "$NOTIFY_FROM" ] && printf 'From: %s\n' "$NOTIFY_FROM"
             printf 'Subject: %s\nMIME-Version: 1.0\n' "$(encode_header "$1")"
             printf 'Content-Type: multipart/alternative; boundary="%s"\n\n' "$bnd"
@@ -2480,13 +2529,13 @@ send_email() {  # $1 = sujet, $2 = corps texte, $3 = corps HTML (optionnel)
             printf 'Content-Type: text/html; charset=UTF-8\nContent-Transfer-Encoding: base64\n\n'
             printf '%s' "$3" | base64
             printf -- '--%s--\n' "$bnd"
-        } | sendmail -t 2>/dev/null || true
+        } | sendmail -t "${envf[@]}" 2>/dev/null || true
     elif command -v mail >/dev/null 2>&1; then
-        if [ -n "$NOTIFY_FROM" ]; then printf '%s\n' "$2" | mail -s "$1" -r "$NOTIFY_FROM" "$NOTIFY_EMAIL" 2>/dev/null || true
-        else printf '%s\n' "$2" | mail -s "$1" "$NOTIFY_EMAIL" 2>/dev/null || true; fi
+        if [ -n "$NOTIFY_FROM" ]; then printf '%s\n' "$2" | mail -s "$1" -r "$NOTIFY_FROM" "$to" 2>/dev/null || true
+        else printf '%s\n' "$2" | mail -s "$1" "$to" 2>/dev/null || true; fi
     elif command -v sendmail >/dev/null 2>&1; then
-        { printf 'To: %s\n' "$NOTIFY_EMAIL"; [ -n "$NOTIFY_FROM" ] && printf 'From: %s\n' "$NOTIFY_FROM"
-          printf 'Subject: %s\n\n%s\n' "$(encode_header "$1")" "$2"; } | sendmail -t 2>/dev/null || true
+        { printf 'To: %s\n' "$to"; [ -n "$NOTIFY_FROM" ] && printf 'From: %s\n' "$NOTIFY_FROM"
+          printf 'Subject: %s\n\n%s\n' "$(encode_header "$1")" "$2"; } | sendmail -t "${envf[@]}" 2>/dev/null || true
     else
         t notify.no_mta >&2
     fi
@@ -2505,19 +2554,39 @@ notify() {  # $1 = sujet, $2 = corps texte (webhook plain + text/plain mail), $3
     send_webhook "$1"$'\n'"$2" "${4:-}" "$1"
     send_email "$1" "$2" "${3:-}"
 }
+# Canaux EFFECTIFS des alertes de ban : NOTIFY_BANS_CHANNELS appliqué aux canaux configurés.
+# Pose BANS_TO (destinataire e-mail ; vide => pas d'e-mail) et BANS_HOOK (true/false). Partagé par
+# l'envoi et le diag, pour que le diag décrive exactement ce qui partira. Valeur inconnue => all
+# (comportement historique : tous les canaux), signalée par le diag.
+bans_route() {
+    BANS_TO="${NOTIFY_BANS_EMAIL:-$NOTIFY_EMAIL}"; BANS_HOOK=false
+    [ -n "$WEBHOOK_URL" ] && BANS_HOOK=true
+    case "${NOTIFY_BANS_CHANNELS:-all}" in
+        email)   BANS_HOOK=false ;;
+        webhook) BANS_TO="" ;;
+    esac
+}
 maybe_notify_new_bans() {
-    [ -z "$WEBHOOK_URL" ] && [ -z "$NOTIFY_EMAIL" ] && return 0
-    local host n subj body line ip sc hp
+    bans_route
+    [ -z "$BANS_TO" ] && [ "$BANS_HOOK" = false ] && return 0
+    local host n subj body line ip sc hp max i=0
     host=$(server_label)
     n=${#new_bans[@]}
+    max="${NOTIFY_BANS_LIST_MAX:-50}"; case "$max" in ''|*[!0-9]*|0) max=50 ;; esac
     subj=$(t notify.subject "$host" "$n")
     body=$(t notify.body_header "$n" "$host")
+    # new_bans suit l'ordre de ips_data, trié par score décroissant : la borne écarte donc les
+    # plus faibles, et l'alerte d'une attaque massive reste lisible (le sujet garde le total).
     for line in "${new_bans[@]}"; do
+        i=$((i + 1)); [ "$i" -gt "$max" ] && break
         IFS='|' read -r ip sc hp <<< "$line"
         if [ "$hp" = "1" ]; then body="$body"$'\n'"$(t notify.item_hp "$ip" "$sc")"
         else body="$body"$'\n'"$(t notify.item "$ip" "$sc")"; fi
     done
-    notify "$subj" "$body"
+    [ "$n" -gt "$max" ] && body="$body"$'\n'"$(t notify.item_more "$((n - max))")"
+    [ "$BANS_HOOK" = true ] && send_webhook "$subj"$'\n'"$body" "" "$subj"
+    [ -n "$BANS_TO" ] && send_email "$subj" "$body" "" "$BANS_TO"
+    return 0
 }
 
 # ---------- --list / --stats / --summary ----------
@@ -3245,25 +3314,38 @@ check_webhook() {
         *)  t check.webhook_fail "$code"; [ -n "$body" ] && t check.diag "$body"; return 1 ;;
     esac
 }
-check_email() {
-    [ -z "$NOTIFY_EMAIL" ] && { t check.email_off; return 2; }
-    local host subj body rc tmp err
+check_email_to() {  # $1 = destinataire(s) : un envoi de test, retour 0 = remis au MTA
+    local to="$1" host subj body rc tmp err
     host=$(server_label)
     subj=$(t check.subject "$host"); body=$(t check.body "$host")
     tmp=$(mktemp 2>/dev/null) || tmp=""
     if command -v mail >/dev/null 2>&1; then
-        if [ -n "$NOTIFY_FROM" ]; then printf '%s\n' "$body" | mail -s "$subj" -r "$NOTIFY_FROM" "$NOTIFY_EMAIL" 2>"${tmp:-/dev/null}"
-        else printf '%s\n' "$body" | mail -s "$subj" "$NOTIFY_EMAIL" 2>"${tmp:-/dev/null}"; fi
+        if [ -n "$NOTIFY_FROM" ]; then printf '%s\n' "$body" | mail -s "$subj" -r "$NOTIFY_FROM" "$to" 2>"${tmp:-/dev/null}"
+        else printf '%s\n' "$body" | mail -s "$subj" "$to" 2>"${tmp:-/dev/null}"; fi
         rc=$?
     elif command -v sendmail >/dev/null 2>&1; then
-        { printf 'To: %s\n' "$NOTIFY_EMAIL"; [ -n "$NOTIFY_FROM" ] && printf 'From: %s\n' "$NOTIFY_FROM"
-          printf 'Subject: %s\n\n%s\n' "$(encode_header "$subj")" "$body"; } | sendmail -t 2>"${tmp:-/dev/null}"; rc=$?
+        local env; local -a envf=()
+        env=$(mail_envelope); [ -n "$env" ] && envf=(-f "$env")
+        { printf 'To: %s\n' "$to"; [ -n "$NOTIFY_FROM" ] && printf 'From: %s\n' "$NOTIFY_FROM"
+          printf 'Subject: %s\n\n%s\n' "$(encode_header "$subj")" "$body"; } | sendmail -t "${envf[@]}" 2>"${tmp:-/dev/null}"; rc=$?
     else
         t check.email_no_mta; [ -n "$tmp" ] && rm -f "$tmp"; return 1
     fi
     err=""; [ -n "$tmp" ] && { err=$(tr '\n' ' ' < "$tmp" 2>/dev/null | head -c 300); rm -f "$tmp"; }
-    if [ "$rc" -eq 0 ]; then t check.email_sent "$NOTIFY_EMAIL"; return 0; fi
+    if [ "$rc" -eq 0 ]; then t check.email_sent "$to"; return 0; fi
     t check.email_fail; [ -n "$err" ] && t check.diag "$err"; return 1
+}
+# Teste CHAQUE destinataire e-mail configuré : celui du résumé (NOTIFY_EMAIL) et, s'il en diffère,
+# celui des alertes de ban (NOTIFY_BANS_EMAIL) — sinon un destinataire d'alertes mal saisi ne se
+# révélerait qu'au premier ban, par un silence.
+check_email() {
+    local rc=0 bans_to=""
+    bans_route
+    [ "$BANS_TO" != "$NOTIFY_EMAIL" ] && bans_to="$BANS_TO"
+    [ -z "$NOTIFY_EMAIL" ] && [ -z "$bans_to" ] && { t check.email_off; return 2; }
+    [ -n "$NOTIFY_EMAIL" ] && { check_email_to "$NOTIFY_EMAIL" || rc=1; }
+    [ -n "$bans_to" ]      && { check_email_to "$bans_to"      || rc=1; }
+    return "$rc"
 }
 check_notification() {  # $1 = email|webhook|all (défaut all)
     local target="${1:-all}"; target="${target,,}"
@@ -3896,7 +3978,20 @@ run_diag_checks() {
     [ -n "$NOTIFY_EMAIL" ] && chans="${chans:+$chans, }e-mail"
     if [ -n "$chans" ]; then diag_line ok "$(t diag.notify_channels "$chans")"
     else diag_line ok "$(t diag.notify_none)"; fi
-    if diag_is_on "$NOTIFY_BANS"   && [ -z "$WEBHOOK_URL" ] && [ -z "$NOTIFY_EMAIL" ]; then diag_line warn "$(t diag.notify_orphan_bans)"; fi
+    # Alertes de ban : on décrit la route EFFECTIVE (bans_route, la même que l'envoi), car elle peut
+    # différer du résumé (destinataire dédié, webhook exclu). Muet si les alertes sont coupées.
+    if diag_is_on "$NOTIFY_BANS"; then
+        case "${NOTIFY_BANS_CHANNELS:-all}" in
+            all|email|webhook) ;;
+            *) diag_line warn "$(t diag.notify_bans_channels_bad "$NOTIFY_BANS_CHANNELS")" ;;
+        esac
+        bans_route
+        route=""
+        [ "$BANS_HOOK" = true ] && route="webhook"
+        [ -n "$BANS_TO" ] && route="${route:+$route + }e-mail ($BANS_TO)"
+        if [ -n "$route" ]; then diag_line ok "$(t diag.notify_bans_route "$route")"
+        else diag_line warn "$(t diag.notify_orphan_bans)"; fi
+    fi
     if diag_is_on "$DAILY_SUMMARY" && [ -z "$WEBHOOK_URL" ] && [ -z "$NOTIFY_EMAIL" ]; then diag_line warn "$(t diag.notify_orphan_summary)"; fi
 
     # 8. Signes vitaux du serveur (load, mémoire, disque, MTA, IO, réseau)
@@ -4806,13 +4901,23 @@ while read -r count hpflag ip; do
     if fw_is_banned "$ip"; then
         [ "$SHOW_BLOCKED" = true ] && t already.banned "$ip" "$count"
     else
-        # Durée du ban : base du circuit au 1er ban (comportement historique EXACT), palier plus
-        # long dès la 1re récidive ou d'emblée pour un score >= AGGRESSIVE_SCORE. Le niveau
-        # « nominal » (celui d'une IP inconnue et non agressive) vaut 1 sur le circuit honeypot et
-        # 0 sur un flood : au-delà, on journalise la variante qui porte le rang et la durée.
-        [ "$count" -ge "$HONEYPOT_SCORE" ] && hp=1 || hp=0
+        # Deux notions distinctes, longtemps confondues :
+        #  - la NATURE du ban (hp) = le drapeau posé par awk (chemin-piège, signature SECURITY ou
+        #    flood POST). Elle choisit le libellé — journal, alerte, Top 24 h — et décide si le ban
+        #    compte pour la cadence (seuls les floods 404, hp=0, la resserrent).
+        #  - le CIRCUIT de DURÉE (ttl_hp) = score >= HONEYPOT_SCORE, inchangé : un flood de 404 purs
+        #    assez massif garde la base longue qu'il a toujours eue.
+        # Jusqu'en 2.3.11 la nature se déduisait du score : un flood de 404 purs atteignant
+        # HONEYPOT_SCORE s'annonçait « Blocage IMMÉDIAT (honeypot) », et avec un BAN_THRESHOLD relevé
+        # à 99 en conf locale, TOUS les floods l'étaient. Les durées, elles, ne bougent pas.
+        # Durée : base du circuit au 1er ban (comportement historique EXACT), palier plus long dès la
+        # 1re récidive ou d'emblée pour un score >= AGGRESSIVE_SCORE. Au-delà du niveau nominal (1 sur
+        # le circuit honeypot, 0 sinon), on journalise la variante qui porte le rang et la durée —
+        # donc un flood massif affiche la durée longue qu'il reçoit.
+        hp="$hpflag"
+        [ "$count" -ge "$HONEYPOT_SCORE" ] && ttl_hp=1 || ttl_hp=0
         esc_rec="${ESC_SEEN[$ip]:-0}"
-        read -r esc_ttl esc_level <<< "$(escalation_ttl "$count" "$hp" "$esc_rec")"
+        read -r esc_ttl esc_level <<< "$(escalation_ttl "$count" "$ttl_hp" "$esc_rec")"
         if [ "$DRY_RUN" = true ]; then
             if [ "$hp" = 1 ]; then
                 t sim.ban_honeypot "$ip" "$count"

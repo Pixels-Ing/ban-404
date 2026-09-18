@@ -419,3 +419,89 @@ ok "fichier de métriques absent : pas de run forcé"
 
 sed -i '/^CRON_STEP=auto$/d' /etc/ban_404.conf
 rm -f /etc/cron.d/ban_404_step /var/lib/ban_404/cadence
+
+# ---------------------------------------------------------------------------
+echo "== Test 12 : alertes de ban routées (destinataire dédié, canal), liste bornée, enveloppe SPF =="
+# 2.3.12. Les alertes de ban partaient sur TOUS les canaux, vers le seul NOTIFY_EMAIL : impossible
+# d'alerter le client d'un serveur sans l'abonner au résumé technique, ni sans inonder le webhook
+# partagé. Les outils d'envoi (mail, sendmail, curl) sont remplacés par des doublures qui consignent
+# leurs arguments (et le message reçu sur l'entrée standard).
+STUB=/tmp/b404stub; rm -rf "$STUB"; mkdir -p "$STUB"
+cat > "$STUB/stub" <<'EOS'
+#!/bin/bash
+n=${0##*/}
+{ printf 'ARGS:'; printf ' %s' "$@"; printf '\n'; [ "$n" = curl ] || cat; } >> "/tmp/b404stub/$n.log"
+exit 0
+EOS
+chmod +x "$STUB/stub"
+for c in mail sendmail curl; do ln -s "$STUB/stub" "$STUB/$c"; done
+stub_run() { PATH="$STUB:$PATH" bash "$ENGINE" "$@" </dev/null >/dev/null 2>&1 || true; }
+
+cat >> /etc/ban_404.conf <<'EOC'
+# test12-debut
+NOTIFY_BANS=true
+NOTIFY_EMAIL=resume@example.test
+NOTIFY_FROM="Ban 404 <no-reply@example.test>"
+NOTIFY_BANS_EMAIL=alertes@example.test
+NOTIFY_BANS_CHANNELS=email
+WEBHOOK_URL=http://127.0.0.1:9/hook
+NOTIFY_BANS_LIST_MAX=3
+DAILY_SUMMARY=true
+# test12-fin
+EOC
+
+# Cinq sondes honeypot (score 100 chacune) + un flood de 120 × 404 PURS, sans aucun chemin-piège.
+VOLIP=198.51.100.210
+: > "$LOG"; rm -f "$OFF"
+for i in 201 202 203 204 205; do
+    printf '198.51.100.%s - - [%s] "GET /.env HTTP/1.1" 404 200 "-" "bot/1.0"\n' "$i" "$TS" >> "$LOG"
+done
+for i in $(seq 1 120); do
+    printf '%s - - [%s] "GET /absent-%d HTTP/1.1" 404 200 "-" "bot/1.0"\n' "$VOLIP" "$TS" "$i" >> "$LOG"
+done
+stub_run
+
+# 12a. Routage : l'alerte va au destinataire dédié, par e-mail seul.
+grep -q 'alertes@example.test' "$STUB/mail.log" 2>/dev/null \
+    || { cat "$STUB/mail.log" 2>/dev/null; fail "12a : l'alerte doit partir vers NOTIFY_BANS_EMAIL"; }
+grep -q 'resume@example.test' "$STUB/mail.log" 2>/dev/null \
+    && fail "12a : l'alerte ne doit PAS partir vers le destinataire du résumé"
+grep -q '127.0.0.1:9/hook' "$STUB/curl.log" 2>/dev/null \
+    && fail "12a : NOTIFY_BANS_CHANNELS=email, le webhook ne doit pas être appelé"
+ok "alerte vers NOTIFY_BANS_EMAIL, par e-mail seul (ni résumé, ni webhook)"
+
+# 12b. Liste bornée : 6 bans, 3 détaillés (plus hauts scores d'abord) + une ligne « et 3 autres ».
+[ "$(grep -c '^  198\.51\.100\.2[0-9][0-9] —' "$STUB/mail.log")" -eq 3 ] \
+    || { cat "$STUB/mail.log"; fail "12b : 3 IP détaillées attendues (NOTIFY_BANS_LIST_MAX=3)"; }
+grep -q '3 more IP(s) (full list: ban_404.sh list)' "$STUB/mail.log" \
+    || { cat "$STUB/mail.log"; fail "12b : ligne « … and 3 more » attendue"; }
+ok "liste bornée à NOTIFY_BANS_LIST_MAX, surplus résumé en une ligne"
+
+# 12c. Un flood de 404 PURS, même au-delà de HONEYPOT_SCORE, n'est plus annoncé « honeypot »…
+grep -q "$VOLIP — score 120 (404 flood)" "$STUB/mail.log" \
+    || { cat "$STUB/mail.log"; fail "12c : $VOLIP doit être annoncé comme un flood 404 dans l'alerte"; }
+grep -a "$VOLIP" "$TLOG" | grep -q honeypot \
+    && { grep -a "$VOLIP" "$TLOG"; fail "12c : $VOLIP journalisé « honeypot » alors qu'il n'a touché aucun piège"; }
+# … mais sa durée ne bouge pas : même circuit long que les sondes honeypot du même run.
+TO_V=$(ipset_timeout "$VOLIP"); TO_H=$(ipset_timeout 198.51.100.201)
+[ -n "$TO_V" ] && [ -n "$TO_H" ] && [ $((TO_H - TO_V)) -le 5 ] && [ $((TO_V - TO_H)) -le 5 ] \
+    || fail "12c : durée du flood massif attendue identique au circuit honeypot ($TO_H), obtenue « ${TO_V:-absent} »"
+ok "flood 404 massif : libellé « 404 flood », durée inchangée ($TO_V s)"
+
+# 12d. Résumé : toujours vers NOTIFY_EMAIL, et enveloppe = adresse de NOTIFY_FROM (sendmail -f).
+stub_run summary
+grep -q '^ARGS: -t -f no-reply@example.test$' "$STUB/sendmail.log" 2>/dev/null \
+    || { cat "$STUB/sendmail.log" 2>/dev/null | head -5; fail "12d : sendmail -t doit recevoir -f <adresse de NOTIFY_FROM>"; }
+grep -q '^To: resume@example.test$' "$STUB/sendmail.log" \
+    || fail "12d : le résumé doit partir vers NOTIFY_EMAIL"
+ok "résumé vers NOTIFY_EMAIL, enveloppe alignée sur NOTIFY_FROM"
+
+# 12e. check-notification teste AUSSI le destinataire des alertes.
+rm -f "$STUB/mail.log"
+stub_run check-notification email
+grep -q 'resume@example.test' "$STUB/mail.log" && grep -q 'alertes@example.test' "$STUB/mail.log" \
+    || { cat "$STUB/mail.log" 2>/dev/null; fail "12e : les deux destinataires doivent recevoir un test"; }
+ok "check-notification teste les deux destinataires"
+
+sed -i '/^# test12-debut$/,/^# test12-fin$/d' /etc/ban_404.conf
+rm -rf "$STUB" /etc/cron.daily/1_ban_404_summary   # DAILY_SUMMARY=true a fait poser le cron de résumé

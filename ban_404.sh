@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="2.3.12"
+BAN404_VERSION="2.3.13"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -2569,23 +2569,26 @@ bans_route() {
 maybe_notify_new_bans() {
     bans_route
     [ -z "$BANS_TO" ] && [ "$BANS_HOOK" = false ] && return 0
-    local host n subj body line ip sc hp max i=0
+    local host n subj items="" line ip sc hp max i=0
     host=$(server_label)
     n=${#new_bans[@]}
     max="${NOTIFY_BANS_LIST_MAX:-50}"; case "$max" in ''|*[!0-9]*|0) max=50 ;; esac
     subj=$(t notify.subject "$host" "$n")
-    body=$(t notify.body_header "$n" "$host")
     # new_bans suit l'ordre de ips_data, trié par score décroissant : la borne écarte donc les
     # plus faibles, et l'alerte d'une attaque massive reste lisible (le sujet garde le total).
+    # Chaque ligne est PRÉFIXÉE d'un saut : items commence par « \n », prêt à suivre une en-tête.
     for line in "${new_bans[@]}"; do
         i=$((i + 1)); [ "$i" -gt "$max" ] && break
         IFS='|' read -r ip sc hp <<< "$line"
-        if [ "$hp" = "1" ]; then body="$body"$'\n'"$(t notify.item_hp "$ip" "$sc")"
-        else body="$body"$'\n'"$(t notify.item "$ip" "$sc")"; fi
+        if [ "$hp" = "1" ]; then items="$items"$'\n'"$(t notify.item_hp "$ip" "$sc")"
+        else items="$items"$'\n'"$(t notify.item "$ip" "$sc")"; fi
     done
-    [ "$n" -gt "$max" ] && body="$body"$'\n'"$(t notify.item_more "$((n - max))")"
-    [ "$BANS_HOOK" = true ] && send_webhook "$subj"$'\n'"$body" "" "$subj"
-    [ -n "$BANS_TO" ] && send_email "$subj" "$body" "" "$BANS_TO"
+    [ "$n" -gt "$max" ] && items="$items"$'\n'"$(t notify.item_more "$((n - max))")"
+    # Webhook : le sujet s'affiche déjà en première ligne du message ; la phrase d'en-tête du corps
+    # (« N nouvelle(s) IP bannie(s) sur <serveur> : ») le répétait mot pour mot. Le mail la garde :
+    # le sujet y est affiché à part, et la phrase introduit la liste à l'ouverture du message.
+    [ "$BANS_HOOK" = true ] && send_webhook "$subj$items" "" "$subj"
+    [ -n "$BANS_TO" ] && send_email "$subj" "$(t notify.body_header "$n" "$host")$items" "" "$BANS_TO"
     return 0
 }
 

@@ -475,6 +475,8 @@ ok "alerte vers NOTIFY_BANS_EMAIL, par e-mail seul (ni résumé, ni webhook)"
     || { cat "$STUB/mail.log"; fail "12b : 3 IP détaillées attendues (NOTIFY_BANS_LIST_MAX=3)"; }
 grep -q '3 more IP(s) (full list: ban_404.sh list)' "$STUB/mail.log" \
     || { cat "$STUB/mail.log"; fail "12b : ligne « … and 3 more » attendue"; }
+grep -q '^6 new IP(s) banned on ' "$STUB/mail.log" \
+    || { cat "$STUB/mail.log"; fail "12b : le mail doit garder sa phrase d'en-tête (le sujet y est affiché à part)"; }
 ok "liste bornée à NOTIFY_BANS_LIST_MAX, surplus résumé en une ligne"
 
 # 12c. Un flood de 404 PURS, même au-delà de HONEYPOT_SCORE, n'est plus annoncé « honeypot »…
@@ -502,6 +504,19 @@ stub_run check-notification email
 grep -q 'resume@example.test' "$STUB/mail.log" && grep -q 'alertes@example.test' "$STUB/mail.log" \
     || { cat "$STUB/mail.log" 2>/dev/null; fail "12e : les deux destinataires doivent recevoir un test"; }
 ok "check-notification teste les deux destinataires"
+
+# 12f. Canal webhook : le sujet ouvre déjà le message, la phrase d'en-tête du corps n'y est plus
+# répétée (elle l'était mot pour mot) ; le mail, lui, la garde pour introduire la liste.
+sed -i 's/^NOTIFY_BANS_CHANNELS=email$/NOTIFY_BANS_CHANNELS=webhook/' /etc/ban_404.conf
+printf '198.51.100.220 - - [%s] "GET /.env HTTP/1.1" 404 200 "-" "bot/1.0"\n' "$TS" >> "$LOG"
+rm -f "$STUB/curl.log" "$STUB/mail.log"
+stub_run
+grep -q '127.0.0.1:9/hook' "$STUB/curl.log" 2>/dev/null && grep -q '198.51.100.220' "$STUB/curl.log" \
+    || { cat "$STUB/curl.log" 2>/dev/null; fail "12f : NOTIFY_BANS_CHANNELS=webhook, l'alerte doit partir sur le webhook"; }
+grep -q 'banned on' "$STUB/curl.log" \
+    && { cat "$STUB/curl.log"; fail "12f : le message webhook ne doit plus répéter le sujet en en-tête de corps"; }
+[ -e "$STUB/mail.log" ] && fail "12f : NOTIFY_BANS_CHANNELS=webhook, aucun e-mail ne doit partir"
+ok "webhook : sujet en tête, sans phrase d'en-tête redondante ; aucun e-mail"
 
 sed -i '/^# test12-debut$/,/^# test12-fin$/d' /etc/ban_404.conf
 rm -rf "$STUB" /etc/cron.daily/1_ban_404_summary   # DAILY_SUMMARY=true a fait poser le cron de résumé

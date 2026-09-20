@@ -520,3 +520,49 @@ ok "webhook : sujet en tête, sans phrase d'en-tête redondante ; aucun e-mail"
 
 sed -i '/^# test12-debut$/,/^# test12-fin$/d' /etc/ban_404.conf
 rm -rf "$STUB" /etc/cron.daily/1_ban_404_summary   # DAILY_SUMMARY=true a fait poser le cron de résumé
+
+echo "== Test 13 : le diag dit si le domaine de NOTIFY_FROM autorise ce serveur en SPF =="
+# 2.3.14. Depuis 2.3.12, NOTIFY_FROM est aussi l'expéditeur d'ENVELOPPE : c'est lui que vérifie le
+# SPF du destinataire. Un domaine sans SPF (nom d'hôte de l'hébergeur par défaut) fait classer les
+# résumés en spam SANS aucun signe côté serveur — le MTA reçoit un « 250 OK ». Tout un parc a
+# basculé ainsi en une nuit. On double `dig` pour rendre le contrôle déterministe (aucun DNS réel).
+SPFD=/tmp/b404spf; rm -rf "$SPFD"; mkdir -p "$SPFD"
+cat > "$SPFD/dig" <<'EOS'
+#!/bin/bash
+cat /tmp/b404spf/answer 2>/dev/null
+exit 0
+EOS
+chmod +x "$SPFD/dig"
+MYIP=$(ip route get 1.1.1.1 2>/dev/null | sed -n 's/.*src \([0-9.]*\).*/\1/p' | head -1)
+[ -n "$MYIP" ] || MYIP=127.0.0.1
+
+cat >> /etc/ban_404.conf <<'EOC'
+# test13-debut
+NOTIFY_EMAIL=resume@example.test
+NOTIFY_FROM="no-reply@spftest.example"
+# test13-fin
+EOC
+# Le tag [ OK ]/[WARN] n'est jamais traduit : on l'utilise comme verdict, quelle que soit la langue.
+spf_verdict() { printf '%s\n' "$1" > "$SPFD/answer"
+    PATH="$SPFD:$PATH" bash "$ENGINE" diag 2>/dev/null | grep -m1 'spftest\.example' | sed -E 's/^\[([^]]*)\].*/\1/' | tr -d ' '; }
+
+v=$(spf_verdict "\"v=spf1 ip4:$MYIP ~all\"")
+[ "$v" = "OK" ] || fail "13a : une IP listée en ip4 doit donner [ OK ] (obtenu : ${v:-<aucune ligne>})"
+ok "SPF listant ce serveur : [ OK ]"
+
+v=$(spf_verdict "\"v=spf1 ip4:203.0.113.1 -all\"")
+[ "$v" = "WARN" ] || fail "13b : un SPF strict sans notre IP doit donner [WARN] (obtenu : ${v:-<aucune ligne>})"
+ok "SPF strict qui n'autorise pas ce serveur : [WARN]"
+
+v=$(spf_verdict "")
+[ "$v" = "WARN" ] || fail "13c : un domaine SANS SPF doit donner [WARN] (obtenu : ${v:-<aucune ligne>})"
+ok "domaine sans SPF (le cas fondateur) : [WARN]"
+
+# Un SPF qui délègue (include/a/mx) n'est PAS évaluable sans résolution récursive : le contrôle doit
+# le dire sans accuser — aucun faux positif, c'est la condition pour qu'il reste crédible.
+v=$(spf_verdict "\"v=spf1 mx a include:_spf.google.com ~all\"")
+[ "$v" = "OK" ] || fail "13d : un SPF qui délègue ne doit PAS produire de [WARN] (obtenu : ${v:-<aucune ligne>})"
+ok "SPF délégué (include/a/mx) : signalé non vérifiable, sans faux positif"
+
+sed -i '/^# test13-debut$/,/^# test13-fin$/d' /etc/ban_404.conf
+rm -rf "$SPFD"

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="2.3.13"
+BAN404_VERSION="2.3.14"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -1111,6 +1111,36 @@ T_FR[diag.notify_bans_channels_bad]="NOTIFY_BANS_CHANNELS=%s invalide (all, emai
 T_DE[diag.notify_bans_channels_bad]="NOTIFY_BANS_CHANNELS=%s ist ungültig (all, email oder webhook) — wird als all behandelt."
 T_ES[diag.notify_bans_channels_bad]="NOTIFY_BANS_CHANNELS=%s no es válido (all, email o webhook) — se trata como all."
 T_IT[diag.notify_bans_channels_bad]="NOTIFY_BANS_CHANNELS=%s non è valido (all, email o webhook) — trattato come all."
+
+T_EN[diag.spf_ok]="Notification sender: %s authorises this server in SPF (%s)."
+T_FR[diag.spf_ok]="Expéditeur des notifications : %s autorise ce serveur en SPF (%s)."
+T_DE[diag.spf_ok]="Absender der Benachrichtigungen: %s autorisiert diesen Server per SPF (%s)."
+T_ES[diag.spf_ok]="Remitente de las notificaciones: %s autoriza este servidor en SPF (%s)."
+T_IT[diag.spf_ok]="Mittente delle notifiche: %s autorizza questo server in SPF (%s)."
+
+T_EN[diag.spf_none]="NOTIFY_FROM uses %s, which publishes no SPF record: notifications are likely to be filed as spam."
+T_FR[diag.spf_none]="NOTIFY_FROM utilise %s, qui ne publie aucun SPF : les notifications risquent le classement en spam."
+T_DE[diag.spf_none]="NOTIFY_FROM verwendet %s ohne SPF-Eintrag: Benachrichtigungen landen wahrscheinlich im Spam."
+T_ES[diag.spf_none]="NOTIFY_FROM usa %s, que no publica ningún SPF: las notificaciones corren el riesgo de acabar en spam."
+T_IT[diag.spf_none]="NOTIFY_FROM usa %s, che non pubblica alcun SPF: le notifiche rischiano di finire nello spam."
+
+T_EN[diag.spf_missing]="SPF of %s does NOT authorise this server (%s): notifications will fail SPF."
+T_FR[diag.spf_missing]="Le SPF de %s n'autorise PAS ce serveur (%s) : les notifications échoueront au SPF."
+T_DE[diag.spf_missing]="Das SPF von %s autorisiert diesen Server NICHT (%s): Benachrichtigungen fallen beim SPF durch."
+T_ES[diag.spf_missing]="El SPF de %s NO autoriza este servidor (%s): las notificaciones fallarán el SPF."
+T_IT[diag.spf_missing]="Lo SPF di %s NON autorizza questo server (%s): le notifiche falliranno lo SPF."
+
+T_EN[diag.spf_partial]="SPF of %s lists no ip4 for this server (%s) but delegates (include/a/mx): not verifiable here."
+T_FR[diag.spf_partial]="Le SPF de %s ne liste pas ce serveur (%s) en ip4 mais délègue (include/a/mx) : non vérifiable ici."
+T_DE[diag.spf_partial]="Das SPF von %s führt diesen Server (%s) nicht als ip4, delegiert aber (include/a/mx): hier nicht prüfbar."
+T_ES[diag.spf_partial]="El SPF de %s no lista este servidor (%s) como ip4 pero delega (include/a/mx): no verificable aquí."
+T_IT[diag.spf_partial]="Lo SPF di %s non elenca questo server (%s) come ip4 ma delega (include/a/mx): non verificabile qui."
+
+T_EN[diag.spf_nocheck]="Notification sender: %s (SPF not checked — no DNS TXT tool available)."
+T_FR[diag.spf_nocheck]="Expéditeur des notifications : %s (SPF non vérifié — aucun outil de requête TXT)."
+T_DE[diag.spf_nocheck]="Absender der Benachrichtigungen: %s (SPF nicht geprüft — kein DNS-TXT-Werkzeug)."
+T_ES[diag.spf_nocheck]="Remitente de las notificaciones: %s (SPF no verificado — sin herramienta de consulta TXT)."
+T_IT[diag.spf_nocheck]="Mittente delle notifiche: %s (SPF non verificato — nessuno strumento di query TXT)."
 
 T_EN[diag.notify_orphan_summary]="DAILY_SUMMARY is enabled but no channel is configured."
 T_FR[diag.notify_orphan_summary]="DAILY_SUMMARY est activé mais aucun canal n'est configuré."
@@ -3728,6 +3758,48 @@ net_opts_init() {
     return 0
 }
 
+# Contrôle SPF de l'expéditeur des notifications (lecture seule, best effort).
+# Depuis 2.3.12, NOTIFY_FROM sert AUSSI d'expéditeur d'ENVELOPPE (sendmail -f) : c'est donc lui que
+# le SPF du destinataire vérifie. Un NOTIFY_FROM sur un domaine sans SPF (cas par défaut : le nom
+# d'hôte de l'hébergeur) fait basculer les résumés en spam chez Gmail SANS AUCUN SIGNE côté serveur
+# — le MTA reçoit un « 250 OK », le mail est simplement classé à l'arrivée. Tout le parc a basculé
+# ainsi en une nuit (sept. 2026) et seul un coup d'œil dans les spams l'a révélé : d'où ce contrôle.
+# Aucune dépendance nouvelle : si aucun outil de requête TXT n'est présent, on le dit sans conclure.
+dns_txt() {  # $1 = nom ; imprime les TXT (un par ligne). rc 1 si AUCUN outil disponible.
+    if   command -v dig      >/dev/null 2>&1; then dig +short TXT "$1" 2>/dev/null
+    elif command -v host     >/dev/null 2>&1; then host -t TXT "$1" 2>/dev/null | sed -n 's/.*descriptive text //p'
+    elif command -v nslookup >/dev/null 2>&1; then nslookup -type=TXT "$1" 2>/dev/null | sed -n 's/.*text = //p'
+    else return 1; fi
+}
+# IP source de la route par défaut = celle que verra le serveur distant (même idiome que l'installeur
+# pour whitelister l'IP locale). Un smtp_bind_address explicite dans Postfix la contredirait : cas
+# assez rare pour ne pas justifier de parser main.cf, et le contrôle reste indicatif.
+local_source_ip() { ip route get 1.1.1.1 2>/dev/null | sed -n 's/.*src \([0-9.]*\).*/\1/p' | head -1; }
+diag_check_spf_from() {
+    local env dom spf ip tok found=false strict=true
+    env=$(mail_envelope)
+    [ -z "$env" ] && return 0                       # enveloppe laissée au système (root@<hôte>)
+    dom="${env##*@}"
+    case "$dom" in ""|"$env") return 0 ;; esac      # NOTIFY_FROM sans @ : rien à vérifier
+    if ! spf=$(dns_txt "$dom"); then diag_line ok "$(t diag.spf_nocheck "$dom")"; return 0; fi
+    spf=$(printf '%s' "$spf" | tr -d '"' | grep -m1 'v=spf1')
+    if [ -z "$spf" ]; then diag_line warn "$(t diag.spf_none "$dom")"; return 0; fi
+    ip=$(local_source_ip)
+    if [ -z "$ip" ]; then diag_line ok "$(t diag.spf_nocheck "$dom")"; return 0; fi
+    # On ne résout QUE les ip4: (pas d'include récursif : ni le budget DNS, ni la complexité d'un
+    # évaluateur SPF complet n'ont leur place ici). Un SPF qui délègue est donc rapporté « non
+    # vérifiable » plutôt que fautif : ce contrôle ne doit produire aucun faux positif.
+    for tok in $spf; do
+        case "$tok" in
+            ip4:*) ip_in_cidr "$ip" "${tok#ip4:}" && found=true ;;
+            include:*|redirect=*|exists:*|ptr|ptr:*|a|a:*|mx|mx:*) strict=false ;;
+        esac
+    done
+    if   [ "$found" = true ];  then diag_line ok   "$(t diag.spf_ok "$dom" "$ip")"
+    elif [ "$strict" = true ]; then diag_line warn "$(t diag.spf_missing "$dom" "$ip")"
+    else                            diag_line ok   "$(t diag.spf_partial "$dom" "$ip")"; fi
+}
+
 # run_diag_checks : exécute les ~25 contrôles (appels diag_line), SANS en-tête ni bilan ni exit.
 # Extrait de do_diag pour être réutilisable par le résumé quotidien (build_stats_text) en mode
 # DIAG_QUIET (accumulation dans DIAG_ISSUES sans impression). do_diag l'enrobe (en-tête + bilan).
@@ -3981,6 +4053,8 @@ run_diag_checks() {
     [ -n "$NOTIFY_EMAIL" ] && chans="${chans:+$chans, }e-mail"
     if [ -n "$chans" ]; then diag_line ok "$(t diag.notify_channels "$chans")"
     else diag_line ok "$(t diag.notify_none)"; fi
+    # L'expéditeur d'enveloppe ne concerne QUE l'e-mail : muet sur un serveur en webhook seul.
+    { [ -n "$NOTIFY_EMAIL" ] || [ -n "${NOTIFY_BANS_EMAIL:-}" ]; } && diag_check_spf_from
     # Alertes de ban : on décrit la route EFFECTIVE (bans_route, la même que l'envoi), car elle peut
     # différer du résumé (destinataire dédié, webhook exclu). Muet si les alertes sont coupées.
     if diag_is_on "$NOTIFY_BANS"; then

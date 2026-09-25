@@ -566,3 +566,48 @@ ok "SPF délégué (include/a/mx) : signalé non vérifiable, sans faux positif"
 
 sed -i '/^# test13-debut$/,/^# test13-fin$/d' /etc/ban_404.conf
 rm -rf "$SPFD"
+
+# ---------------------------------------------------------------------------
+echo "== Test 14 : après minuit, le log de la VEILLE est lu tant que la fenêtre y déborde =="
+# 2.3.15. ISPConfig bascule access.log sur le nouveau AAAAMMJJ-access.log à 00:00 : un run de 00:30
+# ne voyait que 30 min de trafic. On simule « juste après minuit » en élargissant WINDOW jusqu'à la
+# veille, plutôt qu'en truquant l'horloge. Le flood est dans le fichier de la VEILLE uniquement.
+D14="$FIX/www/site14.example/log"; mkdir -p "$D14"
+TODAY14=$(date +%Y%m%d); YDAY14=$(date -d yesterday +%Y%m%d)
+IP14=198.51.100.140
+TS14=$(LC_ALL=C date -u '+%d/%b/%Y:%H:%M:%S +0000')
+: > "$D14/$TODAY14-access.log"; ln -sfn "$TODAY14-access.log" "$D14/access.log"
+: > "$D14/$YDAY14-access.log"
+for i in $(seq 1 7); do   # 7 × 404 : sous le seuil (10), mais 14 si le fichier était lu deux fois
+    printf '%s - - [%s] "GET /probe14-%d HTTP/1.1" 404 200 "-" "bot/1.0"\n' "$IP14" "$TS14" "$i" >> "$D14/$YDAY14-access.log"
+done
+for i in $(seq 8 12); do
+    printf '%s - - [%s] "GET /probe14-%d HTTP/1.1" 404 200 "-" "bot/1.0"\n' "$IP14" "$TS14" "$i" >> "$D14/$YDAY14-access.log"
+done
+SINCE_MIDNIGHT=$(( $(date +%s) - $(date -d 'today 00:00' +%s) ))
+
+# 14a. Fenêtre courte, entièrement dans la journée : la veille n'est PAS lue.
+printf 'WINDOW=60\n' >> /etc/ban_404.conf
+OUT=$(bash "$ENGINE" --dry-run --verbose 2>&1 || true)
+if [ "$SINCE_MIDNIGHT" -gt 120 ]; then
+    printf '%s\n' "$OUT" | grep -q "$YDAY14-access.log" && { printf '%s\n' "$OUT"; fail "14a : fenêtre dans la journée, le log de la veille ne doit pas être lu"; }
+    ok "fenêtre dans la journée : log de la veille ignoré"
+fi
+sed -i '/^WINDOW=60$/d' /etc/ban_404.conf
+
+# 14b. Fenêtre qui déborde sur la veille : le fichier daté de la veille est lu, le flood détecté.
+printf 'WINDOW=%s\n' "$(( SINCE_MIDNIGHT + 3600 ))" >> /etc/ban_404.conf
+OUT=$(bash "$ENGINE" --dry-run 2>&1 || true)
+printf '%s\n' "$OUT" | grep -q "$IP14" || { printf '%s\n' "$OUT"; fail "14b : le flood du log de la veille aurait dû être détecté"; }
+ok "fenêtre à cheval sur minuit : log de la veille lu, flood détecté"
+
+# 14c. access.log pointe encore sur la veille (bascule en retard) : un seul passage, pas de double
+# comptage. On ne garde que 7 lignes : lues deux fois, elles franchiraient le seuil.
+sed -i '8,$d' "$D14/$YDAY14-access.log"
+ln -sfn "$YDAY14-access.log" "$D14/access.log"
+OUT=$(bash "$ENGINE" --dry-run 2>&1 || true)
+printf '%s\n' "$OUT" | grep -q "$IP14" && { printf '%s\n' "$OUT"; fail "14c : access.log -> veille, le fichier a été lu deux fois (score doublé)"; }
+ok "access.log pointant sur la veille : fichier lu une seule fois"
+
+sed -i '/^WINDOW=/d' /etc/ban_404.conf
+rm -rf "$FIX/www/site14.example"

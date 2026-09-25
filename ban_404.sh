@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="2.3.14"
+BAN404_VERSION="2.3.15"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -3608,17 +3608,35 @@ log_profile() {
 # yesterday-access.log (symlink ISPConfig vers le log de la veille, souvent périmé) : jamais
 # le bon fichier à analyser. Les vhosts d'EXCLUDE_VHOSTS sont sautés (trace --verbose).
 discover_valid_logs() {
-    local log_dir vhost latest file f
+    local log_dir vhost latest file f now today wday prev_day=""
     FILES_FOUND=()
     # Énumération des fichiers candidats selon le PROFIL (le parseur awk, lui, est commun). La
     # dérivation du « vhost » (pour EXCLUDE_VHOSTS/verbose) est propre à chaque layout.
     case "$(log_profile)" in
         ispconfig)   # ${BASE_DIR}/<vhost>/log/access.log (défaut historique — verbatim)
+            # Log de la VEILLE lu EN PLUS tant que la fenêtre WINDOW déborde sur la date précédente
+            # (≈ les 2 h qui suivent minuit). ISPConfig bascule access.log sur le nouveau
+            # AAAAMMJJ-access.log à 00:00 : sans ce complément, un run de 00:30 ne voyait que 30 min
+            # de trafic et un scan à cheval sur minuit échappait au seuil. Nom déduit de la DATE de
+            # début de fenêtre (jamais d'un symlink yesterday-access.log : absent de nombreux
+            # serveurs, périmé sur d'autres) ; un .gz n'est
+            # jamais lu. Dates via printf %()T : aucun fork. Seul le jour de début de fenêtre est
+            # ajouté — suffisant tant que WINDOW < 24 h.
+            printf -v now '%(%s)T' -1
+            printf -v today '%(%Y%m%d)T' "$now"
+            printf -v wday '%(%Y%m%d)T' "$(( now - WINDOW ))"
+            [ "$wday" != "$today" ] && prev_day="$wday"
             for log_dir in ${BASE_DIR}/*/log/; do
                 [ -d "$log_dir" ] || continue
                 vhost="${log_dir%/log/}"; vhost="${vhost##*/}"
                 if is_excluded_vhost "$vhost"; then [ "$VERBOSE" = true ] && t verbose.vhost_excluded "$vhost"; continue; fi
                 latest=$(candidate_log_for_dir "$log_dir")
+                # -ef : si access.log pointe ENCORE sur la veille (bascule ISPConfig en retard), c'est
+                # le même fichier — le lire deux fois doublerait les scores (faux bans).
+                f="${log_dir}${prev_day}-access.log"
+                if [ -n "$prev_day" ] && [ -f "$f" ] && ! [ "$f" -ef "${latest:-/nonexistent}" ]; then
+                    FILES_FOUND+=("$f")
+                fi
                 [ -n "$latest" ] && FILES_FOUND+=("$latest")
             done ;;
         plesk)       # /var/www/vhosts/<domaine>/logs/access_log|access_ssl_log

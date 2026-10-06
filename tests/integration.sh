@@ -611,3 +611,40 @@ ok "access.log pointant sur la veille : fichier lu une seule fois"
 
 sed -i '/^WINDOW=/d' /etc/ban_404.conf
 rm -rf "$FIX/www/site14.example"
+
+# ---------------------------------------------------------------------------
+echo "== Test 15 : le serveur ne se bannit jamais lui-même, même absent de WHITELIST_IP =="
+# 2.3.16. Incident du 6 oct. 2026 : des POST de test sur xmlrpc.php, émis par le serveur vers ses
+# propres sites, ont fait bannir 7 j son IP (circuit POST-flood) — la conf ne la whitelistait pas,
+# comme sur 11 serveurs du parc sur 15. Les adresses IPv4 globales de l'hôte sont désormais ajoutées
+# à WHITELIST_IP à l'exécution. La conf de test ne contient que 127.0.0.1 : c'est bien le moteur
+# qui doit protéger l'IP.
+SELF15=$(ip -4 -o addr show scope global | awk '{sub(/\/.*/,"",$4); print $4; exit}')
+if [ -z "$SELF15" ]; then
+    echo "  --  aucune IPv4 globale sur ce runner : test 15 sauté"
+else
+    D15="$FIX/www/site15.example/log"; mkdir -p "$D15"
+    TS15=$(LC_ALL=C date -u '+%d/%b/%Y:%H:%M:%S +0000')
+    : > "$D15/access.log"
+    for i in $(seq 1 30); do
+        printf '%s - - [%s] "POST /xmlrpc.php HTTP/1.1" 403 200 "-" "curl/8"\n' "$SELF15" "$TS15" >> "$D15/access.log"
+        printf '%s - - [%s] "GET /probe15-%d HTTP/1.1" 404 200 "-" "curl/8"\n' "$SELF15" "$TS15" "$i" >> "$D15/access.log"
+    done
+    # 15a. Flood POST + 404 émis par le serveur lui-même : jamais candidat.
+    OUT=$(bash "$ENGINE" --dry-run 2>&1 || true)
+    printf '%s\n' "$OUT" | grep -q "IP[^0-9]*$SELF15\b" && { printf '%s\n' "$OUT"; fail "15a : l'IP du serveur ($SELF15) est traitée comme suspecte"; }
+    bash "$ENGINE" >/dev/null 2>&1 || true
+    ipset test ban_404_list "$SELF15" 2>/dev/null && fail "15a : l'IP du serveur ($SELF15) a été bannie"
+    ok "flood émis par le serveur ($SELF15) : non banni"
+
+    # 15b. IP du serveur DÉJÀ bannie (cas du parc avant 2.3.16) : débannie au passage suivant.
+    ipset add ban_404_list "$SELF15" timeout 600 2>/dev/null || fail "15b : impossible de pré-bannir $SELF15"
+    bash "$ENGINE" >/dev/null 2>&1 || true
+    ipset test ban_404_list "$SELF15" 2>/dev/null && { ipset del ban_404_list "$SELF15" 2>/dev/null; fail "15b : l'IP du serveur bannie n'a pas été débannie"; }
+    ok "IP du serveur déjà bannie : débannie au passage suivant"
+
+    # 15c. Le diag l'annonce.
+    bash "$ENGINE" diag 2>&1 | grep -q "$SELF15" || fail "15c : le diag ne liste pas l'IP du serveur"
+    ok "le diag liste les IP du serveur"
+    rm -rf "$FIX/www/site15.example"
+fi

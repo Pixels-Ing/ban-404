@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="2.3.15"
+BAN404_VERSION="2.3.16"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -1010,6 +1010,18 @@ T_DE[diag.fw_set_missing]="Firewall-Set %s fehlt — keine Sperren aktiv."
 T_ES[diag.fw_set_missing]="Set del firewall %s ausente — no se aplica ningún bloqueo."
 T_IT[diag.fw_set_missing]="Set del firewall %s assente — nessun blocco applicato."
 
+T_EN[diag.self_ips_ok]="This server's own IPs, never banned: %s"
+T_FR[diag.self_ips_ok]="IP de ce serveur, jamais bannies : %s"
+T_DE[diag.self_ips_ok]="Eigene IPs dieses Servers, nie gesperrt: %s"
+T_ES[diag.self_ips_ok]="IP de este servidor, nunca bloqueadas: %s"
+T_IT[diag.self_ips_ok]="IP di questo server, mai bloccati: %s"
+
+T_EN[diag.self_ips_none]="This server's own IPs could not be determined ('ip' missing?) — add them to WHITELIST_IP."
+T_FR[diag.self_ips_none]="IP de ce serveur introuvables (commande 'ip' absente ?) — ajoute-les à WHITELIST_IP."
+T_DE[diag.self_ips_none]="Eigene IPs dieses Servers nicht ermittelbar ('ip' fehlt?) — bitte in WHITELIST_IP eintragen."
+T_ES[diag.self_ips_none]="No se pudieron determinar las IP de este servidor (¿falta 'ip'?) — añádelas a WHITELIST_IP."
+T_IT[diag.self_ips_none]="Impossibile determinare gli IP di questo server ('ip' assente?) — aggiungili a WHITELIST_IP."
+
 T_EN[diag.fw_rule_ok]="Firewall DROP rule present."
 T_FR[diag.fw_rule_ok]="Règle DROP du pare-feu présente."
 T_DE[diag.fw_rule_ok]="DROP-Regel der Firewall vorhanden."
@@ -1282,11 +1294,11 @@ T_DE[help.conf_repo_raw]="  REPO_RAW         Raw-URL des Repos für den Self-Upd
 T_ES[help.conf_repo_raw]="  REPO_RAW         URL raw del repositorio para el self-updater (obligatorio)."
 T_IT[help.conf_repo_raw]="  REPO_RAW         URL raw del repository per il self-updater (obbligatorio)."
 
-T_EN[help.conf_whitelist_ip]="  WHITELIST_IP     IPs never banned, exact match, '|'-separated (default 127.0.0.1)."
-T_FR[help.conf_whitelist_ip]="  WHITELIST_IP     IP jamais bannies, exactes, séparées par '|' (défaut 127.0.0.1)."
-T_DE[help.conf_whitelist_ip]="  WHITELIST_IP     Nie gesperrte IPs, exakt, '|'-getrennt (Standard 127.0.0.1)."
-T_ES[help.conf_whitelist_ip]="  WHITELIST_IP     IP nunca bloqueadas, exactas, separadas por '|' (por defecto 127.0.0.1)."
-T_IT[help.conf_whitelist_ip]="  WHITELIST_IP     IP mai bloccati, esatti, separati da '|' (predefinito 127.0.0.1)."
+T_EN[help.conf_whitelist_ip]="  WHITELIST_IP     IPs never banned, exact match, '|'-separated (default 127.0.0.1; this server's own IPs are always added)."
+T_FR[help.conf_whitelist_ip]="  WHITELIST_IP     IP jamais bannies, exactes, séparées par '|' (défaut 127.0.0.1 ; les IP du serveur sont toujours ajoutées)."
+T_DE[help.conf_whitelist_ip]="  WHITELIST_IP     Nie gesperrte IPs, exakt, '|'-getrennt (Standard 127.0.0.1; die eigenen IPs des Servers werden immer ergänzt)."
+T_ES[help.conf_whitelist_ip]="  WHITELIST_IP     IP nunca bloqueadas, exactas, separadas por '|' (por defecto 127.0.0.1; las IP del servidor se añaden siempre)."
+T_IT[help.conf_whitelist_ip]="  WHITELIST_IP     IP mai bloccati, esatti, separati da '|' (predefinito 127.0.0.1; gli IP del server sono sempre aggiunti)."
 
 T_EN[help.conf_whitelist_cidr]="  WHITELIST_CIDR   Subnets never banned, CIDR '|'-separated (e.g. 10.0.0.0/8|192.168.0.0/16)."
 T_FR[help.conf_whitelist_cidr]="  WHITELIST_CIDR   Sous-réseaux jamais bannis, CIDR séparés par '|' (ex. 10.0.0.0/8|192.168.0.0/16)."
@@ -1890,6 +1902,25 @@ CONF_FILE="/etc/ban_404.conf"
 : "${BAN404_LANG:=$(detect_lang)}"
 BAN404_LANG="${BAN404_LANG,,}"
 case "$BAN404_LANG" in en|fr|de|es|it) ;; *) BAN404_LANG=en ;; esac
+
+# --- Le serveur ne se bannit JAMAIS lui-même (depuis 2.3.16) ---
+# L'installeur ajoute l'IP du serveur à WHITELIST_IP, mais seulement depuis peu : 11 serveurs du
+# parc sur 15 en étaient dépourvus. Or le serveur s'appelle lui-même (wp-cron, boucle locale de
+# WordPress, contrôles d'admin) et peut franchir un seuil comme n'importe quel client — incident du
+# 6 oct. 2026 : des POST de test sur xmlrpc.php ont fait bannir 7 j l'IP du serveur par le circuit
+# POST-flood, coupant toutes ses requêtes vers ses propres sites. On ajoute donc, à l'exécution et
+# sans toucher à la conf, TOUTES ses adresses IPv4 globales en tête de WHITELIST_IP : le awk les
+# écarte, et enforce_whitelist_unban débannit au passage suivant une IP déjà bannie.
+SELF_IPS=""
+_ipbin=$(command -v ip 2>/dev/null || { [ -x /sbin/ip ] && echo /sbin/ip; } || { [ -x /usr/sbin/ip ] && echo /usr/sbin/ip; })
+if [ -n "$_ipbin" ]; then
+    SELF_IPS=$("$_ipbin" -4 -o addr show scope global 2>/dev/null \
+        | awk '{ a = $4; sub(/\/.*/, "", a); if (a != "" && !seen[a]++) o = o (o ? "|" : "") a } END { print o }')
+fi
+for _ip in ${SELF_IPS//|/ }; do
+    case "|$WHITELIST_IP|" in *"|$_ip|"*) ;; *) WHITELIST_IP="${_ip}${WHITELIST_IP:+|$WHITELIST_IP}" ;; esac
+done
+unset _ip _ipbin
 
 # t <clé> [args...] : imprime la traduction (\n du format interprétés) + saut de ligne final.
 # Le format est TOUJOURS notre chaîne ; les données ($ip, $count...) passent en arguments
@@ -3976,6 +4007,11 @@ run_diag_checks() {
     if platform_supported; then
         diag_line ok "$(t diag.platform_ok "$pf_id")"
         diag_line ok "$(t diag.fw_backend "$(fw_backend_label)" "$pf_avail")"   # backend EFFECTIF (FW_BACKEND) + disponibles
+        if [ -n "$SELF_IPS" ]; then   # whitelist automatique de ses propres adresses (2.3.16)
+            diag_line ok "$(t diag.self_ips_ok "${SELF_IPS//|/, }")"
+        else
+            diag_line warn "$(t diag.self_ips_none)"
+        fi
         if [ "$(id -u)" -eq 0 ]; then
             if fw_set_exists; then
                 diag_line ok "$(t diag.fw_set_ok "$IPSET_NAME" "$(fw_count "$IPSET_NAME")")"

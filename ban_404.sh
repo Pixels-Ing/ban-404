@@ -3150,6 +3150,98 @@ build_recidivists() {
     return 0
 }
 
+# --- Plages /24 suspectes : échecs d'authentification FTP/SMTP (2.3.17, OBSERVATION) ------
+# Campagne d'octobre 2026 : toute la plage 69.42.211.0/24 testait des mots de passe FTP sur le
+# parc, une adresse différente à chaque connexion. fail2ban, qui bannit adresse par adresse, ne la
+# voyait jamais franchir son seuil, et elle a saturé les 50 connexions de pure-ftpd sur plusieurs
+# serveurs. ban_404 compte donc ces échecs PAR PLAGE /24. Mode observation : rien n'est banni, la
+# plage est journalisée et listée au résumé, le temps de mesurer les faux positifs.
+#
+# Lecture INCRÉMENTALE des journaux (position par chemin + inode dans RANGE_POS_FILE), et non par
+# date : les formats d'horodatage varient d'un serveur à l'autre (syslog classique, ISO, mois en
+# français « oct. 13 » sur une partie du parc). Chaque échec est daté à l'heure du passage qui le
+# lit ; la cadence (≤ 60 min) borne l'erreur. Premier passage : on part de la FIN du journal (aucun
+# vieil échec daté à tort de maintenant) ; journal tourné (inode changé) ou tronqué : on repart du
+# début du nouveau fichier.
+range_excluded() {  # $1 = plage a.b.c.0/24 ; 0 = ne jamais la signaler
+    local p="${1%.0/24}" w IFS='|'
+    case "$p." in
+        10.*|127.*|192.168.*|169.254.*|172.1[6-9].*|172.2[0-9].*|172.3[01].*) return 0 ;;
+    esac
+    for w in $WHITELIST_IP; do [ "${w%.*}" = "$p" ] && return 0; done   # dont les IP du serveur
+    for w in $WHITELIST_CIDR; do
+        [ -n "$w" ] || continue
+        ip_in_cidr "$p.0" "$w" && return 0              # plage incluse dans un CIDR whitelisté
+        ip_in_cidr "${w%/*}" "$p.0/24" && return 0      # CIDR plus étroit logé dans la plage
+    done
+    return 1
+}
+range_source() {  # $1 = service  $2 = journal  $3 = programme awk imprimant l'IP de chaque échec
+    local svc="$1" f="$2" ino size pos oino
+    [ -r "$f" ] || return 0
+    ino=$(stat -c %i "$f" 2>/dev/null) || return 0
+    size=$(stat -c %s "$f" 2>/dev/null) || return 0
+    read -r oino pos <<< "$(awk -v f="$f" '$1 == f { print $2, $3; exit }' "$RANGE_POS_FILE" 2>/dev/null)"
+    if [ -z "$pos" ]; then pos=$size
+    elif [ "$oino" != "$ino" ] || [ "$pos" -gt "$size" ] 2>/dev/null; then pos=0; fi
+    RANGE_NEWPOS+=("$f $ino $size")
+    [ "$size" -gt "$pos" ] 2>/dev/null || return 0
+    tail -c +"$((pos + 1))" "$f" 2>/dev/null | head -c "$((size - pos))" | awk "$3" | sort | uniq -c \
+        | awk -v n="$RANGE_NOW" -v s="$svc" '$2 ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ { print n, s, $2, $1 }' >> "$RANGE_TMP"
+    return 0
+}
+range_watch_sample() {
+    [ "$RANGE_WATCH" = observe ] || return 0
+    local net nips nf svs known obs_tmp
+    RANGE_NOW=$(date +%s); RANGE_NEWPOS=()
+    mkdir -p "$(dirname "$RANGE_STATE_FILE")" 2>/dev/null
+    RANGE_TMP=$(mktemp 2>/dev/null) || return 0
+    range_source ftp "$RANGE_FTP_LOG" \
+        '/pure-ftpd/ && /Authentication failed/ && match($0, /@[0-9.]+\)/) { print substr($0, RSTART + 1, RLENGTH - 2) }'
+    range_source smtp "$RANGE_SMTP_LOG" \
+        '/SASL/ && /authentication failed/ && match($0, /\[[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+\]/) { print substr($0, RSTART + 1, RLENGTH - 2) }'
+    printf '%s\n' "${RANGE_NEWPOS[@]}" > "$RANGE_POS_FILE.tmp" 2>/dev/null && mv -f "$RANGE_POS_FILE.tmp" "$RANGE_POS_FILE" 2>/dev/null
+    # Fenêtre glissante : échecs de moins de WINDOW s + ceux de ce passage.
+    { awk -v cut="$((RANGE_NOW - WINDOW))" 'NF == 4 && $1 >= cut' "$RANGE_STATE_FILE" 2>/dev/null; cat "$RANGE_TMP"; } \
+        > "$RANGE_STATE_FILE.tmp" 2>/dev/null && mv -f "$RANGE_STATE_FILE.tmp" "$RANGE_STATE_FILE" 2>/dev/null
+    rm -f "$RANGE_TMP"
+    # Plages franchissant les deux seuils, puis mise à jour des observations (purge à 7 j).
+    obs_tmp=$(mktemp 2>/dev/null) || return 0
+    awk -v cut="$((RANGE_NOW - 604800))" 'NF >= 6 && $3 >= cut' "$RANGE_OBS_FILE" 2>/dev/null > "$obs_tmp"
+    while read -r net nips nf svs; do
+        [ "$nips" -ge "$RANGE_MIN_IPS" ] 2>/dev/null && [ "$nf" -ge "$RANGE_MIN_FAILS" ] 2>/dev/null || continue
+        range_excluded "$net" && continue
+        # Journalisé une fois par épisode : plage inconnue, ou absente depuis plus de 24 h.
+        known=$(awk -v n="$net" -v cut="$((RANGE_NOW - 86400))" '$1 == n && $3 >= cut { print 1; exit }' "$obs_tmp")
+        [ -n "$known" ] || t_log range.observed "$net" "$nips" "$nf" "$(fmt_duration "$WINDOW")" "$svs" >/dev/null
+        awk -v n="$net" -v now="$RANGE_NOW" -v i="$nips" -v f="$nf" -v s="$svs" '
+            $1 == n { hit = 1; $3 = now; if (i + 0 > $4 + 0) $4 = i; if (f + 0 > $5 + 0) $5 = f
+                      split(s, a, "+"); for (k in a) if (index("+" $6 "+", "+" a[k] "+") == 0) $6 = $6 "+" a[k] }
+            { print }
+            END { if (!hit) print n, now, now, i, f, s }' "$obs_tmp" > "$obs_tmp.n" && mv -f "$obs_tmp.n" "$obs_tmp"
+    done < <(awk '{ split($3, o, "."); net = o[1] "." o[2] "." o[3] ".0/24"
+                    if (!((net SUBSEP $3) in vu)) { vu[net SUBSEP $3] = 1; ips[net]++ }
+                    nf[net] += $4
+                    if (index("+" sv[net] "+", "+" $2 "+") == 0) sv[net] = sv[net] (sv[net] == "" ? "" : "+") $2 }
+              END { for (n in ips) print n, ips[n], nf[n], sv[n] }' "$RANGE_STATE_FILE" 2>/dev/null)
+    mv -f "$obs_tmp" "$RANGE_OBS_FILE" 2>/dev/null || rm -f "$obs_tmp"
+    return 0
+}
+# Bloc du résumé / de stats : plages vues sur 24 h, les plus actives d'abord (≤ 10).
+build_ranges_observed() {
+    [ "$RANGE_WATCH" = observe ] && [ -r "$RANGE_OBS_FILE" ] || return 0
+    local rows net first last mi mf sv
+    rows=$(awk -v cut="$(( $(date +%s) - 86400 ))" 'NF >= 6 && $3 >= cut' "$RANGE_OBS_FILE" 2>/dev/null \
+        | sort -k5,5nr | head -n 10)
+    [ -n "$rows" ] || return 0
+    printf '\n── %s ──\n' "$(t stats.ranges_header)"
+    while read -r net first last mi mf sv; do
+        [ -n "$net" ] || continue
+        t stats.range_item "$net" "$mi" "$mf" "$sv" "$(date -d "@$last" '+%Y-%m-%d %H:%M' 2>/dev/null || echo "$last")"
+    done <<< "$rows"
+    return 0
+}
+
 build_stats_text() {
     local bans unbans evt cutoff24 cnt ip rdns updater upd_ver issue div kind sc top_raw top404 tophp
     # Couleur ANSI des triangles seulement au terminal ([ -t 1 ]) ; sinon 'plain'. Le résumé notifié
@@ -4855,98 +4947,6 @@ finish_run() {
         cadence_adjust "$_cad_real"         # hystérésis du mode CRON_STEP=auto (no-op sinon)
     fi
     self_heal_update_trigger
-    return 0
-}
-
-# --- Plages /24 suspectes : échecs d'authentification FTP/SMTP (2.3.17, OBSERVATION) ------
-# Campagne d'octobre 2026 : toute la plage 69.42.211.0/24 testait des mots de passe FTP sur le
-# parc, une adresse différente à chaque connexion. fail2ban, qui bannit adresse par adresse, ne la
-# voyait jamais franchir son seuil, et elle a saturé les 50 connexions de pure-ftpd sur plusieurs
-# serveurs. ban_404 compte donc ces échecs PAR PLAGE /24. Mode observation : rien n'est banni, la
-# plage est journalisée et listée au résumé, le temps de mesurer les faux positifs.
-#
-# Lecture INCRÉMENTALE des journaux (position par chemin + inode dans RANGE_POS_FILE), et non par
-# date : les formats d'horodatage varient d'un serveur à l'autre (syslog classique, ISO, mois en
-# français « oct. 13 » sur une partie du parc). Chaque échec est daté à l'heure du passage qui le
-# lit ; la cadence (≤ 60 min) borne l'erreur. Premier passage : on part de la FIN du journal (aucun
-# vieil échec daté à tort de maintenant) ; journal tourné (inode changé) ou tronqué : on repart du
-# début du nouveau fichier.
-range_excluded() {  # $1 = plage a.b.c.0/24 ; 0 = ne jamais la signaler
-    local p="${1%.0/24}" w IFS='|'
-    case "$p." in
-        10.*|127.*|192.168.*|169.254.*|172.1[6-9].*|172.2[0-9].*|172.3[01].*) return 0 ;;
-    esac
-    for w in $WHITELIST_IP; do [ "${w%.*}" = "$p" ] && return 0; done   # dont les IP du serveur
-    for w in $WHITELIST_CIDR; do
-        [ -n "$w" ] || continue
-        ip_in_cidr "$p.0" "$w" && return 0              # plage incluse dans un CIDR whitelisté
-        ip_in_cidr "${w%/*}" "$p.0/24" && return 0      # CIDR plus étroit logé dans la plage
-    done
-    return 1
-}
-range_source() {  # $1 = service  $2 = journal  $3 = programme awk imprimant l'IP de chaque échec
-    local svc="$1" f="$2" ino size pos oino
-    [ -r "$f" ] || return 0
-    ino=$(stat -c %i "$f" 2>/dev/null) || return 0
-    size=$(stat -c %s "$f" 2>/dev/null) || return 0
-    read -r oino pos <<< "$(awk -v f="$f" '$1 == f { print $2, $3; exit }' "$RANGE_POS_FILE" 2>/dev/null)"
-    if [ -z "$pos" ]; then pos=$size
-    elif [ "$oino" != "$ino" ] || [ "$pos" -gt "$size" ] 2>/dev/null; then pos=0; fi
-    RANGE_NEWPOS+=("$f $ino $size")
-    [ "$size" -gt "$pos" ] 2>/dev/null || return 0
-    tail -c +"$((pos + 1))" "$f" 2>/dev/null | head -c "$((size - pos))" | awk "$3" | sort | uniq -c \
-        | awk -v n="$RANGE_NOW" -v s="$svc" '$2 ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ { print n, s, $2, $1 }' >> "$RANGE_TMP"
-    return 0
-}
-range_watch_sample() {
-    [ "$RANGE_WATCH" = observe ] || return 0
-    local net nips nf svs known obs_tmp
-    RANGE_NOW=$(date +%s); RANGE_NEWPOS=()
-    mkdir -p "$(dirname "$RANGE_STATE_FILE")" 2>/dev/null
-    RANGE_TMP=$(mktemp 2>/dev/null) || return 0
-    range_source ftp "$RANGE_FTP_LOG" \
-        '/pure-ftpd/ && /Authentication failed/ && match($0, /@[0-9.]+\)/) { print substr($0, RSTART + 1, RLENGTH - 2) }'
-    range_source smtp "$RANGE_SMTP_LOG" \
-        '/SASL/ && /authentication failed/ && match($0, /\[[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+\]/) { print substr($0, RSTART + 1, RLENGTH - 2) }'
-    printf '%s\n' "${RANGE_NEWPOS[@]}" > "$RANGE_POS_FILE.tmp" 2>/dev/null && mv -f "$RANGE_POS_FILE.tmp" "$RANGE_POS_FILE" 2>/dev/null
-    # Fenêtre glissante : échecs de moins de WINDOW s + ceux de ce passage.
-    { awk -v cut="$((RANGE_NOW - WINDOW))" 'NF == 4 && $1 >= cut' "$RANGE_STATE_FILE" 2>/dev/null; cat "$RANGE_TMP"; } \
-        > "$RANGE_STATE_FILE.tmp" 2>/dev/null && mv -f "$RANGE_STATE_FILE.tmp" "$RANGE_STATE_FILE" 2>/dev/null
-    rm -f "$RANGE_TMP"
-    # Plages franchissant les deux seuils, puis mise à jour des observations (purge à 7 j).
-    obs_tmp=$(mktemp 2>/dev/null) || return 0
-    awk -v cut="$((RANGE_NOW - 604800))" 'NF >= 6 && $3 >= cut' "$RANGE_OBS_FILE" 2>/dev/null > "$obs_tmp"
-    while read -r net nips nf svs; do
-        [ "$nips" -ge "$RANGE_MIN_IPS" ] 2>/dev/null && [ "$nf" -ge "$RANGE_MIN_FAILS" ] 2>/dev/null || continue
-        range_excluded "$net" && continue
-        # Journalisé une fois par épisode : plage inconnue, ou absente depuis plus de 24 h.
-        known=$(awk -v n="$net" -v cut="$((RANGE_NOW - 86400))" '$1 == n && $3 >= cut { print 1; exit }' "$obs_tmp")
-        [ -n "$known" ] || t_log range.observed "$net" "$nips" "$nf" "$(fmt_duration "$WINDOW")" "$svs" >/dev/null
-        awk -v n="$net" -v now="$RANGE_NOW" -v i="$nips" -v f="$nf" -v s="$svs" '
-            $1 == n { hit = 1; $3 = now; if (i + 0 > $4 + 0) $4 = i; if (f + 0 > $5 + 0) $5 = f
-                      split(s, a, "+"); for (k in a) if (index("+" $6 "+", "+" a[k] "+") == 0) $6 = $6 "+" a[k] }
-            { print }
-            END { if (!hit) print n, now, now, i, f, s }' "$obs_tmp" > "$obs_tmp.n" && mv -f "$obs_tmp.n" "$obs_tmp"
-    done < <(awk '{ split($3, o, "."); net = o[1] "." o[2] "." o[3] ".0/24"
-                    if (!((net SUBSEP $3) in vu)) { vu[net SUBSEP $3] = 1; ips[net]++ }
-                    nf[net] += $4
-                    if (index("+" sv[net] "+", "+" $2 "+") == 0) sv[net] = sv[net] (sv[net] == "" ? "" : "+") $2 }
-              END { for (n in ips) print n, ips[n], nf[n], sv[n] }' "$RANGE_STATE_FILE" 2>/dev/null)
-    mv -f "$obs_tmp" "$RANGE_OBS_FILE" 2>/dev/null || rm -f "$obs_tmp"
-    return 0
-}
-# Bloc du résumé / de stats : plages vues sur 24 h, les plus actives d'abord (≤ 10).
-build_ranges_observed() {
-    [ "$RANGE_WATCH" = observe ] && [ -r "$RANGE_OBS_FILE" ] || return 0
-    local rows net first last mi mf sv
-    rows=$(awk -v cut="$(( $(date +%s) - 86400 ))" 'NF >= 6 && $3 >= cut' "$RANGE_OBS_FILE" 2>/dev/null \
-        | sort -k5,5nr | head -n 10)
-    [ -n "$rows" ] || return 0
-    printf '\n── %s ──\n' "$(t stats.ranges_header)"
-    while read -r net first last mi mf sv; do
-        [ -n "$net" ] || continue
-        t stats.range_item "$net" "$mi" "$mf" "$sv" "$(date -d "@$last" '+%Y-%m-%d %H:%M' 2>/dev/null || echo "$last")"
-    done <<< "$rows"
     return 0
 }
 

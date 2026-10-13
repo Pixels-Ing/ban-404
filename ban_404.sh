@@ -3158,8 +3158,9 @@ build_recidivists() {
 # plage est journalisée et listée au résumé, le temps de mesurer les faux positifs.
 #
 # Lecture INCRÉMENTALE des journaux (position par chemin + inode dans RANGE_POS_FILE), et non par
-# date : les formats d'horodatage varient d'un serveur à l'autre (syslog classique, ISO, mois en
-# français « oct. 13 » sur une partie du parc). Chaque échec est daté à l'heure du passage qui le
+# date : les formats d'horodatage varient d'un serveur à l'autre (syslog classique, ISO 8601), et
+# une date calculée par `date` suit la locale du serveur (« oct. 13 » sous fr_FR) — piège vécu
+# lors de l'état des lieux du parc. Chaque échec est daté à l'heure du passage qui le
 # lit ; la cadence (≤ 60 min) borne l'erreur. Premier passage : on part de la FIN du journal (aucun
 # vieil échec daté à tort de maintenant) ; journal tourné (inode changé) ou tronqué : on repart du
 # début du nouveau fichier.

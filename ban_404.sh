@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="2.3.16"
+BAN404_VERSION="2.3.17"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -20,6 +20,11 @@ RUN_STAMP_FILE="/var/lib/ban_404/last_run"         # repère « le moteur a fini
 METRICS_FILE="/var/lib/ban_404/metrics"            # historique horaire load/IO/réseau/mémoire (moyennes 24 h du résumé)
 IPSET_COUNTS_FILE="/var/lib/ban_404/ipset_counts"  # historique horaire du nb d'entrées par ipset (évol. + tendance 24 h du résumé)
 OFFENDERS_FILE="/var/lib/ban_404/offenders"        # mémoire des récidives : « ip nb_bans epoch_fin_du_dernier_ban »
+RANGE_STATE_FILE="/var/lib/ban_404/range_fails"     # échecs d'authentification FTP/SMTP de la fenêtre : « epoch service ip nb »
+RANGE_POS_FILE="/var/lib/ban_404/range_pos"         # position de lecture des journaux : « chemin inode octets »
+RANGE_OBS_FILE="/var/lib/ban_404/range_observed"    # plages /24 suspectes : « plage 1re_vue dernière_vue max_ip max_échecs services »
+RANGE_FTP_LOG="/var/log/syslog"                     # pure-ftpd : « (?@IP) [WARNING] Authentication failed »
+RANGE_SMTP_LOG="/var/log/mail.log"                  # postfix : « unknown[IP]: SASL LOGIN authentication failed »
 PLATFORM_VALIDATED=""   # fail-safe plateforme : vide = auto-détection (os-release distro + backend iptables/ipset) ;
                         # true = forcer l'application même sur plateforme non reconnue (l'admin assume le risque) ; false = forcer la lecture seule
 
@@ -41,6 +46,19 @@ ESCALATION_MEMORY=2073600
 # flood de 500 x 404 dans la fenêtre, ou 5 chemins-pièges touchés (100/hit), ou ~400 POST de
 # brute-force (100 forfaitaires + 1/POST). 0 => désactivé.
 AGGRESSIVE_SCORE=500
+# Surveillance des PLAGES /24 sur les échecs d'authentification FTP (pure-ftpd) et SMTP (postfix
+# SASL), depuis 2.3.17. Née de la campagne d'octobre 2026 : toute la plage 69.42.211.0/24 testait
+# des mots de passe FTP sur le parc, une adresse différente à chaque fois, sous le seuil de
+# fail2ban (qui bannit adresse par adresse) — jusqu'à saturer les 50 connexions de pure-ftpd.
+# Une plage est SUSPECTE si, dans la fenêtre WINDOW, au moins RANGE_MIN_IPS adresses distinctes y
+# ont échoué ET au moins RANGE_MIN_FAILS échecs au total. « observe » = OBSERVATION SEULE : rien
+# n'est banni, la plage est journalisée ([i], une fois par épisode de 24 h) et listée au résumé et
+# au diag, pour mesurer les faux positifs avant tout blocage. « off » = désactivé.
+# Jamais signalées : plages privées, et plages contenant une adresse de WHITELIST_IP (dont celles
+# du serveur) ou chevauchant WHITELIST_CIDR.
+RANGE_WATCH=observe
+RANGE_MIN_IPS=5
+RANGE_MIN_FAILS=50
 HONEYPOT_PATTERN='\.env|wp-config\.php|phpmyadmin|config\.json|setup\.php|actuator|xmlrpc\.php'
 NOISE_PATTERN='\.(jpg|jpeg|png|gif|webp|ico|css|js|svg|woff2?|map)$|apple-touch-icon|favicon|browserconfig\.xml|mstile|autodiscover\.xml|sitemap\.xml|robots\.txt|ads\.txt|\.well-known/(security\.txt|pki-validation)'
 # Signatures sécurité testées sur la requête ($7) QUEL QUE SOIT le statut HTTP (contrairement aux
@@ -1021,6 +1039,42 @@ T_FR[diag.self_ips_none]="IP de ce serveur introuvables (commande 'ip' absente ?
 T_DE[diag.self_ips_none]="Eigene IPs dieses Servers nicht ermittelbar ('ip' fehlt?) — bitte in WHITELIST_IP eintragen."
 T_ES[diag.self_ips_none]="No se pudieron determinar las IP de este servidor (¿falta 'ip'?) — añádelas a WHITELIST_IP."
 T_IT[diag.self_ips_none]="Impossibile determinare gli IP di questo server ('ip' assente?) — aggiungili a WHITELIST_IP."
+
+T_EN[diag.range_observe]="Range watch (FTP/SMTP auth failures, /24): observation only — threshold %s IPs and %s failures in %s; %s suspicious range(s) in 24 h"
+T_FR[diag.range_observe]="Surveillance des plages (échecs d'authentification FTP/SMTP, /24) : observation seule — seuil %s IP et %s échecs en %s ; %s plage(s) suspecte(s) sur 24 h"
+T_DE[diag.range_observe]="Bereichsüberwachung (FTP/SMTP-Anmeldefehler, /24): nur Beobachtung — Schwelle %s IPs und %s Fehler in %s; %s verdächtige(r) Bereich(e) in 24 h"
+T_ES[diag.range_observe]="Vigilancia de rangos (fallos de autenticación FTP/SMTP, /24): solo observación — umbral %s IP y %s fallos en %s; %s rango(s) sospechoso(s) en 24 h"
+T_IT[diag.range_observe]="Sorveglianza intervalli (autenticazioni FTP/SMTP fallite, /24): solo osservazione — soglia %s IP e %s fallimenti in %s; %s intervallo/i sospetto/i in 24 h"
+
+T_EN[diag.range_off]="Range watch (FTP/SMTP auth failures, /24): off (RANGE_WATCH)"
+T_FR[diag.range_off]="Surveillance des plages (échecs d'authentification FTP/SMTP, /24) : désactivée (RANGE_WATCH)"
+T_DE[diag.range_off]="Bereichsüberwachung (FTP/SMTP-Anmeldefehler, /24): aus (RANGE_WATCH)"
+T_ES[diag.range_off]="Vigilancia de rangos (fallos de autenticación FTP/SMTP, /24): desactivada (RANGE_WATCH)"
+T_IT[diag.range_off]="Sorveglianza intervalli (autenticazioni FTP/SMTP fallite, /24): disattivata (RANGE_WATCH)"
+
+T_EN[range.observed]="[i] Suspicious range (observation only, not banned): %s — %s IPs, %s FTP/SMTP auth failures in %s (%s)"
+T_FR[range.observed]="[i] Plage suspecte (observation seule, non bannie) : %s — %s IP, %s échecs d'authentification FTP/SMTP en %s (%s)"
+T_DE[range.observed]="[i] Verdächtiger Bereich (nur Beobachtung, nicht gesperrt): %s — %s IPs, %s FTP/SMTP-Anmeldefehler in %s (%s)"
+T_ES[range.observed]="[i] Rango sospechoso (solo observación, no bloqueado): %s — %s IP, %s fallos de autenticación FTP/SMTP en %s (%s)"
+T_IT[range.observed]="[i] Intervallo sospetto (solo osservazione, non bloccato): %s — %s IP, %s autenticazioni FTP/SMTP fallite in %s (%s)"
+
+T_EN[stats.ranges_header]="Suspicious ranges, 24 h (observation: none banned)"
+T_FR[stats.ranges_header]="Plages suspectes sur 24 h (observation : aucune bannie)"
+T_DE[stats.ranges_header]="Verdächtige Bereiche, 24 h (Beobachtung: keiner gesperrt)"
+T_ES[stats.ranges_header]="Rangos sospechosos, 24 h (observación: ninguno bloqueado)"
+T_IT[stats.ranges_header]="Intervalli sospetti, 24 h (osservazione: nessuno bloccato)"
+
+T_EN[stats.range_item]="%s — up to %s IPs and %s auth failures per window (%s), last seen %s"
+T_FR[stats.range_item]="%s — jusqu'à %s IP et %s échecs d'authentification par fenêtre (%s), vue en dernier le %s"
+T_DE[stats.range_item]="%s — bis zu %s IPs und %s Anmeldefehler pro Fenster (%s), zuletzt gesehen %s"
+T_ES[stats.range_item]="%s — hasta %s IP y %s fallos de autenticación por ventana (%s), visto por última vez %s"
+T_IT[stats.range_item]="%s — fino a %s IP e %s autenticazioni fallite per finestra (%s), visto l'ultima volta %s"
+
+T_EN[help.conf_range_watch]="  RANGE_WATCH  Watch /24 ranges on FTP/SMTP auth failures: observe (default, logs and reports, bans nothing) or off. Thresholds RANGE_MIN_IPS (5) and RANGE_MIN_FAILS (50) within WINDOW."
+T_FR[help.conf_range_watch]="  RANGE_WATCH  Surveillance des plages /24 sur les échecs d'authentification FTP/SMTP : observe (défaut, journalise et signale, ne bannit rien) ou off. Seuils RANGE_MIN_IPS (5) et RANGE_MIN_FAILS (50) dans WINDOW."
+T_DE[help.conf_range_watch]="  RANGE_WATCH  Überwachung von /24-Bereichen bei FTP/SMTP-Anmeldefehlern: observe (Standard, protokolliert und meldet, sperrt nichts) oder off. Schwellen RANGE_MIN_IPS (5) und RANGE_MIN_FAILS (50) in WINDOW."
+T_ES[help.conf_range_watch]="  RANGE_WATCH  Vigilancia de rangos /24 según los fallos de autenticación FTP/SMTP: observe (por defecto, registra e informa, no bloquea nada) u off. Umbrales RANGE_MIN_IPS (5) y RANGE_MIN_FAILS (50) en WINDOW."
+T_IT[help.conf_range_watch]="  RANGE_WATCH  Sorveglianza degli intervalli /24 sulle autenticazioni FTP/SMTP fallite: observe (predefinito, registra e segnala, non blocca nulla) o off. Soglie RANGE_MIN_IPS (5) e RANGE_MIN_FAILS (50) in WINDOW."
 
 T_EN[diag.fw_rule_ok]="Firewall DROP rule present."
 T_FR[diag.fw_rule_ok]="Règle DROP du pare-feu présente."
@@ -2293,6 +2347,7 @@ show_help() {
     t help.conf_ban_escalation
     t help.conf_escalation_memory
     t help.conf_aggressive_score
+    t help.conf_range_watch
     t help.conf_nickname
     t help.conf_webhook
     t help.conf_chatcard
@@ -3255,6 +3310,8 @@ build_stats_text() {
     fi
     # --- Récidivistes (fenêtre d'épreuve, source = fichier d'état) : muet s'il n'y en a aucun ---
     build_recidivists
+    # --- Plages /24 suspectes (échecs FTP/SMTP, observation) : muet s'il n'y en a aucune ---
+    build_ranges_observed
 }
 do_list() {
     local members ip rest to_raw to fam key ipkey
@@ -4011,6 +4068,12 @@ run_diag_checks() {
             diag_line ok "$(t diag.self_ips_ok "${SELF_IPS//|/, }")"
         else
             diag_line warn "$(t diag.self_ips_none)"
+        fi
+        if [ "$RANGE_WATCH" = observe ]; then   # plages /24 suspectes (2.3.17)
+            diag_line ok "$(t diag.range_observe "$RANGE_MIN_IPS" "$RANGE_MIN_FAILS" "$(fmt_duration "$WINDOW")" \
+                "$(awk -v cut="$(( $(date +%s) - 86400 ))" 'NF >= 6 && $3 >= cut' "$RANGE_OBS_FILE" 2>/dev/null | grep -c .)")"
+        else
+            diag_line ok "$(t diag.range_off)"
         fi
         if [ "$(id -u)" -eq 0 ]; then
             if fw_set_exists; then
@@ -4782,6 +4845,7 @@ finish_run() {
         touch "$RUN_STAMP_FILE" 2>/dev/null
         metrics_sample                      # échantillon horaire (moyennes 24 h) ; même garde DRY_RUN+root
         ipset_counts_sample                 # échantillon horaire du nb d'entrées par ipset (évol. + tendance 24 h)
+        range_watch_sample                  # plages /24 suspectes (échecs FTP/SMTP), observation seule
         # Cadence auto : ne compter QUE les bans « réels » (hp=0, flood volume-404) — pas le bruit du
         # circuit honeypot (hp=1 : honeypot + signatures SECURITY/POST-flood). Le scan de fond d'un
         # mutualisé bannit une nouvelle IP honeypot toutes les ~10-15 min ; le compter épinglait la
@@ -4791,6 +4855,98 @@ finish_run() {
         cadence_adjust "$_cad_real"         # hystérésis du mode CRON_STEP=auto (no-op sinon)
     fi
     self_heal_update_trigger
+    return 0
+}
+
+# --- Plages /24 suspectes : échecs d'authentification FTP/SMTP (2.3.17, OBSERVATION) ------
+# Campagne d'octobre 2026 : toute la plage 69.42.211.0/24 testait des mots de passe FTP sur le
+# parc, une adresse différente à chaque connexion. fail2ban, qui bannit adresse par adresse, ne la
+# voyait jamais franchir son seuil, et elle a saturé les 50 connexions de pure-ftpd sur plusieurs
+# serveurs. ban_404 compte donc ces échecs PAR PLAGE /24. Mode observation : rien n'est banni, la
+# plage est journalisée et listée au résumé, le temps de mesurer les faux positifs.
+#
+# Lecture INCRÉMENTALE des journaux (position par chemin + inode dans RANGE_POS_FILE), et non par
+# date : les formats d'horodatage varient d'un serveur à l'autre (syslog classique, ISO, mois en
+# français « oct. 13 » sur une partie du parc). Chaque échec est daté à l'heure du passage qui le
+# lit ; la cadence (≤ 60 min) borne l'erreur. Premier passage : on part de la FIN du journal (aucun
+# vieil échec daté à tort de maintenant) ; journal tourné (inode changé) ou tronqué : on repart du
+# début du nouveau fichier.
+range_excluded() {  # $1 = plage a.b.c.0/24 ; 0 = ne jamais la signaler
+    local p="${1%.0/24}" w IFS='|'
+    case "$p." in
+        10.*|127.*|192.168.*|169.254.*|172.1[6-9].*|172.2[0-9].*|172.3[01].*) return 0 ;;
+    esac
+    for w in $WHITELIST_IP; do [ "${w%.*}" = "$p" ] && return 0; done   # dont les IP du serveur
+    for w in $WHITELIST_CIDR; do
+        [ -n "$w" ] || continue
+        ip_in_cidr "$p.0" "$w" && return 0              # plage incluse dans un CIDR whitelisté
+        ip_in_cidr "${w%/*}" "$p.0/24" && return 0      # CIDR plus étroit logé dans la plage
+    done
+    return 1
+}
+range_source() {  # $1 = service  $2 = journal  $3 = programme awk imprimant l'IP de chaque échec
+    local svc="$1" f="$2" ino size pos oino
+    [ -r "$f" ] || return 0
+    ino=$(stat -c %i "$f" 2>/dev/null) || return 0
+    size=$(stat -c %s "$f" 2>/dev/null) || return 0
+    read -r oino pos <<< "$(awk -v f="$f" '$1 == f { print $2, $3; exit }' "$RANGE_POS_FILE" 2>/dev/null)"
+    if [ -z "$pos" ]; then pos=$size
+    elif [ "$oino" != "$ino" ] || [ "$pos" -gt "$size" ] 2>/dev/null; then pos=0; fi
+    RANGE_NEWPOS+=("$f $ino $size")
+    [ "$size" -gt "$pos" ] 2>/dev/null || return 0
+    tail -c +"$((pos + 1))" "$f" 2>/dev/null | head -c "$((size - pos))" | awk "$3" | sort | uniq -c \
+        | awk -v n="$RANGE_NOW" -v s="$svc" '$2 ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ { print n, s, $2, $1 }' >> "$RANGE_TMP"
+    return 0
+}
+range_watch_sample() {
+    [ "$RANGE_WATCH" = observe ] || return 0
+    local net nips nf svs known obs_tmp
+    RANGE_NOW=$(date +%s); RANGE_NEWPOS=()
+    mkdir -p "$(dirname "$RANGE_STATE_FILE")" 2>/dev/null
+    RANGE_TMP=$(mktemp 2>/dev/null) || return 0
+    range_source ftp "$RANGE_FTP_LOG" \
+        '/pure-ftpd/ && /Authentication failed/ && match($0, /@[0-9.]+\)/) { print substr($0, RSTART + 1, RLENGTH - 2) }'
+    range_source smtp "$RANGE_SMTP_LOG" \
+        '/SASL/ && /authentication failed/ && match($0, /\[[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+\]/) { print substr($0, RSTART + 1, RLENGTH - 2) }'
+    printf '%s\n' "${RANGE_NEWPOS[@]}" > "$RANGE_POS_FILE.tmp" 2>/dev/null && mv -f "$RANGE_POS_FILE.tmp" "$RANGE_POS_FILE" 2>/dev/null
+    # Fenêtre glissante : échecs de moins de WINDOW s + ceux de ce passage.
+    { awk -v cut="$((RANGE_NOW - WINDOW))" 'NF == 4 && $1 >= cut' "$RANGE_STATE_FILE" 2>/dev/null; cat "$RANGE_TMP"; } \
+        > "$RANGE_STATE_FILE.tmp" 2>/dev/null && mv -f "$RANGE_STATE_FILE.tmp" "$RANGE_STATE_FILE" 2>/dev/null
+    rm -f "$RANGE_TMP"
+    # Plages franchissant les deux seuils, puis mise à jour des observations (purge à 7 j).
+    obs_tmp=$(mktemp 2>/dev/null) || return 0
+    awk -v cut="$((RANGE_NOW - 604800))" 'NF >= 6 && $3 >= cut' "$RANGE_OBS_FILE" 2>/dev/null > "$obs_tmp"
+    while read -r net nips nf svs; do
+        [ "$nips" -ge "$RANGE_MIN_IPS" ] 2>/dev/null && [ "$nf" -ge "$RANGE_MIN_FAILS" ] 2>/dev/null || continue
+        range_excluded "$net" && continue
+        # Journalisé une fois par épisode : plage inconnue, ou absente depuis plus de 24 h.
+        known=$(awk -v n="$net" -v cut="$((RANGE_NOW - 86400))" '$1 == n && $3 >= cut { print 1; exit }' "$obs_tmp")
+        [ -n "$known" ] || t_log range.observed "$net" "$nips" "$nf" "$(fmt_duration "$WINDOW")" "$svs" >/dev/null
+        awk -v n="$net" -v now="$RANGE_NOW" -v i="$nips" -v f="$nf" -v s="$svs" '
+            $1 == n { hit = 1; $3 = now; if (i + 0 > $4 + 0) $4 = i; if (f + 0 > $5 + 0) $5 = f
+                      split(s, a, "+"); for (k in a) if (index("+" $6 "+", "+" a[k] "+") == 0) $6 = $6 "+" a[k] }
+            { print }
+            END { if (!hit) print n, now, now, i, f, s }' "$obs_tmp" > "$obs_tmp.n" && mv -f "$obs_tmp.n" "$obs_tmp"
+    done < <(awk '{ split($3, o, "."); net = o[1] "." o[2] "." o[3] ".0/24"
+                    if (!((net SUBSEP $3) in vu)) { vu[net SUBSEP $3] = 1; ips[net]++ }
+                    nf[net] += $4
+                    if (index("+" sv[net] "+", "+" $2 "+") == 0) sv[net] = sv[net] (sv[net] == "" ? "" : "+") $2 }
+              END { for (n in ips) print n, ips[n], nf[n], sv[n] }' "$RANGE_STATE_FILE" 2>/dev/null)
+    mv -f "$obs_tmp" "$RANGE_OBS_FILE" 2>/dev/null || rm -f "$obs_tmp"
+    return 0
+}
+# Bloc du résumé / de stats : plages vues sur 24 h, les plus actives d'abord (≤ 10).
+build_ranges_observed() {
+    [ "$RANGE_WATCH" = observe ] && [ -r "$RANGE_OBS_FILE" ] || return 0
+    local rows net first last mi mf sv
+    rows=$(awk -v cut="$(( $(date +%s) - 86400 ))" 'NF >= 6 && $3 >= cut' "$RANGE_OBS_FILE" 2>/dev/null \
+        | sort -k5,5nr | head -n 10)
+    [ -n "$rows" ] || return 0
+    printf '\n── %s ──\n' "$(t stats.ranges_header)"
+    while read -r net first last mi mf sv; do
+        [ -n "$net" ] || continue
+        t stats.range_item "$net" "$mi" "$mf" "$sv" "$(date -d "@$last" '+%Y-%m-%d %H:%M' 2>/dev/null || echo "$last")"
+    done <<< "$rows"
     return 0
 }
 

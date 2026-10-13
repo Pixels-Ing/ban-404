@@ -648,3 +648,37 @@ else
     ok "le diag liste les IP du serveur"
     rm -rf "$FIX/www/site15.example"
 fi
+
+# ---------------------------------------------------------------------------
+echo "== Test 16 : plages /24 suspectes sur les échecs FTP/SMTP — observation, aucun ban =="
+# 2.3.17. Campagne d'octobre 2026 : une /24 entière testait des mots de passe FTP, une adresse
+# différente à chaque connexion, sous le seuil de fail2ban. Le moteur compte ces échecs PAR PLAGE
+# et la signale (journal, stats/résumé, diag), SANS bannir. Lecture incrémentale : le premier
+# passage se positionne en fin de journal, seuls les échecs écrits ensuite comptent.
+NET16=198.18.7     # 198.18.0.0/15, réservé aux bancs d'essai (RFC 2544)
+WL16=198.19.9      # plage contenant une IP whitelistée : jamais signalée
+F16="$FIX/syslog16"; M16="$FIX/mail16.log"; : > "$F16"; : > "$M16"
+rm -f /var/lib/ban_404/range_fails /var/lib/ban_404/range_pos /var/lib/ban_404/range_observed
+printf 'RANGE_FTP_LOG=%s\nRANGE_SMTP_LOG=%s\nWHITELIST_IP="127.0.0.1|%s.5"\n' "$F16" "$M16" "$WL16" >> /etc/ban_404.conf
+bash "$ENGINE" >/dev/null 2>&1 || true            # positionnement en fin de journal
+for i in $(seq 1 40); do
+    printf 'Oct 13 14:00:00 h pure-ftpd: (?@%s.%s) [WARNING] Authentication failed for user [admin]\n' "$NET16" $((i % 7 + 1)) >> "$F16"
+    printf 'Oct 13 14:00:00 h pure-ftpd: (?@%s.%s) [WARNING] Authentication failed for user [admin]\n' "$WL16" $((i % 7 + 1)) >> "$F16"
+    printf 'oct. 13 14:00:00 h postfix/smtpd[42]: warning: unknown[%s.%s]: SASL LOGIN authentication failed: x\n' "$NET16" $((i % 3 + 1)) >> "$M16"
+done
+bash "$ENGINE" >/dev/null 2>&1 || true
+grep -q "^$NET16.0/24 " /var/lib/ban_404/range_observed 2>/dev/null || { cat /var/lib/ban_404/range_observed 2>/dev/null; fail "16a : la plage $NET16.0/24 aurait dû être observée"; }
+grep -q "$NET16.0/24" "$LOGF" 2>/dev/null || fail "16a : la plage observée n'est pas journalisée"
+ok "plage à 7 adresses / 80 échecs FTP+SMTP : observée et journalisée"
+grep -q "^$WL16.0/24 " /var/lib/ban_404/range_observed 2>/dev/null && fail "16b : une plage contenant une IP whitelistée a été signalée"
+ok "plage contenant une IP whitelistée : jamais signalée"
+for i in 1 2 3 4 5 6 7; do ipset test ban_404_list "$NET16.$i" 2>/dev/null && fail "16c : $NET16.$i bannie alors que le mode est l'observation"; done
+ok "mode observation : aucune adresse de la plage bannie"
+n=$(grep -c "$NET16.0/24" "$LOGF")
+bash "$ENGINE" >/dev/null 2>&1 || true
+[ "$(grep -c "$NET16.0/24" "$LOGF")" = "$n" ] || fail "16d : la plage est journalisée à chaque passage (une fois par épisode attendue)"
+ok "journalisée une seule fois par épisode"
+bash "$ENGINE" stats 2>&1 | grep -q "$NET16.0/24" || fail "16e : la plage n'apparaît pas dans stats"
+bash "$ENGINE" diag 2>&1 | grep -q "1 plage(s) suspecte(s)\|1 suspicious range(s)" || { bash "$ENGINE" diag 2>&1 | grep -i "plage\|range"; fail "16e : le diag ne compte pas la plage"; }
+ok "stats et diag signalent la plage"
+sed -i '/^RANGE_FTP_LOG=/d; /^RANGE_SMTP_LOG=/d; /^WHITELIST_IP="127.0.0.1|/d' /etc/ban_404.conf

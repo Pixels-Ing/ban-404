@@ -96,6 +96,32 @@ WHITELIST_IP="127.0.0.1"
 #BAN_ESCALATION="604800 1209600 2073600"
 #ESCALATION_MEMORY=2073600
 #AGGRESSIVE_SCORE=500
+# /24 range watch on FTP (pure-ftpd) and SMTP (postfix SASL) authentication failures: a range is
+#   suspicious when, within WINDOW, at least RANGE_MIN_IPS distinct addresses AND RANGE_MIN_FAILS
+#   failures come from it. observe = OBSERVATION ONLY (logged once per 24 h episode, listed in the
+#   summary and diag, nothing banned); off = disabled. Private ranges and ranges holding a
+#   WHITELIST_IP address (including this server's own) or overlapping WHITELIST_CIDR are never reported.
+# Surveillance des plages /24 sur les échecs d'authentification FTP (pure-ftpd) et SMTP (postfix
+#   SASL) : une plage est suspecte si, dans WINDOW, au moins RANGE_MIN_IPS adresses distinctes ET
+#   RANGE_MIN_FAILS échecs en viennent. observe = OBSERVATION SEULE (journalisée une fois par
+#   épisode de 24 h, listée au résumé et au diag, rien n'est banni) ; off = désactivé. Jamais
+#   signalées : plages privées, plages contenant une adresse de WHITELIST_IP (dont celles du
+#   serveur) ou chevauchant WHITELIST_CIDR.
+# Überwachung von /24-Bereichen bei FTP- (pure-ftpd) und SMTP-Anmeldefehlern (postfix SASL): ein
+#   Bereich ist verdächtig, wenn in WINDOW mindestens RANGE_MIN_IPS verschiedene Adressen UND
+#   RANGE_MIN_FAILS Fehler daraus kommen. observe = NUR BEOBACHTUNG (einmal pro 24-h-Episode
+#   protokolliert, in Zusammenfassung und diag aufgeführt, keine Sperre); off = aus.
+# Vigilancia de rangos /24 según los fallos de autenticación FTP (pure-ftpd) y SMTP (postfix SASL):
+#   un rango es sospechoso si, en WINDOW, al menos RANGE_MIN_IPS direcciones distintas Y
+#   RANGE_MIN_FAILS fallos proceden de él. observe = SOLO OBSERVACIÓN (registrado una vez por
+#   episodio de 24 h, listado en el resumen y el diag, sin bloqueo); off = desactivado.
+# Sorveglianza degli intervalli /24 sulle autenticazioni FTP (pure-ftpd) e SMTP (postfix SASL)
+#   fallite: un intervallo è sospetto se, in WINDOW, almeno RANGE_MIN_IPS indirizzi distinti E
+#   RANGE_MIN_FAILS fallimenti ne provengono. observe = SOLO OSSERVAZIONE (registrato una volta per
+#   episodio di 24 h, elencato nel riepilogo e nel diag, nessun blocco); off = disattivato.
+#RANGE_WATCH=observe
+#RANGE_MIN_IPS=5
+#RANGE_MIN_FAILS=50
 #POST_FLOOD_THRESHOLD=20
 #RESOLVE_PTR=false
 #PTR_TIMEOUT=2

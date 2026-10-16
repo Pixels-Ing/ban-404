@@ -681,4 +681,30 @@ ok "journalisée une seule fois par épisode"
 bash "$ENGINE" stats 2>&1 | grep -q "$NET16.0/24" || fail "16e : la plage n'apparaît pas dans stats"
 bash "$ENGINE" diag 2>&1 | grep -q "1 plage(s) suspecte(s)\|1 suspicious range(s)" || { bash "$ENGINE" diag 2>&1 | grep -i "plage\|range"; fail "16e : le diag ne compte pas la plage"; }
 ok "stats et diag signalent la plage"
+
+# 16f. Mode ban (2.3.18) : la plage est bannie dans l'ensemble ban_404_net, 7 j au 1er ban ; la plage
+# contenant une IP whitelistée reste libre. Les échecs du passage précédent sont encore dans la fenêtre.
+printf 'RANGE_WATCH=ban\n' >> /etc/ban_404.conf
+bash "$ENGINE" >/dev/null 2>&1 || true
+ipset test ban_404_net "$NET16.200" 2>/dev/null || { ipset list ban_404_net 2>&1 | head; fail "16f : la plage $NET16.0/24 aurait dû être bannie"; }
+iptables -C INPUT -m set --match-set ban_404_net src -j DROP 2>/dev/null || fail "16f : règle DROP de ban_404_net absente"
+ipset test ban_404_net "$WL16.200" 2>/dev/null && fail "16f : la plage contenant une IP whitelistée a été bannie"
+to=$(ipset list ban_404_net | awk -v n="$NET16.0/24" '$1 == n { print $3 }')
+[ "${to:-0}" -gt 600000 ] && [ "${to:-0}" -le 604800 ] || fail "16f : durée du 1er ban de plage inattendue ($to s, attendu 7 j)"
+grep -q "Range banned: $NET16.0/24" "$LOGF" || fail "16f : le ban de plage n'est pas journalisé"
+ok "mode ban : plage bannie 7 j dans ban_404_net (règle DROP posée), plage whitelistée épargnée"
+bash "$ENGINE" list 2>&1 | grep -q "$NET16.0/24" || fail "16g : list n'affiche pas la plage bannie"
+bash "$ENGINE" diag 2>&1 | grep -q "1 range(s) currently banned" || fail "16g : le diag ne compte pas la plage bannie"
+ok "list et diag montrent la plage bannie"
+# 16h. Déban manuel d'une plage, puis récidive : 2e ban => 14 j.
+bash "$ENGINE" unban "$NET16.0/24" >/dev/null 2>&1
+ipset test ban_404_net "$NET16.200" 2>/dev/null && fail "16h : unban d'une plage sans effet"
+ok "unban a.b.c.0/24 libère la plage"
+printf '%s 1 %s\n' "$NET16.0/24" "$(( $(date +%s) + 600000 ))" >> /var/lib/ban_404/offenders
+bash "$ENGINE" >/dev/null 2>&1 || true
+to=$(ipset list ban_404_net | awk -v n="$NET16.0/24" '$1 == n { print $3 }')
+[ "${to:-0}" -gt 1200000 ] || fail "16h : récidive d'une plage, durée $to s (attendu 14 j)"
+ok "récidive : 2e ban de la plage pour 14 j"
+iptables -D INPUT -m set --match-set ban_404_net src -j DROP 2>/dev/null; ipset destroy ban_404_net 2>/dev/null
+sed -i '/^RANGE_WATCH=/d' /etc/ban_404.conf
 sed -i '/^RANGE_FTP_LOG=/d; /^RANGE_SMTP_LOG=/d; /^WHITELIST_IP="127.0.0.1|/d' /etc/ban_404.conf

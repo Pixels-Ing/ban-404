@@ -113,5 +113,25 @@ ok "B4 ban re-transféré vers ipset + règle iptables restaurée"
 nft list table inet ban_404 &>/dev/null && fail "B5 : table nft ban_404 subsiste après retour iptables"
 ok "B5 table nft ban_404 retirée (retour propre)"
 
+echo "== Test C : plage /24 bannie dans le set nft à intervalles (RANGE_WATCH=ban, 2.3.18) =="
+cleanup_fw
+build_fixture
+write_conf nftables
+F="$FIX/syslog"; : > "$F"
+rm -f /var/lib/ban_404/range_fails /var/lib/ban_404/range_pos /var/lib/ban_404/range_observed
+printf 'RANGE_WATCH=ban\nRANGE_FTP_LOG=%s\nRANGE_SMTP_LOG=%s/absent.log\n' "$F" "$FIX" >> /etc/ban_404.conf
+bash "$ENGINE" >/dev/null 2>&1 || true           # positionnement en fin de journal
+for i in $(seq 1 60); do
+    printf 'Oct 16 14:00:00 h pure-ftpd: (?@198.18.9.%s) [WARNING] Authentication failed for user [x]\n' $((i % 7 + 1)) >> "$F"
+done
+bash "$ENGINE" >/dev/null 2>&1 || true
+nft get element inet ban_404 ban_404_net '{ 198.18.9.200 }' >/dev/null 2>&1 \
+    || { nft list table inet ban_404 2>&1 | sed -n '1,40p'; fail "C1 : la plage 198.18.9.0/24 n'est pas dans le set nft ban_404_net"; }
+nft list chain inet ban_404 input 2>/dev/null | grep -q "@ban_404_net drop" || fail "C1 : règle « ip saddr @ban_404_net drop » absente"
+ok "C1 plage bannie dans le set nft à intervalles + règle DROP"
+bash "$ENGINE" unban 198.18.9.0/24 >/dev/null 2>&1
+nft get element inet ban_404 ban_404_net '{ 198.18.9.200 }' >/dev/null 2>&1 && fail "C2 : unban de la plage sans effet en nft"
+ok "C2 unban de la plage en nft"
+
 cleanup_fw
 echo "== INTÉGRATION NFT OK =="

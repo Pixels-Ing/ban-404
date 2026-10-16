@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="2.3.17"
+BAN404_VERSION="2.3.18"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -53,10 +53,14 @@ AGGRESSIVE_SCORE=500
 # Une plage est SUSPECTE si, dans la fenêtre WINDOW, au moins RANGE_MIN_IPS adresses distinctes y
 # ont échoué ET au moins RANGE_MIN_FAILS échecs au total. « observe » = OBSERVATION SEULE : rien
 # n'est banni, la plage est journalisée ([i], une fois par épisode de 24 h) et listée au résumé et
-# au diag, pour mesurer les faux positifs avant tout blocage. « off » = désactivé.
-# Jamais signalées : plages privées, et plages contenant une adresse de WHITELIST_IP (dont celles
-# du serveur) ou chevauchant WHITELIST_CIDR.
+# au diag, pour mesurer les faux positifs avant tout blocage. « ban » (depuis 2.3.18) = la plage
+# est BANNIE dans un second ensemble (« ban_404_net », hash:net / set nft à intervalles), pour
+# RANGE_BAN_TIMEOUT au premier ban puis selon l'échelle BAN_ESCALATION (même mémoire de récidive
+# que les adresses, clé = la plage). « off » = désactivé. Valeur inconnue => observe.
+# Jamais signalées ni bannies : plages privées, et plages contenant une adresse de WHITELIST_IP
+# (dont celles du serveur) ou chevauchant WHITELIST_CIDR.
 RANGE_WATCH=observe
+RANGE_BAN_TIMEOUT=604800   # 1er ban d'une plage : 7 j (constante de tête, surchargeable en conf)
 RANGE_MIN_IPS=5
 RANGE_MIN_FAILS=50
 HONEYPOT_PATTERN='\.env|wp-config\.php|phpmyadmin|config\.json|setup\.php|actuator|xmlrpc\.php'
@@ -1058,6 +1062,36 @@ T_DE[range.observed]="[i] Verdächtiger Bereich (nur Beobachtung, nicht gesperrt
 T_ES[range.observed]="[i] Rango sospechoso (solo observación, no bloqueado): %s — %s IP, %s fallos de autenticación FTP/SMTP en %s (%s)"
 T_IT[range.observed]="[i] Intervallo sospetto (solo osservazione, non bloccato): %s — %s IP, %s autenticazioni FTP/SMTP fallite in %s (%s)"
 
+T_EN[diag.range_ban]="Range watch (FTP/SMTP auth failures, /24): BAN — threshold %s IPs and %s failures in %s; %s range(s) currently banned (set %s)"
+T_FR[diag.range_ban]="Surveillance des plages (échecs d'authentification FTP/SMTP, /24) : BANNISSEMENT — seuil %s IP et %s échecs en %s ; %s plage(s) bannie(s) actuellement (ensemble %s)"
+T_DE[diag.range_ban]="Bereichsüberwachung (FTP/SMTP-Anmeldefehler, /24): SPERRE — Schwelle %s IPs und %s Fehler in %s; %s Bereich(e) derzeit gesperrt (Set %s)"
+T_ES[diag.range_ban]="Vigilancia de rangos (fallos de autenticación FTP/SMTP, /24): BLOQUEO — umbral %s IP y %s fallos en %s; %s rango(s) bloqueado(s) actualmente (conjunto %s)"
+T_IT[diag.range_ban]="Sorveglianza intervalli (autenticazioni FTP/SMTP fallite, /24): BLOCCO — soglia %s IP e %s fallimenti in %s; %s intervallo/i attualmente bloccato/i (set %s)"
+
+T_EN[range.banned]="[i] Range banned: %s — %s IPs, %s FTP/SMTP auth failures in %s (%s); ban %s"
+T_FR[range.banned]="[i] Plage bannie : %s — %s IP, %s échecs d'authentification FTP/SMTP en %s (%s) ; ban %s"
+T_DE[range.banned]="[i] Bereich gesperrt: %s — %s IPs, %s FTP/SMTP-Anmeldefehler in %s (%s); Sperre %s"
+T_ES[range.banned]="[i] Rango bloqueado: %s — %s IP, %s fallos de autenticación FTP/SMTP en %s (%s); bloqueo %s"
+T_IT[range.banned]="[i] Intervallo bloccato: %s — %s IP, %s autenticazioni FTP/SMTP fallite in %s (%s); blocco %s"
+
+T_EN[range.ban_failed]="[!] Range %s could not be banned (firewall refused it)"
+T_FR[range.ban_failed]="[!] La plage %s n'a pas pu être bannie (refus du pare-feu)"
+T_DE[range.ban_failed]="[!] Bereich %s konnte nicht gesperrt werden (von der Firewall abgelehnt)"
+T_ES[range.ban_failed]="[!] No se pudo bloquear el rango %s (rechazado por el firewall)"
+T_IT[range.ban_failed]="[!] Impossibile bloccare l'intervallo %s (rifiutato dal firewall)"
+
+T_EN[stats.ranges_header_ban]="Suspicious ranges, 24 h (BAN mode: %s banned now)"
+T_FR[stats.ranges_header_ban]="Plages suspectes sur 24 h (mode BANNISSEMENT : %s bannie(s) actuellement)"
+T_DE[stats.ranges_header_ban]="Verdächtige Bereiche, 24 h (SPERR-Modus: %s derzeit gesperrt)"
+T_ES[stats.ranges_header_ban]="Rangos sospechosos, 24 h (modo BLOQUEO: %s bloqueado(s) ahora)"
+T_IT[stats.ranges_header_ban]="Intervalli sospetti, 24 h (modalità BLOCCO: %s bloccato/i ora)"
+
+T_EN[list.nets_header]="Banned ranges (%s):"
+T_FR[list.nets_header]="Plages bannies (%s) :"
+T_DE[list.nets_header]="Gesperrte Bereiche (%s):"
+T_ES[list.nets_header]="Rangos bloqueados (%s):"
+T_IT[list.nets_header]="Intervalli bloccati (%s):"
+
 T_EN[stats.ranges_header]="Suspicious ranges, 24 h (observation: none banned)"
 T_FR[stats.ranges_header]="Plages suspectes sur 24 h (observation : aucune bannie)"
 T_DE[stats.ranges_header]="Verdächtige Bereiche, 24 h (Beobachtung: keiner gesperrt)"
@@ -1070,11 +1104,11 @@ T_DE[stats.range_item]="%s — bis zu %s IPs und %s Anmeldefehler pro Fenster (%
 T_ES[stats.range_item]="%s — hasta %s IP y %s fallos de autenticación por ventana (%s), visto por última vez %s"
 T_IT[stats.range_item]="%s — fino a %s IP e %s autenticazioni fallite per finestra (%s), visto l'ultima volta %s"
 
-T_EN[help.conf_range_watch]="  RANGE_WATCH  Watch /24 ranges on FTP/SMTP auth failures: observe (default, logs and reports, bans nothing) or off. Thresholds RANGE_MIN_IPS (5) and RANGE_MIN_FAILS (50) within WINDOW."
-T_FR[help.conf_range_watch]="  RANGE_WATCH  Surveillance des plages /24 sur les échecs d'authentification FTP/SMTP : observe (défaut, journalise et signale, ne bannit rien) ou off. Seuils RANGE_MIN_IPS (5) et RANGE_MIN_FAILS (50) dans WINDOW."
-T_DE[help.conf_range_watch]="  RANGE_WATCH  Überwachung von /24-Bereichen bei FTP/SMTP-Anmeldefehlern: observe (Standard, protokolliert und meldet, sperrt nichts) oder off. Schwellen RANGE_MIN_IPS (5) und RANGE_MIN_FAILS (50) in WINDOW."
-T_ES[help.conf_range_watch]="  RANGE_WATCH  Vigilancia de rangos /24 según los fallos de autenticación FTP/SMTP: observe (por defecto, registra e informa, no bloquea nada) u off. Umbrales RANGE_MIN_IPS (5) y RANGE_MIN_FAILS (50) en WINDOW."
-T_IT[help.conf_range_watch]="  RANGE_WATCH  Sorveglianza degli intervalli /24 sulle autenticazioni FTP/SMTP fallite: observe (predefinito, registra e segnala, non blocca nulla) o off. Soglie RANGE_MIN_IPS (5) e RANGE_MIN_FAILS (50) in WINDOW."
+T_EN[help.conf_range_watch]="  RANGE_WATCH  Watch /24 ranges on FTP/SMTP auth failures: observe (default, logs and reports, bans nothing), ban (bans the range, 7 d then the repeat-offence scale) or off. Thresholds RANGE_MIN_IPS (5) and RANGE_MIN_FAILS (50) within WINDOW."
+T_FR[help.conf_range_watch]="  RANGE_WATCH  Surveillance des plages /24 sur les échecs d'authentification FTP/SMTP : observe (défaut, journalise et signale, ne bannit rien), ban (bannit la plage, 7 j puis échelle de récidive) ou off. Seuils RANGE_MIN_IPS (5) et RANGE_MIN_FAILS (50) dans WINDOW."
+T_DE[help.conf_range_watch]="  RANGE_WATCH  Überwachung von /24-Bereichen bei FTP/SMTP-Anmeldefehlern: observe (Standard, protokolliert und meldet, sperrt nichts), ban (sperrt den Bereich, 7 T, dann Wiederholungsstufen) oder off. Schwellen RANGE_MIN_IPS (5) und RANGE_MIN_FAILS (50) in WINDOW."
+T_ES[help.conf_range_watch]="  RANGE_WATCH  Vigilancia de rangos /24 según los fallos de autenticación FTP/SMTP: observe (por defecto, registra e informa, no bloquea nada), ban (bloquea el rango, 7 d y luego la escala de reincidencia) u off. Umbrales RANGE_MIN_IPS (5) y RANGE_MIN_FAILS (50) en WINDOW."
+T_IT[help.conf_range_watch]="  RANGE_WATCH  Sorveglianza degli intervalli /24 sulle autenticazioni FTP/SMTP fallite: observe (predefinito, registra e segnala, non blocca nulla), ban (blocca l'intervallo, 7 g poi la scala di recidiva) o off. Soglie RANGE_MIN_IPS (5) e RANGE_MIN_FAILS (50) in WINDOW."
 
 T_EN[diag.fw_rule_ok]="Firewall DROP rule present."
 T_FR[diag.fw_rule_ok]="Règle DROP du pare-feu présente."
@@ -2236,6 +2270,48 @@ fw_persist()          { case "$FW_ACTIVE" in nftables) nft_persist ;; *) ipt_per
 fw_rule_present()     { case "$FW_ACTIVE" in nftables) nft_rule_present ;; *) ipt_rule_present ;; esac; }
 fw_persist_present()  { case "$FW_ACTIVE" in nftables) nft_persist_present ;; *) ipt_persist_present ;; esac; }
 
+# ---------- Ensemble de PLAGES bannies (RANGE_WATCH=ban, depuis 2.3.18) ----------
+# L'ensemble historique est un hash:ip : il ne sait pas contenir une plage. Un SECOND ensemble, créé
+# à la demande (premier ban de plage), porte les /24 : ipset hash:net (persisté par le même « ipset
+# save », qui sauvegarde tous les sets) ou, en nftables, un set à intervalles dans NOTRE table (la
+# persistance nft sauvegarde la table entière). Hors du transfert de fw_migrate_if_needed : une
+# bascule de backend laisse expirer les plages de l'ancien, sans trou de protection au-delà.
+NET_SET_NAME="${IPSET_NAME%_list}_net"
+ipt_net_exists()    { ipset list "$NET_SET_NAME" &>/dev/null; }
+ipt_net_is_banned() { ipset test "$NET_SET_NAME" "$1" &>/dev/null; }                               # $1=plage
+ipt_net_ban_ttl()   { ipset -exist add "$NET_SET_NAME" "$1" timeout "$(ipt_ttl_clamp "$2")"; }     # $1=plage $2=ttl(s)
+ipt_net_unban()     { ipset del "$NET_SET_NAME" "$1" 2>/dev/null; }
+ipt_net_flush()     { ipset flush "$NET_SET_NAME" 2>/dev/null; }
+ipt_net_list()      { ipset list "$NET_SET_NAME" 2>/dev/null | awk '/^Members:/{m=1;next} m&&NF{print $1}'; }
+ipt_net_ensure() {
+    ipt_net_exists || ipset create "$NET_SET_NAME" hash:net timeout "$(ipt_ttl_clamp "$RANGE_BAN_TIMEOUT")" maxelem 65536 || return 1
+    if ! "$IPT_BIN" -C INPUT -m set --match-set "$NET_SET_NAME" src -j DROP &>/dev/null; then
+        "$IPT_BIN" -I INPUT -m set --match-set "$NET_SET_NAME" src -j DROP || return 1
+        mkdir -p "$(dirname "$IPTABLES_RULES_FILE")"
+        "$IPT_SAVE_BIN" > "$IPTABLES_RULES_FILE"
+    fi
+}
+nft_net_exists()    { "$NFT_BIN" list set "$NFT_TABLE_FAMILY" "$NFT_TABLE" "$NET_SET_NAME" &>/dev/null; }
+nft_net_is_banned() { "$NFT_BIN" get element "$NFT_TABLE_FAMILY" "$NFT_TABLE" "$NET_SET_NAME" "{ $1 }" &>/dev/null; }
+nft_net_ban_ttl()   { "$NFT_BIN" add element "$NFT_TABLE_FAMILY" "$NFT_TABLE" "$NET_SET_NAME" "{ $1 timeout ${2}s }" 2>/dev/null; }
+nft_net_unban()     { "$NFT_BIN" delete element "$NFT_TABLE_FAMILY" "$NFT_TABLE" "$NET_SET_NAME" "{ $1 }" 2>/dev/null; }
+nft_net_flush()     { "$NFT_BIN" flush set "$NFT_TABLE_FAMILY" "$NFT_TABLE" "$NET_SET_NAME" 2>/dev/null; }
+nft_net_list()      { "$NFT_BIN" list set "$NFT_TABLE_FAMILY" "$NFT_TABLE" "$NET_SET_NAME" 2>/dev/null | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2}'; }
+nft_net_ensure() {
+    nft_ensure_infra
+    nft_net_exists || "$NFT_BIN" add set "$NFT_TABLE_FAMILY" "$NFT_TABLE" "$NET_SET_NAME" \
+        "{ type ipv4_addr; flags interval,timeout; timeout ${RANGE_BAN_TIMEOUT}s; }" 2>/dev/null || return 1
+    "$NFT_BIN" list chain "$NFT_TABLE_FAMILY" "$NFT_TABLE" "$NFT_CHAIN" 2>/dev/null | grep -q "@$NET_SET_NAME drop" \
+        || "$NFT_BIN" add rule "$NFT_TABLE_FAMILY" "$NFT_TABLE" "$NFT_CHAIN" ip saddr "@$NET_SET_NAME" drop 2>/dev/null
+}
+fw_net_ensure()    { case "$FW_ACTIVE" in nftables) nft_net_ensure ;; *) ipt_net_ensure ;; esac; }
+fw_net_exists()    { case "$FW_ACTIVE" in nftables) nft_net_exists ;; *) ipt_net_exists ;; esac; }
+fw_net_is_banned() { case "$FW_ACTIVE" in nftables) nft_net_is_banned "$1" ;; *) ipt_net_is_banned "$1" ;; esac; }
+fw_net_ban_ttl()   { case "$FW_ACTIVE" in nftables) nft_net_ban_ttl "$1" "$2" ;; *) ipt_net_ban_ttl "$1" "$2" ;; esac; }
+fw_net_unban()     { case "$FW_ACTIVE" in nftables) nft_net_unban "$1" ;; *) ipt_net_unban "$1" ;; esac; }
+fw_net_flush()     { case "$FW_ACTIVE" in nftables) nft_net_flush ;; *) ipt_net_flush ;; esac; }
+fw_net_list()      { case "$FW_ACTIVE" in nftables) nft_net_list ;; *) ipt_net_list ;; esac; }
+
 # Le backend sait-il STOCKER cette adresse ? Les deux backends sont IPv4 uniquement : l'ipset est
 # créé « family inet » (le défaut) et le set nftables est un ipv4_addr. Passer une IPv6 à
 # `ipset add` ÉCHOUE — et l'échec passait inaperçu : la ligne [+] partait au journal, la mémoire
@@ -2459,6 +2535,18 @@ enforce_whitelist_unban() {
                 escalation_forget "$w"   # whitelistée => son passé de récidiviste n'a plus de sens
             fi
         done
+    fi
+    # 1 bis) Plages bannies (RANGE_WATCH=ban) qu'une entrée de liste blanche couvre désormais.
+    if fw_net_exists; then
+        while read -r w; do
+            [ -n "$w" ] && range_excluded "$w" || continue
+            if [ "$DRY_RUN" = true ]; then
+                t wl.sim_unban "$w"
+            elif fw_net_unban "$w"; then
+                t_log wl.unban "$w"; removed=true
+                escalation_forget "$w"
+            fi
+        done < <(fw_net_list)
     fi
     # 2) CIDR : l'appartenance à une plage impose d'énumérer les membres. Balayage réservé au cas
     #    où au moins un CIDR est whitelisté (sinon tout a été traité en 1) sans le moindre parcours).
@@ -3191,9 +3279,27 @@ range_source() {  # $1 = service  $2 = journal  $3 = programme awk imprimant l'I
         | awk -v n="$RANGE_NOW" -v s="$svc" '$2 ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ { print n, s, $2, $1 }' >> "$RANGE_TMP"
     return 0
 }
+# TTL du ban d'une plage : RANGE_BAN_TIMEOUT au 1er ban, puis les paliers suivants de BAN_ESCALATION
+# selon le nombre de bans déjà mémorisés pour la plage (clé = la plage dans OFFENDERS_FILE) : 7 j,
+# 14 j, puis 24 j avec les défauts ; jamais moins que RANGE_BAN_TIMEOUT. Fonction PURE.
+range_ttl() {  # $1 = bans antérieurs encore en période d'épreuve
+    local rec="${1:-0}" base="$RANGE_BAN_TIMEOUT" n ttl
+    local -a tiers
+    read -r -a tiers <<< "${BAN_ESCALATION:-}"
+    n=${#tiers[@]}
+    case "$rec" in ''|*[!0-9]*) rec=0 ;; esac
+    if [ "$n" -eq 0 ] || [ "$rec" -eq 0 ]; then printf '%s' "$base"; return 0; fi
+    # 2e ban => 2e palier (14 j par défaut), 3e et au-delà => 3e (24 j) : le 1er palier vaut la base.
+    [ "$rec" -ge "$n" ] && rec=$((n - 1))
+    ttl="${tiers[rec]}"
+    case "$ttl" in ''|*[!0-9]*) ttl="$base" ;; esac
+    [ "$ttl" -lt "$base" ] && ttl="$base"
+    printf '%s' "$ttl"
+}
 range_watch_sample() {
-    [ "$RANGE_WATCH" = observe ] || return 0
-    local net nips nf svs known obs_tmp
+    case "$RANGE_WATCH" in observe|ban) ;; off) return 0 ;; *) RANGE_WATCH=observe ;; esac
+    local net nips nf svs known obs_tmp rec ttl net_ready=0 banned=0
+    local -a esc_records=()   # masque le tableau du run : escalation_record n'enregistre que la plage
     RANGE_NOW=$(date +%s); RANGE_NEWPOS=()
     mkdir -p "$(dirname "$RANGE_STATE_FILE")" 2>/dev/null
     RANGE_TMP=$(mktemp 2>/dev/null) || return 0
@@ -3212,9 +3318,25 @@ range_watch_sample() {
     while read -r net nips nf svs; do
         [ "$nips" -ge "$RANGE_MIN_IPS" ] 2>/dev/null && [ "$nf" -ge "$RANGE_MIN_FAILS" ] 2>/dev/null || continue
         range_excluded "$net" && continue
-        # Journalisé une fois par épisode : plage inconnue, ou absente depuis plus de 24 h.
-        known=$(awk -v n="$net" -v cut="$((RANGE_NOW - 86400))" '$1 == n && $3 >= cut { print 1; exit }' "$obs_tmp")
-        [ -n "$known" ] || t_log range.observed "$net" "$nips" "$nf" "$(fmt_duration "$WINDOW")" "$svs" >/dev/null
+        if [ "$RANGE_WATCH" = ban ]; then
+            # Plage déjà bannie : rien à refaire. Sinon ban, durée selon sa récidive, puis mémoire.
+            if ! { fw_net_exists && fw_net_is_banned "$net"; }; then
+                [ "$net_ready" = 1 ] || { fw_net_ensure && net_ready=1; }
+                rec=$(printf '%s\n' "$net" | escalation_lookup | awk '{ print $2; exit }')
+                ttl=$(range_ttl "${rec:-0}")
+                if [ "$net_ready" = 1 ] && fw_net_ban_ttl "$net" "$ttl"; then
+                    t_log range.banned "$net" "$nips" "$nf" "$(fmt_duration "$WINDOW")" "$svs" "$(fmt_duration "$ttl")" >/dev/null
+                    esc_records=("$net $((RANGE_NOW + ttl))"); escalation_record
+                    banned=1
+                else
+                    t_log range.ban_failed "$net" >/dev/null
+                fi
+            fi
+        else
+            # Journalisé une fois par épisode : plage inconnue, ou absente depuis plus de 24 h.
+            known=$(awk -v n="$net" -v cut="$((RANGE_NOW - 86400))" '$1 == n && $3 >= cut { print 1; exit }' "$obs_tmp")
+            [ -n "$known" ] || t_log range.observed "$net" "$nips" "$nf" "$(fmt_duration "$WINDOW")" "$svs" >/dev/null
+        fi
         awk -v n="$net" -v now="$RANGE_NOW" -v i="$nips" -v f="$nf" -v s="$svs" '
             $1 == n { hit = 1; $3 = now; if (i + 0 > $4 + 0) $4 = i; if (f + 0 > $5 + 0) $5 = f
                       split(s, a, "+"); for (k in a) if (index("+" $6 "+", "+" a[k] "+") == 0) $6 = $6 "+" a[k] }
@@ -3226,16 +3348,22 @@ range_watch_sample() {
                     if (index("+" sv[net] "+", "+" $2 "+") == 0) sv[net] = sv[net] (sv[net] == "" ? "" : "+") $2 }
               END { for (n in ips) print n, ips[n], nf[n], sv[n] }' "$RANGE_STATE_FILE" 2>/dev/null)
     mv -f "$obs_tmp" "$RANGE_OBS_FILE" 2>/dev/null || rm -f "$obs_tmp"
+    [ "$banned" = 1 ] && fw_persist
     return 0
 }
 # Bloc du résumé / de stats : plages vues sur 24 h, les plus actives d'abord (≤ 10).
 build_ranges_observed() {
-    [ "$RANGE_WATCH" = observe ] && [ -r "$RANGE_OBS_FILE" ] || return 0
+    case "$RANGE_WATCH" in observe|ban) ;; *) return 0 ;; esac
+    [ -r "$RANGE_OBS_FILE" ] || return 0
     local rows net first last mi mf sv
     rows=$(awk -v cut="$(( $(date +%s) - 86400 ))" 'NF >= 6 && $3 >= cut' "$RANGE_OBS_FILE" 2>/dev/null \
         | sort -k5,5nr | head -n 10)
     [ -n "$rows" ] || return 0
-    printf '\n── %s ──\n' "$(t stats.ranges_header)"
+    if [ "$RANGE_WATCH" = ban ]; then
+        printf '\n── %s ──\n' "$(t stats.ranges_header_ban "$(fw_net_list 2>/dev/null | grep -c .)")"
+    else
+        printf '\n── %s ──\n' "$(t stats.ranges_header)"
+    fi
     while read -r net first last mi mf sv; do
         [ -n "$net" ] || continue
         t stats.range_item "$net" "$mi" "$mf" "$sv" "$(date -d "@$last" '+%Y-%m-%d %H:%M' 2>/dev/null || echo "$last")"
@@ -3440,6 +3568,16 @@ do_list() {
             t list.item "$ip" "$to"
         fi
     done
+    # Plages bannies (RANGE_WATCH=ban) : ensemble distinct, listé à la suite.
+    if fw_net_exists; then
+        local nets
+        nets=$(fw_net_list | LC_ALL=C sort -t. -k1,1n -k2,2n -k3,3n)
+        if [ -n "$nets" ]; then
+            echo ""
+            t list.nets_header "$NET_SET_NAME"
+            printf '  %s\n' $nets
+        fi
+    fi
 }
 do_summary() {
     case "$DAILY_SUMMARY" in true|1|yes|on) ;; *) exit 0 ;; esac
@@ -4162,7 +4300,10 @@ run_diag_checks() {
         else
             diag_line warn "$(t diag.self_ips_none)"
         fi
-        if [ "$RANGE_WATCH" = observe ]; then   # plages /24 suspectes (2.3.17)
+        if [ "$RANGE_WATCH" = ban ]; then        # plages /24 bannies (2.3.18)
+            diag_line ok "$(t diag.range_ban "$RANGE_MIN_IPS" "$RANGE_MIN_FAILS" "$(fmt_duration "$WINDOW")" \
+                "$(fw_net_list 2>/dev/null | grep -c .)" "$NET_SET_NAME")"
+        elif [ "$RANGE_WATCH" != off ]; then    # plages /24 suspectes, observation (2.3.17)
             diag_line ok "$(t diag.range_observe "$RANGE_MIN_IPS" "$RANGE_MIN_FAILS" "$(fmt_duration "$WINDOW")" \
                 "$(awk -v cut="$(( $(date +%s) - 86400 ))" 'NF >= 6 && $3 >= cut' "$RANGE_OBS_FILE" 2>/dev/null | grep -c .)")"
         else
@@ -4473,8 +4614,16 @@ do_unban() {  # $1 = IP | all  (valeur requise, pas de défaut)
     if [ "${target,,}" = "all" ]; then
         n=$(fw_count "$IPSET_NAME")
         fw_flush || { t unban.fail "all"; exit 1; }
+        fw_net_exists && fw_net_flush     # plages bannies (RANGE_WATCH=ban) : vidées avec le reste
         t_log unban.all_done "$n"
         escalation_forget all
+    elif [[ "$target" == */* ]]; then     # une plage (a.b.c.0/24), bannie par RANGE_WATCH=ban
+        if fw_net_exists && fw_net_is_banned "$target" && fw_net_unban "$target"; then
+            t_log unban.done "$target"
+        else
+            t unban.notfound "$target"
+        fi
+        escalation_forget "$target"       # verdict d'innocence : la récidive de la plage repart de zéro
     elif fw_is_banned "$target"; then
         fw_unban_ip "$target" || { t unban.fail "$target"; exit 1; }
         t_log unban.done "$target"

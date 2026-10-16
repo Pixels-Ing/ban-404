@@ -128,6 +128,22 @@ WHITELIST_IP="127.0.0.1"
 #RANGE_WATCH=observe
 #RANGE_MIN_IPS=5
 #RANGE_MIN_FAILS=50
+# Ranges shared across a fleet (2.3.19): file dropped by an external collector, one /24 banned on
+#   another server per line (« a.b.c.0/24 expiry_epoch »). Each range is re-checked here (public
+#   IPv4 /24 only, local whitelist) and banned until its expiry. A file older than 2 h raises a
+#   [WARN] in diag and the summary; bans already applied then stay until they expire. Empty = off.
+# Plages partagées entre serveurs (2.3.19) : fichier déposé par un collecteur externe, une plage /24
+#   bannie sur un autre serveur par ligne (« a.b.c.0/24 échéance_epoch »). Chaque plage est revérifiée
+#   ici (/24 IPv4 publiques seulement, liste blanche locale) puis bannie jusqu'à son échéance. Un
+#   fichier de plus de 2 h lève un [WARN] au diag et au résumé ; les bans déjà posés vont alors à leur
+#   terme. Vide = désactivé.
+# Geteilte Bereiche (2.3.19): von einem externen Sammler abgelegte Datei, ein auf einem anderen
+#   Server gesperrter /24-Bereich je Zeile; hier geprüft und bis zum Ablauf gesperrt. Leer = aus.
+# Rangos compartidos (2.3.19): archivo depositado por un colector externo, un rango /24 bloqueado en
+#   otro servidor por línea; se verifica aquí y se bloquea hasta su vencimiento. Vacío = desactivado.
+# Intervalli condivisi (2.3.19): file depositato da un raccoglitore esterno, un intervallo /24
+#   bloccato su un altro server per riga; verificato qui e bloccato fino alla scadenza. Vuoto = off.
+#SHARED_NETS_FILE=
 #POST_FLOOD_THRESHOLD=20
 #RESOLVE_PTR=false
 #PTR_TIMEOUT=2

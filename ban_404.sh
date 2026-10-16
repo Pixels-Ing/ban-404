@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="2.3.18"
+BAN404_VERSION="2.3.19"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -25,6 +25,7 @@ RANGE_POS_FILE="/var/lib/ban_404/range_pos"         # position de lecture des jo
 RANGE_OBS_FILE="/var/lib/ban_404/range_observed"    # plages /24 suspectes : « plage 1re_vue dernière_vue max_ip max_échecs services »
 RANGE_FTP_LOG="/var/log/syslog"                     # pure-ftpd : « (?@IP) [WARNING] Authentication failed »
 RANGE_SMTP_LOG="/var/log/mail.log"                  # postfix : « unknown[IP]: SASL LOGIN authentication failed »
+SHARED_NETS_STATE="/var/lib/ban_404/shared_applied" # plages partagées appliquées ici : « plage échéance »
 PLATFORM_VALIDATED=""   # fail-safe plateforme : vide = auto-détection (os-release distro + backend iptables/ipset) ;
                         # true = forcer l'application même sur plateforme non reconnue (l'admin assume le risque) ; false = forcer la lecture seule
 
@@ -63,6 +64,13 @@ RANGE_WATCH=observe
 RANGE_BAN_TIMEOUT=604800   # 1er ban d'une plage : 7 j (constante de tête, surchargeable en conf)
 RANGE_MIN_IPS=5
 RANGE_MIN_FAILS=50
+# Plages PARTAGÉES (depuis 2.3.19) : fichier déposé par un collecteur externe, une plage bannie
+# ailleurs dans le parc par ligne (« a.b.c.0/24 échéance_epoch »). Vide = désactivé. Chaque plage
+# est revalidée ici puis bannie jusqu'à son échéance. Fichier plus vieux que SHARED_NETS_STALE (s)
+# => [WARN] au diag et au résumé, et plus aucune levée (les bans en cours vont à leur terme).
+SHARED_NETS_FILE=""
+SHARED_NETS_STALE=7200
+SHARED_NETS_MAX=256
 HONEYPOT_PATTERN='\.env|wp-config\.php|phpmyadmin|config\.json|setup\.php|actuator|xmlrpc\.php'
 NOISE_PATTERN='\.(jpg|jpeg|png|gif|webp|ico|css|js|svg|woff2?|map)$|apple-touch-icon|favicon|browserconfig\.xml|mstile|autodiscover\.xml|sitemap\.xml|robots\.txt|ads\.txt|\.well-known/(security\.txt|pki-validation)'
 # Signatures sécurité testées sur la requête ($7) QUEL QUE SOIT le statut HTTP (contrairement aux
@@ -1080,6 +1088,36 @@ T_DE[range.ban_failed]="[!] Bereich %s konnte nicht gesperrt werden (von der Fir
 T_ES[range.ban_failed]="[!] No se pudo bloquear el rango %s (rechazado por el firewall)"
 T_IT[range.ban_failed]="[!] Impossibile bloccare l'intervallo %s (rifiutato dal firewall)"
 
+T_EN[range.shared_banned]="[i] Shared range banned: %s — banned on another server of the fleet; ban %s"
+T_FR[range.shared_banned]="[i] Plage partagée bannie : %s — bannie sur un autre serveur du parc ; ban %s"
+T_DE[range.shared_banned]="[i] Geteilter Bereich gesperrt: %s — auf einem anderen Server gesperrt; Sperre %s"
+T_ES[range.shared_banned]="[i] Rango compartido bloqueado: %s — bloqueado en otro servidor; bloqueo %s"
+T_IT[range.shared_banned]="[i] Intervallo condiviso bloccato: %s — bloccato su un altro server; blocco %s"
+
+T_EN[range.shared_lifted]="[i] Shared range released: %s — no longer banned anywhere in the fleet"
+T_FR[range.shared_lifted]="[i] Plage partagée libérée : %s — plus bannie nulle part dans le parc"
+T_DE[range.shared_lifted]="[i] Geteilter Bereich freigegeben: %s — nirgends mehr gesperrt"
+T_ES[range.shared_lifted]="[i] Rango compartido liberado: %s — ya no está bloqueado en ningún servidor"
+T_IT[range.shared_lifted]="[i] Intervallo condiviso sbloccato: %s — non più bloccato su alcun server"
+
+T_EN[diag.shared_ok]="Shared ranges (%s): %s listed, %s applied here, updated %s min ago"
+T_FR[diag.shared_ok]="Plages partagées (%s) : %s dans la liste, %s appliquée(s) ici, mise à jour il y a %s min"
+T_DE[diag.shared_ok]="Geteilte Bereiche (%s): %s gelistet, %s hier angewendet, vor %s Min. aktualisiert"
+T_ES[diag.shared_ok]="Rangos compartidos (%s): %s en la lista, %s aplicado(s) aquí, actualizado hace %s min"
+T_IT[diag.shared_ok]="Intervalli condivisi (%s): %s in elenco, %s applicato/i qui, aggiornato %s min fa"
+
+T_EN[diag.shared_stale]="Shared ranges (%s): not updated for %s min — the collector seems to have stopped (bans already applied stay until they expire)"
+T_FR[diag.shared_stale]="Plages partagées (%s) : pas de mise à jour depuis %s min — le collecteur semble arrêté (les bans déjà appliqués restent jusqu'à leur échéance)"
+T_DE[diag.shared_stale]="Geteilte Bereiche (%s): seit %s Min. nicht aktualisiert — der Sammler scheint gestoppt (bestehende Sperren bleiben bis zum Ablauf)"
+T_ES[diag.shared_stale]="Rangos compartidos (%s): sin actualizar desde hace %s min — el colector parece detenido (los bloqueos aplicados siguen hasta su vencimiento)"
+T_IT[diag.shared_stale]="Intervalli condivisi (%s): non aggiornato da %s min — il raccoglitore sembra fermo (i blocchi applicati restano fino alla scadenza)"
+
+T_EN[diag.shared_missing]="Shared ranges: file %s is missing (SHARED_NETS_FILE) — the collector has never delivered it or has stopped"
+T_FR[diag.shared_missing]="Plages partagées : fichier %s absent (SHARED_NETS_FILE) — le collecteur ne l'a jamais déposé ou s'est arrêté"
+T_DE[diag.shared_missing]="Geteilte Bereiche: Datei %s fehlt (SHARED_NETS_FILE) — der Sammler hat sie nie geliefert oder ist gestoppt"
+T_ES[diag.shared_missing]="Rangos compartidos: falta el archivo %s (SHARED_NETS_FILE) — el colector nunca lo entregó o se detuvo"
+T_IT[diag.shared_missing]="Intervalli condivisi: file %s mancante (SHARED_NETS_FILE) — il raccoglitore non l'ha mai consegnato o si è fermato"
+
 T_EN[stats.ranges_header_ban]="Suspicious ranges, 24 h (BAN mode: %s banned now)"
 T_FR[stats.ranges_header_ban]="Plages suspectes sur 24 h (mode BANNISSEMENT : %s bannie(s) actuellement)"
 T_DE[stats.ranges_header_ban]="Verdächtige Bereiche, 24 h (SPERR-Modus: %s derzeit gesperrt)"
@@ -1109,6 +1147,11 @@ T_FR[help.conf_range_watch]="  RANGE_WATCH  Surveillance des plages /24 sur les 
 T_DE[help.conf_range_watch]="  RANGE_WATCH  Überwachung von /24-Bereichen bei FTP/SMTP-Anmeldefehlern: observe (Standard, protokolliert und meldet, sperrt nichts), ban (sperrt den Bereich, 7 T, dann Wiederholungsstufen) oder off. Schwellen RANGE_MIN_IPS (5) und RANGE_MIN_FAILS (50) in WINDOW."
 T_ES[help.conf_range_watch]="  RANGE_WATCH  Vigilancia de rangos /24 según los fallos de autenticación FTP/SMTP: observe (por defecto, registra e informa, no bloquea nada), ban (bloquea el rango, 7 d y luego la escala de reincidencia) u off. Umbrales RANGE_MIN_IPS (5) y RANGE_MIN_FAILS (50) en WINDOW."
 T_IT[help.conf_range_watch]="  RANGE_WATCH  Sorveglianza degli intervalli /24 sulle autenticazioni FTP/SMTP fallite: observe (predefinito, registra e segnala, non blocca nulla), ban (blocca l'intervallo, 7 g poi la scala di recidiva) o off. Soglie RANGE_MIN_IPS (5) e RANGE_MIN_FAILS (50) in WINDOW."
+T_EN[help.conf_shared_nets]="  SHARED_NETS_FILE  File of /24 ranges banned elsewhere in the fleet (« range expiry_epoch » per line), dropped by a collector; each range is checked and banned here until its expiry. Empty = off."
+T_FR[help.conf_shared_nets]="  SHARED_NETS_FILE  Fichier des plages /24 bannies ailleurs dans le parc (« plage échéance_epoch » par ligne), déposé par un collecteur ; chaque plage est vérifiée puis bannie ici jusqu'à son échéance. Vide = désactivé."
+T_DE[help.conf_shared_nets]="  SHARED_NETS_FILE  Datei der anderswo gesperrten /24-Bereiche (« Bereich Ablauf_epoch » je Zeile), von einem Sammler abgelegt; jeder Bereich wird geprüft und hier bis zum Ablauf gesperrt. Leer = aus."
+T_ES[help.conf_shared_nets]="  SHARED_NETS_FILE  Archivo de rangos /24 bloqueados en otro servidor (« rango vencimiento_epoch » por línea), depositado por un colector; cada rango se verifica y se bloquea aquí hasta su vencimiento. Vacío = desactivado."
+T_IT[help.conf_shared_nets]="  SHARED_NETS_FILE  File degli intervalli /24 bloccati altrove (« intervallo scadenza_epoch » per riga), depositato da un raccoglitore; ogni intervallo è verificato e bloccato qui fino alla scadenza. Vuoto = disattivato."
 
 T_EN[diag.fw_rule_ok]="Firewall DROP rule present."
 T_FR[diag.fw_rule_ok]="Règle DROP du pare-feu présente."
@@ -2424,6 +2467,7 @@ show_help() {
     t help.conf_escalation_memory
     t help.conf_aggressive_score
     t help.conf_range_watch
+    t help.conf_shared_nets
     t help.conf_nickname
     t help.conf_webhook
     t help.conf_chatcard
@@ -3371,6 +3415,97 @@ build_ranges_observed() {
     return 0
 }
 
+# --- Plages PARTAGÉES entre serveurs (depuis 2.3.19) ---------------------------------------------
+# Une plage bannie par un serveur (RANGE_WATCH=ban) l'est aussi sur les autres sans attendre qu'elle
+# les attaque : 77.91.65.0/24 a frappé 9 serveurs du parc l'un après l'autre (oct. 2026). Le moteur
+# ne fait que LIRE un fichier local SHARED_NETS_FILE (« plage échéance_epoch » par ligne) ; le
+# collecteur qui le dépose (relevé des plages bannies localement sur chaque serveur) vit HORS de ce
+# dépôt. Garde-fous appliqués ici, quel que soit le collecteur : /24 IPv4 publiques uniquement,
+# exclusions locales (range_excluded : liste blanche, adresses du serveur), nombre de lignes plafonné
+# (SHARED_NETS_MAX), durée plafonnée au dernier palier de BAN_ESCALATION. Aucune mémoire de récidive :
+# ce serveur n'a rien constaté lui-même.
+# FAIL-SAFE : collecteur en panne (fichier absent ou périmé au-delà de SHARED_NETS_STALE) => les bans
+# déjà posés restent jusqu'à leur échéance et rien n'est levé ; le diag (donc le résumé) le signale.
+# Une plage qui disparaît d'un fichier FRAIS (déban sur le serveur d'origine) est libérée ici, sauf
+# si ce serveur l'a bannie lui-même (entrée en cours dans OFFENDERS_FILE).
+shared_nets_age() {  # âge (s) du fichier partagé ; rien s'il est absent
+    local m
+    m=$(stat -c %Y "$SHARED_NETS_FILE" 2>/dev/null) || return 0
+    printf '%s' "$(( $(date +%s) - m ))"
+}
+shared_net_valid() {  # $1 = plage ; 0 = /24 IPv4 publique, non exclue localement
+    [[ "$1" =~ ^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.0/24$ ]] || return 1
+    local a=$((10#${BASH_REMATCH[1]})) b=$((10#${BASH_REMATCH[2]})) c=$((10#${BASH_REMATCH[3]}))
+    [ "$a" -ge 1 ] && [ "$a" -le 223 ] && [ "$b" -le 255 ] && [ "$c" -le 255 ] || return 1
+    [ "$a" -eq 100 ] && [ "$b" -ge 64 ] && [ "$b" -le 127 ] && return 1   # CGNAT 100.64.0.0/10
+    range_excluded "$1" && return 1
+    return 0
+}
+shared_net_local() {  # $1 = plage ; 0 = bannie par CE serveur (ban en cours dans OFFENDERS_FILE)
+    awk -v n="$1" -v now="$(date +%s)" '$1 == n && $3 > now { f = 1 } END { exit !f }' "$OFFENDERS_FILE" 2>/dev/null
+}
+shared_nets_apply() {
+    [ -n "$SHARED_NETS_FILE" ] || return 0
+    local now age fresh=0 max net exp ttl n=0 net_ready=0 changed=0 tmp
+    local -a tiers
+    local -A want=() prev=()
+    now=$(date +%s)
+    read -r -a tiers <<< "${BAN_ESCALATION:-}"
+    max=0; [ "${#tiers[@]}" -gt 0 ] && max="${tiers[${#tiers[@]}-1]}"
+    case "$max" in ''|*[!0-9]*) max=0 ;; esac
+    [ "$max" -lt "$RANGE_BAN_TIMEOUT" ] && max="$RANGE_BAN_TIMEOUT"
+    age=$(shared_nets_age)
+    [ -n "$age" ] && [ "$age" -le "$SHARED_NETS_STALE" ] && fresh=1
+    if [ -r "$SHARED_NETS_FILE" ]; then
+        while read -r net exp _; do
+            case "$net" in ''|'#'*) continue ;; esac
+            n=$((n + 1)); [ "$n" -le "$SHARED_NETS_MAX" ] || break
+            [[ "$exp" =~ ^[0-9]{1,12}$ ]] && [ "$exp" -gt "$((now + 60))" ] || continue
+            shared_net_valid "$net" || continue
+            [ "$((exp - now))" -gt "$max" ] && exp=$((now + max))
+            want[$net]=$exp
+        done < "$SHARED_NETS_FILE"
+    fi
+    while read -r net exp; do
+        [ -n "$net" ] && [ "${exp:-0}" -gt "$now" ] 2>/dev/null && prev[$net]=$exp
+    done 2>/dev/null < "$SHARED_NETS_STATE"
+    # Bans : plages de la liste pas encore bannies ici.
+    for net in "${!want[@]}"; do
+        if fw_net_exists && fw_net_is_banned "$net"; then
+            [ -n "${prev[$net]:-}" ] && prev[$net]=${want[$net]}
+            continue
+        fi
+        [ "$net_ready" = 1 ] || { fw_net_ensure && net_ready=1; }
+        ttl=$(( want[$net] - now ))
+        if [ "$net_ready" = 1 ] && fw_net_ban_ttl "$net" "$ttl"; then
+            t_log range.shared_banned "$net" "$(fmt_duration "$ttl")" >/dev/null
+            prev[$net]=${want[$net]}; changed=1
+        else
+            t_log range.ban_failed "$net" >/dev/null
+        fi
+    done
+    # Levées : seulement sur une liste FRAÎCHE, jamais une plage bannie par ce serveur lui-même.
+    if [ "$fresh" = 1 ]; then
+        for net in "${!prev[@]}"; do
+            [ -n "${want[$net]:-}" ] && continue
+            unset 'prev[$net]'
+            shared_net_local "$net" && continue
+            if fw_net_exists && fw_net_is_banned "$net" && fw_net_unban "$net"; then
+                t_log range.shared_lifted "$net" >/dev/null; changed=1
+            fi
+        done
+    fi
+    mkdir -p "$(dirname "$SHARED_NETS_STATE")" 2>/dev/null
+    tmp=$(mktemp "$(dirname "$SHARED_NETS_STATE")/.shared.XXXXXX" 2>/dev/null) || tmp=""
+    if [ -n "$tmp" ]; then
+        for net in "${!prev[@]}"; do printf '%s %s\n' "$net" "${prev[$net]}"; done > "$tmp"
+        chmod 644 "$tmp" 2>/dev/null
+        mv -f "$tmp" "$SHARED_NETS_STATE" 2>/dev/null || rm -f "$tmp"
+    fi
+    [ "$changed" = 1 ] && fw_persist
+    return 0
+}
+
 build_stats_text() {
     local bans unbans evt cutoff24 cnt ip rdns updater upd_ver issue div kind sc top_raw top404 tophp
     # Couleur ANSI des triangles seulement au terminal ([ -t 1 ]) ; sinon 'plain'. Le résumé notifié
@@ -4309,6 +4444,17 @@ run_diag_checks() {
         else
             diag_line ok "$(t diag.range_off)"
         fi
+        if [ -n "$SHARED_NETS_FILE" ]; then      # plages partagées entre serveurs (2.3.19)
+            sh_age=$(shared_nets_age)
+            if [ -z "$sh_age" ]; then
+                diag_line warn "$(t diag.shared_missing "$SHARED_NETS_FILE")"
+            elif [ "$sh_age" -gt "$SHARED_NETS_STALE" ]; then
+                diag_line warn "$(t diag.shared_stale "$SHARED_NETS_FILE" "$((sh_age / 60))")"
+            else
+                diag_line ok "$(t diag.shared_ok "$SHARED_NETS_FILE" "$(grep -cE '^[0-9]' "$SHARED_NETS_FILE" 2>/dev/null)" \
+                    "$(awk -v now="$(date +%s)" '$2 > now' "$SHARED_NETS_STATE" 2>/dev/null | grep -c .)" "$((sh_age / 60))")"
+            fi
+        fi
         if [ "$(id -u)" -eq 0 ]; then
             if fw_set_exists; then
                 diag_line ok "$(t diag.fw_set_ok "$IPSET_NAME" "$(fw_count "$IPSET_NAME")")"
@@ -5087,7 +5233,8 @@ finish_run() {
         touch "$RUN_STAMP_FILE" 2>/dev/null
         metrics_sample                      # échantillon horaire (moyennes 24 h) ; même garde DRY_RUN+root
         ipset_counts_sample                 # échantillon horaire du nb d'entrées par ipset (évol. + tendance 24 h)
-        range_watch_sample                  # plages /24 suspectes (échecs FTP/SMTP), observation seule
+        range_watch_sample                  # plages /24 suspectes (échecs FTP/SMTP), observation ou ban
+        shared_nets_apply                   # plages bannies ailleurs dans le parc (SHARED_NETS_FILE)
         # Cadence auto : ne compter QUE les bans « réels » (hp=0, flood volume-404) — pas le bruit du
         # circuit honeypot (hp=1 : honeypot + signatures SECURITY/POST-flood). Le scan de fond d'un
         # mutualisé bannit une nouvelle IP honeypot toutes les ~10-15 min ; le compter épinglait la

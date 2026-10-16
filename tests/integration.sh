@@ -705,6 +705,40 @@ bash "$ENGINE" >/dev/null 2>&1 || true
 to=$(ipset list ban_404_net | awk -v n="$NET16.0/24" '$1 == n { print $3 }')
 [ "${to:-0}" -gt 1200000 ] || fail "16h : récidive d'une plage, durée $to s (attendu 14 j)"
 ok "récidive : 2e ban de la plage pour 14 j"
+
+# 16i. Plages PARTAGÉES (2.3.19) : un fichier déposé par un collecteur liste les plages bannies
+# ailleurs. Seules les /24 publiques non whitelistées sont bannies, jusqu'à leur échéance, sans
+# entrer dans la mémoire de récidive ; une plage retirée d'un fichier FRAIS est libérée.
+SH16="$FIX/shared_nets"; SHN=198.51.100; now16=$(date +%s)
+printf 'SHARED_NETS_FILE=%s\n' "$SH16" >> /etc/ban_404.conf
+{ echo "# liste du collecteur"
+  printf '%s.0/24 %s\n' "$SHN" "$((now16 + 86400))" "$WL16" "$((now16 + 86400))" 10.9.9 "$((now16 + 86400))"
+  printf '203.0.113.0/25 %s\n198.51.101.0/24 %s\n' "$((now16 + 86400))" "$((now16 - 10))"; } > "$SH16"
+bash "$ENGINE" >/dev/null 2>&1 || true
+ipset test ban_404_net "$SHN.7" 2>/dev/null || { cat "$SH16"; fail "16i : la plage partagée $SHN.0/24 n'est pas bannie"; }
+for bad in "$WL16.7" 10.9.9.7 203.0.113.7 198.51.101.7; do
+    ipset test ban_404_net "$bad" 2>/dev/null && fail "16i : $bad (plage whitelistée, privée, mal formée ou échue) a été bannie"
+done
+to=$(ipset list ban_404_net | awk -v n="$SHN.0/24" '$1 == n { print $3 }')
+[ "${to:-0}" -gt 86000 ] && [ "${to:-0}" -le 86400 ] || fail "16i : durée de la plage partagée inattendue ($to s, attendu son échéance ~1 j)"
+grep -q "Shared range banned: $SHN.0/24" "$LOGF" || fail "16i : le ban de plage partagée n'est pas journalisé"
+grep -q "^$SHN.0/24 " /var/lib/ban_404/offenders 2>/dev/null && fail "16i : la plage partagée est entrée dans la mémoire de récidive"
+bash "$ENGINE" diag 2>&1 | grep -q "Shared ranges ($SH16): 5 listed, 1 applied here" \
+    || { bash "$ENGINE" diag 2>&1 | grep -i shared; fail "16i : ligne de diag des plages partagées absente ou fausse"; }
+ok "plage partagée bannie jusqu'à son échéance ; whitelistée, privée, mal formée et échue écartées"
+# Collecteur arrêté : fichier périmé => [WARN], et AUCUNE levée même si la plage a disparu.
+: > "$SH16"; touch -d '-3 hours' "$SH16"
+bash "$ENGINE" >/dev/null 2>&1 || true
+ipset test ban_404_net "$SHN.7" 2>/dev/null || fail "16i : plage partagée levée alors que la liste est périmée"
+bash "$ENGINE" diag 2>&1 | grep -q "not updated for 180 min" || fail "16i : liste périmée non signalée au diag"
+ok "liste périmée : signalée au diag, bans conservés"
+# Liste fraîche sans la plage (déban sur le serveur d'origine) => libérée ici.
+: > "$SH16"
+bash "$ENGINE" >/dev/null 2>&1 || true
+ipset test ban_404_net "$SHN.7" 2>/dev/null && fail "16i : plage retirée de la liste fraîche toujours bannie"
+grep -q "Shared range released: $SHN.0/24" "$LOGF" || fail "16i : levée de plage partagée non journalisée"
+ok "plage retirée de la liste : libérée"
+sed -i '/^SHARED_NETS_FILE=/d' /etc/ban_404.conf; rm -f "$SH16" /var/lib/ban_404/shared_applied
 iptables -D INPUT -m set --match-set ban_404_net src -j DROP 2>/dev/null; ipset destroy ban_404_net 2>/dev/null
 sed -i '/^RANGE_WATCH=/d' /etc/ban_404.conf
 sed -i '/^RANGE_FTP_LOG=/d; /^RANGE_SMTP_LOG=/d; /^WHITELIST_IP="127.0.0.1|/d' /etc/ban_404.conf

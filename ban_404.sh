@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="2.3.19"
+BAN404_VERSION="2.3.20"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -4177,7 +4177,11 @@ sentinel_hit() {
     !($1 in white) {
         cand = 0
         if (security_re != "" && tolower($7) ~ security_re) cand = 1
-        else if ($9 == 404 && (noise_re == "" || tolower($7) !~ noise_re)) cand = 2
+        else if ($9 == 404) {
+            # Bruit teste sans query string, comme l analyse complete (cache-busters ?v=).
+            q = tolower($7); sub(/\?.*/, "", q)
+            if (noise_re == "" || q !~ noise_re) cand = 2
+        }
         if (!cand) next
         split(substr($4,2), d, /[\/:]/)
         ts = sprintf("%04d%02d%02d%02d%02d%02d", d[3], mon[d[2]], d[1], d[4], d[5], d[6])
@@ -5369,7 +5373,12 @@ BEGIN {
     if ($9 != 404) next
 
     # --- A. Bruit de fond (faux positifs) ---
-    if (p ~ noise_re) next
+    # Teste le chemin SANS query string : les motifs sont ancres en fin de chemin (\.png$), et un
+    # cache-buster (logo.png?1.7.7.3 du back-office PrestaShop, style.css?ver= de WordPress) les
+    # faisait echouer -> une image manquante comptait comme un vrai 404. Effet inverse corrige au
+    # passage : /.env?x.png etait classe bruit et echappait au honeypot.
+    q = p; sub(/\?.*/, "", q)
+    if (q ~ noise_re) next
 
     # --- B. Honeypots : +HONEYPOT_SCORE (ban quasi immédiat) ---
     if (p ~ honeypot_re) {

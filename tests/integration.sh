@@ -742,3 +742,23 @@ sed -i '/^SHARED_NETS_FILE=/d' /etc/ban_404.conf; rm -f "$SH16" /var/lib/ban_404
 iptables -D INPUT -m set --match-set ban_404_net src -j DROP 2>/dev/null; ipset destroy ban_404_net 2>/dev/null
 sed -i '/^RANGE_WATCH=/d' /etc/ban_404.conf
 sed -i '/^RANGE_FTP_LOG=/d; /^RANGE_SMTP_LOG=/d; /^WHITELIST_IP="127.0.0.1|/d' /etc/ban_404.conf
+
+# ---------------------------------------------------------------------------
+echo "== Test 17 : le bruit est reconnu malgré une query string (cache-buster) =="
+# Incident du 28 oct. 2026 : une développeuse bannie 48 h pour 20 x /modules/<m>/logo.png?1.7.7.3
+# (logos de modules du back-office PrestaShop). NOISE_PATTERN est ancré en fin de chemin (\.png$) :
+# testé sur la requête COMPLÈTE, il échouait à cause du ?1.7.7.3, et 5 chemins distincts passaient
+# DISTINCT_PATH_MIN. Le bruit se teste désormais sans query — ce qui ferme aussi l'évasion inverse.
+PSIP=198.51.100.140   # back-office : images manquantes avec cache-buster
+ENVQ=198.51.100.141   # scanner : chemin-piège déguisé en image par la query
+for m in jaubproduct diamantsdecouleur diamantconfigurateur blockdeffileaccueil admincustomfields; do
+    for i in 1 2 3 4; do
+        printf '%s - - [%s] "GET /modules/%s/logo.png?1.7.7.3 HTTP/1.1" 404 200 "-" "Mozilla/5.0"\n' "$PSIP" "$TS" "$m" >> "$LOG"
+    done
+done
+printf '%s - - [%s] "GET /.env?x.png HTTP/1.1" 404 200 "-" "bot/1.0"\n' "$ENVQ" "$TS" >> "$LOG"
+OUT=$(bash "$ENGINE" --dry-run 2>&1 || true)
+printf '%s\n' "$OUT" | grep -q "$PSIP" && { printf '%s\n' "$OUT"; fail "17 : $PSIP (images manquantes avec ?1.7.7.3) ne doit pas être candidat"; }
+ok "images manquantes avec cache-buster : ignorées comme bruit"
+printf '%s\n' "$OUT" | grep -q "$ENVQ" || { printf '%s\n' "$OUT"; fail "17 : $ENVQ (/.env?x.png) doit être détecté comme honeypot"; }
+ok "chemin-piège déguisé par la query (/.env?x.png) : détecté"

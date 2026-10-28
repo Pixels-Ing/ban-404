@@ -773,3 +773,21 @@ printf '%s
 ' "$OUT" | grep -q "$DOCIP" && { printf '%s
 ' "$OUT"; fail "17b : $DOCIP (documents/médias manquants) ne doit pas être candidat"; }
 ok "documents, vidéos, sons et polices manquants : ignorés comme bruit"
+# 17c (2.3.22) : le « ? » encodé (%3f) est décodé avant la coupe, dans les deux sens.
+ENC1=198.51.100.143   # chemin-piège déguisé par un %3f : doit être détecté
+ENC2=198.51.100.144   # images avec cache-buster encodé : doivent rester du bruit
+printf '%s - - [%s] "GET /.env%%3fx.png HTTP/1.1" 404 200 "-" "bot/1.0"
+' "$ENC1" "$TS" >> "$LOG"
+for i in $(seq 1 12); do
+    printf '%s - - [%s] "GET /img/logo-%d.png%%3F1.2 HTTP/1.1" 404 200 "-" "Mozilla/5.0"
+' "$ENC2" "$TS" "$i" >> "$LOG"
+done
+OUT=$(bash "$ENGINE" --dry-run 2>&1 || true)
+printf '%s
+' "$OUT" | grep -q "$ENC1" || { printf '%s
+' "$OUT"; fail "17c : $ENC1 (/.env%3fx.png) doit être détecté comme honeypot"; }
+ok "chemin-piège déguisé par un ? encodé (/.env%3fx.png) : détecté"
+printf '%s
+' "$OUT" | grep -q "$ENC2" && { printf '%s
+' "$OUT"; fail "17c : $ENC2 (images avec %3F) ne doit pas être candidat"; }
+ok "images avec cache-buster encodé (%3F) : ignorées comme bruit"

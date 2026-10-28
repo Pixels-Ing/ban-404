@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="2.3.20"
+BAN404_VERSION="2.3.21"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -72,7 +72,7 @@ SHARED_NETS_FILE=""
 SHARED_NETS_STALE=7200
 SHARED_NETS_MAX=256
 HONEYPOT_PATTERN='\.env|wp-config\.php|phpmyadmin|config\.json|setup\.php|actuator|xmlrpc\.php'
-NOISE_PATTERN='\.(jpg|jpeg|png|gif|webp|ico|css|js|svg|woff2?|map)$|apple-touch-icon|favicon|browserconfig\.xml|mstile|autodiscover\.xml|sitemap\.xml|robots\.txt|ads\.txt|\.well-known/(security\.txt|pki-validation)'
+NOISE_PATTERN='\.(jpe?g|png|gif|webp|avif|bmp|ico|svg|css|js|map|woff2?|ttf|otf|eot|mp4|m4v|webm|ogv|mov|avi|mp3|m4a|wav|ogg|oga|opus|aac|flac|pdf|docx?|xlsx?|pptx?|odt|ods|odp|rtf)$|apple-touch-icon|favicon|browserconfig\.xml|mstile|autodiscover\.xml|sitemap\.xml|robots\.txt|ads\.txt|\.well-known/(security\.txt|pki-validation)'
 # Signatures sécurité testées sur la requête ($7) QUEL QUE SOIT le statut HTTP (contrairement aux
 # honeypots, limités aux 404) : traversée de répertoires, sondes RCE, SQLi encodées, bots à liens
 # ré-encodés, « ? » encodé dans la valeur d'un paramètre. Match => +HONEYPOT_SCORE (ban immédiat,

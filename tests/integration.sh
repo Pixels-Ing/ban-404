@@ -762,3 +762,14 @@ printf '%s\n' "$OUT" | grep -q "$PSIP" && { printf '%s\n' "$OUT"; fail "17 : $PS
 ok "images manquantes avec cache-buster : ignorées comme bruit"
 printf '%s\n' "$OUT" | grep -q "$ENVQ" || { printf '%s\n' "$OUT"; fail "17 : $ENVQ (/.env?x.png) doit être détecté comme honeypot"; }
 ok "chemin-piège déguisé par la query (/.env?x.png) : détecté"
+# 17b (2.3.21) : documents, vidéos, sons et polices manquants sont aussi du bruit.
+DOCIP=198.51.100.142
+for p in /docs/tarifs.pdf /docs/catalogue.docx /docs/stock.xlsx /docs/presentation.pptx          /media/intro.mp4 /media/clip.mov /media/jingle.mp3 /media/son.wav /fonts/inter.ttf          /docs/notice.odt "/media/teaser.webm?v=3" /img/photo.avif; do
+    printf '%s - - [%s] "GET %s HTTP/1.1" 404 200 "-" "Mozilla/5.0"
+' "$DOCIP" "$TS" "$p" >> "$LOG"
+done
+OUT=$(bash "$ENGINE" --dry-run 2>&1 || true)
+printf '%s
+' "$OUT" | grep -q "$DOCIP" && { printf '%s
+' "$OUT"; fail "17b : $DOCIP (documents/médias manquants) ne doit pas être candidat"; }
+ok "documents, vidéos, sons et polices manquants : ignorés comme bruit"

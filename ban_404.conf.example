@@ -212,7 +212,7 @@ WHITELIST_IP="127.0.0.1"
 # --- Patrones de detección (regex awk) — AVANZADO: sobrescribir solo con conocimiento ---
 # --- Pattern di rilevamento (regex awk) — AVANZATO: sovrascrivere solo con cognizione di causa ---
 #HONEYPOT_PATTERN='\.env|wp-config\.php|phpmyadmin|config\.json|setup\.php|actuator|xmlrpc\.php'
-#NOISE_PATTERN='\.(jpg|jpeg|png|gif|webp|ico|css|js|svg|woff2?|map)$|apple-touch-icon|favicon|browserconfig\.xml|mstile|autodiscover\.xml|sitemap\.xml|robots\.txt|ads\.txt|\.well-known/(security\.txt|pki-validation)'
+#NOISE_PATTERN='\.(jpe?g|png|gif|webp|avif|bmp|ico|svg|css|js|map|woff2?|ttf|otf|eot|mp4|m4v|webm|ogv|mov|avi|mp3|m4a|wav|ogg|oga|opus|aac|flac|pdf|docx?|xlsx?|pptx?|odt|ods|odp|rtf)$|apple-touch-icon|favicon|browserconfig\.xml|mstile|autodiscover\.xml|sitemap\.xml|robots\.txt|ads\.txt|\.well-known/(security\.txt|pki-validation)'
 # --- Monitoring/health-check host: a fixed endpoint (e.g. Uptime Kuma push /api/push/<token>) can 404 with no client fault — append it so its 404s never count as a flood; also whitelist the senders (WHITELIST_IP). ---
 # --- Hôte de monitoring/health-check : un endpoint fixe (ex. push Uptime Kuma /api/push/<token>) peut renvoyer 404 sans faute du client — l'ajouter pour que ses 404 ne comptent jamais ; whitelister aussi les émetteurs (WHITELIST_IP). ---
 # --- Monitoring-/Health-Check-Host: ein fester Endpunkt (z. B. Uptime-Kuma-Push /api/push/<token>) kann ohne Client-Fehler 404 liefern — anhängen, damit seine 404 nie zählen; zusätzlich die Absender per WHITELIST_IP absichern. ---

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="2.3.22"
+BAN404_VERSION="2.3.23"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -200,6 +200,9 @@ HEALTH_MEM_CRIT=5     # [FAIL] si MemAvailable < N % (< HEALTH_MEM_WARN)
 HEALTH_DISK_CRIT=95   # [FAIL] si espace OU inodes > N % (> HEALTH_DISK_WARN)
 HEALTH_MAILQ_CRIT=500 # [FAIL] si file postfix > N messages (> HEALTH_MAILQ_WARN)
 HEALTH_IO_CRIT=50     # [FAIL] si pression IO (PSI some avg60) > N % (> HEALTH_IO_WARN)
+# RAID logiciel (mdadm) : état lu dans ce fichier — grappe dégradée => [FAIL], reconstruction en
+# cours => [WARN]. Aucun seuil. Constante interne (surchargeable : sert aux tests).
+MDSTAT_FILE=/proc/mdstat
 
 # Graduation des triangles de tendance du bloc « Comptage ipset » (tranche = intensité |%| sur la
 # valeur : rien si < flat / ▼▲ modéré / ▼▼▲▲ fort ; couleur = direction, baisse=vert, hausse=rouge).
@@ -1351,6 +1354,26 @@ T_FR[diag.health_disk_full]="Disque %s PRESQUE PLEIN : %s %% d'espace, %s %% d'i
 T_DE[diag.health_disk_full]="Festplatte %s FAST VOLL: %s %% Platz, %s %% Inodes (Schwelle %s %%)"
 T_ES[diag.health_disk_full]="Disco %s CASI LLENO: %s %% de espacio, %s %% de inodos (umbral %s %%)"
 T_IT[diag.health_disk_full]="Disco %s QUASI PIENO: %s %% di spazio, %s %% di inode (soglia %s %%)"
+T_EN[diag.health_raid_ok]="Software RAID: %s array(s) OK (%s)"
+T_FR[diag.health_raid_ok]="RAID logiciel : %s grappe(s) OK (%s)"
+T_DE[diag.health_raid_ok]="Software-RAID: %s Verbund/Verbünde OK (%s)"
+T_ES[diag.health_raid_ok]="RAID por software: %s matriz(es) OK (%s)"
+T_IT[diag.health_raid_ok]="RAID software: %s array OK (%s)"
+T_EN[diag.health_raid_degraded]="RAID %s DEGRADED: %s of %s disks active [%s] — a disk is missing or failed: replace it, then rebuild."
+T_FR[diag.health_raid_degraded]="RAID %s DÉGRADÉ : %s disque(s) actif(s) sur %s [%s] — disque absent ou en panne : le remplacer, puis reconstruire."
+T_DE[diag.health_raid_degraded]="RAID %s DEGRADIERT: %s von %s Platten aktiv [%s] — Platte fehlt oder defekt: ersetzen, dann neu aufbauen."
+T_ES[diag.health_raid_degraded]="RAID %s DEGRADADO: %s de %s discos activos [%s] — disco ausente o averiado: reemplazarlo y reconstruir."
+T_IT[diag.health_raid_degraded]="RAID %s DEGRADATO: %s dischi attivi su %s [%s] — disco assente o guasto: sostituirlo, poi ricostruire."
+T_EN[diag.health_raid_rebuild]="RAID %s rebuilding: %s done (%s of %s disks active, about %s min left)"
+T_FR[diag.health_raid_rebuild]="RAID %s en reconstruction : %s effectués (%s disque(s) actif(s) sur %s, fin dans ~%s min)"
+T_DE[diag.health_raid_rebuild]="RAID %s wird neu aufgebaut: %s erledigt (%s von %s Platten aktiv, noch ~%s min)"
+T_ES[diag.health_raid_rebuild]="RAID %s en reconstrucción: %s hecho (%s de %s discos activos, faltan ~%s min)"
+T_IT[diag.health_raid_rebuild]="RAID %s in ricostruzione: %s completato (%s dischi attivi su %s, mancano ~%s min)"
+T_EN[diag.health_raid_inactive]="RAID %s INACTIVE — array not assembled, its data is unavailable."
+T_FR[diag.health_raid_inactive]="RAID %s INACTIF — grappe non assemblée, ses données sont inaccessibles."
+T_DE[diag.health_raid_inactive]="RAID %s INAKTIV — Verbund nicht assembliert, seine Daten sind nicht verfügbar."
+T_ES[diag.health_raid_inactive]="RAID %s INACTIVO — matriz no ensamblada, sus datos no están disponibles."
+T_IT[diag.health_raid_inactive]="RAID %s INATTIVO — array non assemblato, i suoi dati non sono disponibili."
 
 T_EN[diag.health_mta]="Postfix running · mail queue: %s message(s)"
 T_FR[diag.health_mta]="Postfix actif · file d'attente : %s message(s)"
@@ -4604,6 +4627,48 @@ health_disk_check() {
     fi
 }
 
+# RAID logiciel (mdadm), lu dans MDSTAT_FILE (/proc/mdstat, lisible non-root, aucune dépendance).
+# Né d'un incident réel (oct. 2026) : un des deux NVMe du RAID 1 portant /var a disparu sans
+# que rien ne le signale. Une ligne par grappe en anomalie, une ligne « OK » pour les autres ; muet
+# sans RAID logiciel (VM, RAID matériel). Grappe dégradée => crit ; reconstruction (recovery/reshape)
+# => warn, avec l'avancement ; grappe inactive => crit. Un resync/check sur une grappe complète
+# (vérification mensuelle de checkarray) reste OK.
+health_raid_check() {
+    [ -r "$MDSTAT_FILE" ] || return 0
+    local name state tot act map op pct fin n_ok=0 ok_list=""
+    while IFS='|' read -r name state tot act map op pct fin; do
+        [ -n "$name" ] || continue
+        if [ "$state" = inactive ]; then
+            health_line crit "$(t diag.health_raid_inactive "$name")"
+        elif [ -n "$tot" ] && { [ "${act:-0}" -lt "$tot" ] || [[ "$map" == *_* ]]; }; then
+            if [ -n "$pct" ] && { [ "$op" = recovery ] || [ "$op" = reshape ]; }; then
+                health_line warn "$(t diag.health_raid_rebuild "$name" "$pct" "$act" "$tot" "${fin:-?}")"
+            else
+                health_line crit "$(t diag.health_raid_degraded "$name" "$act" "$tot" "$map")"
+            fi
+        else
+            n_ok=$((n_ok + 1)); ok_list="$ok_list $name"
+        fi
+    done < <(awk '
+        function emit() { if (n != "") print n "|" st "|" tot "|" act "|" map "|" op "|" pct "|" fin; n = "" }
+        /^md[^ ]* *:/ { emit(); n = $1; st = $3; tot = act = map = op = pct = fin = ""; next }
+        n != "" && /blocks/ {
+            if (match($0, /\[[0-9]+\/[0-9]+\]/)) { split(substr($0, RSTART + 1, RLENGTH - 2), a, "/"); tot = a[1]; act = a[2] }
+            if (match($0, /\[[U_]+\]/)) map = substr($0, RSTART + 1, RLENGTH - 2)
+            next
+        }
+        n != "" && /(recovery|resync|reshape|check) *=/ {
+            match($0, /(recovery|resync|reshape|check)/); op = substr($0, RSTART, RLENGTH)
+            if (match($0, /[0-9.]+%/)) pct = substr($0, RSTART, RLENGTH)
+            if (match($0, /finish=[0-9.]+min/)) fin = substr($0, RSTART + 7, RLENGTH - 10)
+            next
+        }
+        /^[[:space:]]*$/ { emit() }
+        END { emit() }' "$MDSTAT_FILE" 2>/dev/null)
+    [ "$n_ok" -gt 0 ] && health_line ok "$(t diag.health_raid_ok "$n_ok" "${ok_list# }")"
+    return 0
+}
+
 # Débit octets/s => forme humaine (kB/MB), pour la ligne réseau. Borné à 0 (wrap de compteur).
 health_rate() { awk -v b="${1:-0}" 'BEGIN{ if (b < 0) b = 0; if (b >= 1048576) printf "%.1f MB", b/1048576; else printf "%.0f kB", b/1024 }'; }
 
@@ -4656,6 +4721,9 @@ run_health_checks() {
     root_dev=$(df -P / 2>/dev/null | awk 'NR==2{print $1}')
     var_dev=$(df -P /var 2>/dev/null | awk 'NR==2{print $1}')
     [ -n "$var_dev" ] && [ "$var_dev" != "$root_dev" ] && health_disk_check /var
+
+    # c2. RAID logiciel : grappe dégradée / en reconstruction / inactive (muet sans RAID logiciel)
+    health_raid_check
 
     # d. MTA postfix : service actif ? file d'attente ? (l'incident fondateur : postfix arrêté =>
     # mailq énorme, mails perdus en silence). Arrêté => [FAIL] (du courrier se perd ACTIVEMENT).

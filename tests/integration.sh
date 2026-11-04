@@ -791,3 +791,39 @@ printf '%s
 ' "$OUT" | grep -q "$ENC2" && { printf '%s
 ' "$OUT"; fail "17c : $ENC2 (images avec %3F) ne doit pas être candidat"; }
 ok "images avec cache-buster encodé (%3F) : ignorées comme bruit"
+echo "== Test 18 : RAID logiciel dégradé / en reconstruction / inactif signalé dans les signes vitaux =="
+# Incident d'oct. 2026 : un des deux NVMe du RAID 1 portant /var a disparu sans alerte.
+MD18=$FIX/mdstat
+cat > "$MD18" <<'MD'
+Personalities : [raid1]
+md2 : active raid1 sdb2[1] sda2[0]
+      1046528 blocks super 1.2 [2/2] [UU]
+      [=>...................]  check =  8.1% (84768/1046528) finish=35.2min speed=202956K/sec
+
+md127 : active raid1 nvme1n1p1[0]
+      1875241280 blocks super 1.2 [2/1] [U_]
+
+md5 : active raid1 sdb5[2] sda5[0]
+      1890496448 blocks [2/1] [U_]
+      [===>.................]  recovery = 17.5% (330955008/1890496448) finish=128.4min speed=202366K/sec
+
+md9 : inactive sdc1[1](S)
+      1000 blocks super 1.2
+
+unused devices: <none>
+MD
+printf 'MDSTAT_FILE=%s\nBAN404_LANG=fr\n' "$MD18" >> /etc/ban_404.conf
+OUT=$(bash "$ENGINE" health 2>&1 || true)
+printf '%s\n' "$OUT" | grep -q '\[FAIL\].*RAID md127 DÉGRADÉ : 1 disque(s) actif(s) sur 2 \[U_\]' || { printf '%s\n' "$OUT"; fail "18 : md127 dégradé doit sortir en [FAIL]"; }
+ok "grappe dégradée : [FAIL]"
+printf '%s\n' "$OUT" | grep -q '\[WARN\].*RAID md5 en reconstruction : 17.5%' || { printf '%s\n' "$OUT"; fail "18 : md5 en reconstruction doit sortir en [WARN] avec l'avancement"; }
+ok "reconstruction : [WARN] avec l'avancement"
+printf '%s\n' "$OUT" | grep -q '\[FAIL\].*RAID md9 INACTIF' || { printf '%s\n' "$OUT"; fail "18 : md9 inactif doit sortir en [FAIL]"; }
+ok "grappe inactive : [FAIL]"
+printf '%s\n' "$OUT" | grep -q '\[ OK \].*RAID logiciel : 1 grappe(s) OK (md2)' || { printf '%s\n' "$OUT"; fail "18 : md2 (vérification mensuelle en cours) doit rester OK"; }
+ok "grappe complète en vérification (check) : OK"
+printf 'Personalities :\nunused devices: <none>\n' > "$MD18"
+OUT=$(bash "$ENGINE" health 2>&1 || true)
+printf '%s\n' "$OUT" | grep -q 'RAID' && { printf '%s\n' "$OUT"; fail "18 : sans grappe, aucune ligne RAID"; }
+ok "sans RAID logiciel : muet"
+sed -i '/^MDSTAT_FILE=/d; /^BAN404_LANG=fr$/d' /etc/ban_404.conf; rm -f "$MD18"

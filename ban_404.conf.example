@@ -205,6 +205,13 @@ WHITELIST_IP="127.0.0.1"
 #HEALTH_DISK_CRIT=95
 #HEALTH_MAILQ_CRIT=500
 #HEALTH_IO_CRIT=50
+# Blocklists (DNSBL): server IPv4 addresses checked against these lists + reputation rejections in the MTA log (24 h)
+# Listes noires (DNSBL) : adresses IPv4 du serveur cherchées dans ces listes + refus de réputation au journal du MTA (24 h)
+# Sperrlisten (DNSBL): IPv4-Adressen des Servers in diesen Listen gesucht + Reputations-Abweisungen im MTA-Log (24 h)
+# Listas negras (DNSBL): direcciones IPv4 del servidor buscadas en estas listas + rechazos por reputación en el log del MTA (24 h)
+# Blacklist (DNSBL): indirizzi IPv4 del server cercati in queste liste + rifiuti per reputazione nel log del MTA (24 h)
+#HEALTH_DNSBL=true
+#HEALTH_DNSBL_LISTS="zen.spamhaus.org b.barracudacentral.org bl.spamcop.net bl.mailspike.net dnsbl-1.uceprotect.net psbl.surriel.com"
 
 # --- Detection patterns (awk regex) — ADVANCED: override only if you know what you are doing ---
 # --- Motifs de détection (regex awk) — AVANCÉ : ne surcharger qu'en connaissance de cause ---

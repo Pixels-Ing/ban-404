@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="2.3.23"
+BAN404_VERSION="2.3.24"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -203,6 +203,18 @@ HEALTH_IO_CRIT=50     # [FAIL] si pression IO (PSI some avg60) > N % (> HEALTH_I
 # RAID logiciel (mdadm) : état lu dans ce fichier — grappe dégradée => [FAIL], reconstruction en
 # cours => [WARN]. Aucun seuil. Constante interne (surchargeable : sert aux tests).
 MDSTAT_FILE=/proc/mdstat
+# Listes noires (DNSBL) : chaque adresse IPv4 publique du serveur est cherchée dans ces listes, et le
+# journal du MTA (RANGE_SMTP_LOG) est relu pour compter les refus « de réputation » des 24 h. Un mail
+# refusé par une liste noire est perdu sans que rien ne le dise côté serveur (incident nov. 2026 :
+# 92 mails d'une boutique refusés en 2 jours par Orange, IP inscrite sur Abusix). Sans objet (muet)
+# sur un serveur sans MTA. Abusix exige une clé : non interrogée, mais ses refus sont vus au journal.
+HEALTH_DNSBL=true
+HEALTH_DNSBL_LISTS="zen.spamhaus.org b.barracudacentral.org bl.spamcop.net bl.mailspike.net dnsbl-1.uceprotect.net psbl.surriel.com"
+# Constantes internes (surchargeables : servent aux tests) : délai par requête, commande de
+# résolution (A), et adresses à vérifier (vide = adresses IPv4 globales publiques du serveur).
+DNSBL_TIMEOUT=3
+DNSBL_LOOKUP_CMD="getent ahostsv4"
+DNSBL_IPS=""
 
 # Graduation des triangles de tendance du bloc « Comptage ipset » (tranche = intensité |%| sur la
 # valeur : rien si < flat / ▼▲ modéré / ▼▼▲▲ fort ; couleur = direction, baisse=vert, hausse=rouge).
@@ -1374,6 +1386,26 @@ T_FR[diag.health_raid_inactive]="RAID %s INACTIF — grappe non assemblée, ses 
 T_DE[diag.health_raid_inactive]="RAID %s INAKTIV — Verbund nicht assembliert, seine Daten sind nicht verfügbar."
 T_ES[diag.health_raid_inactive]="RAID %s INACTIVO — matriz no ensamblada, sus datos no están disponibles."
 T_IT[diag.health_raid_inactive]="RAID %s INATTIVO — array non assemblato, i suoi dati non sono disponibili."
+T_EN[diag.health_dnsbl_ok]="Blocklists: %s address(es) clean on the %s lists checked"
+T_FR[diag.health_dnsbl_ok]="Listes noires : %s adresse(s) absente(s) des %s listes consultées"
+T_DE[diag.health_dnsbl_ok]="Sperrlisten: %s Adresse(n) auf keiner der %s geprüften Listen"
+T_ES[diag.health_dnsbl_ok]="Listas negras: %s dirección(es) ausente(s) de las %s listas consultadas"
+T_IT[diag.health_dnsbl_ok]="Blacklist: %s indirizzo/i assente/i dalle %s liste consultate"
+T_EN[diag.health_dnsbl_listed]="Blocklist: %s LISTED on %s — mail may be rejected; request removal (check: https://mxtoolbox.com/SuperTool.aspx?action=blacklist%%3a%s)"
+T_FR[diag.health_dnsbl_listed]="Liste noire : %s INSCRITE sur %s — des mails peuvent être refusés ; demander le retrait (vérifier : https://mxtoolbox.com/SuperTool.aspx?action=blacklist%%3a%s)"
+T_DE[diag.health_dnsbl_listed]="Sperrliste: %s GELISTET auf %s — E-Mails können abgewiesen werden; Austragung beantragen (prüfen: https://mxtoolbox.com/SuperTool.aspx?action=blacklist%%3a%s)"
+T_ES[diag.health_dnsbl_listed]="Lista negra: %s INSCRITA en %s — pueden rechazarse correos; solicitar la retirada (comprobar: https://mxtoolbox.com/SuperTool.aspx?action=blacklist%%3a%s)"
+T_IT[diag.health_dnsbl_listed]="Blacklist: %s ELENCATO su %s — le email possono essere rifiutate; chiedere la rimozione (verifica: https://mxtoolbox.com/SuperTool.aspx?action=blacklist%%3a%s)"
+T_EN[diag.health_dnsbl_na]="Blocklists not checkable from this DNS resolver: %s (public resolvers are refused)"
+T_FR[diag.health_dnsbl_na]="Listes noires non vérifiables depuis ce résolveur DNS : %s (les résolveurs publics sont refusés)"
+T_DE[diag.health_dnsbl_na]="Sperrlisten von diesem DNS-Resolver aus nicht prüfbar: %s (öffentliche Resolver werden abgewiesen)"
+T_ES[diag.health_dnsbl_na]="Listas negras no comprobables desde este resolvedor DNS: %s (los resolvedores públicos se rechazan)"
+T_IT[diag.health_dnsbl_na]="Blacklist non verificabili da questo resolver DNS: %s (i resolver pubblici sono rifiutati)"
+T_EN[diag.health_mta_rejects]="Mail rejected for reputation: %s attempt(s) in 24 h (last: %s — %s)"
+T_FR[diag.health_mta_rejects]="Mails refusés pour réputation : %s tentative(s) en 24 h (dernière : %s — %s)"
+T_DE[diag.health_mta_rejects]="E-Mails wegen Reputation abgewiesen: %s Versuch(e) in 24 h (zuletzt: %s — %s)"
+T_ES[diag.health_mta_rejects]="Correos rechazados por reputación: %s intento(s) en 24 h (último: %s — %s)"
+T_IT[diag.health_mta_rejects]="Email rifiutate per reputazione: %s tentativo/i in 24 h (ultimo: %s — %s)"
 
 T_EN[diag.health_mta]="Postfix running · mail queue: %s message(s)"
 T_FR[diag.health_mta]="Postfix actif · file d'attente : %s message(s)"
@@ -4669,6 +4701,82 @@ health_raid_check() {
     return 0
 }
 
+# Listes noires (DNSBL) + refus de réputation au journal du MTA (cf. HEALTH_DNSBL en tête).
+# Réponse d'une liste : vide = absente ; 127.x = inscrite ; 127.255.255.x = la liste refuse ce
+# résolveur (Spamhaus et les résolveurs publics) => « non vérifiable », jamais « inscrite » ; une
+# réponse hors 127/8 (DNS menteur d'un FAI) => non vérifiable aussi. Inscription => [WARN] avec le
+# lien de vérification ; refus au journal sur 24 h => [WARN] avec le dernier relais et son motif.
+dnsbl_public_ip() {  # $1 = IPv4 ; 0 si publique (hors privées, CGNAT, lien local, boucle)
+    case "$1" in
+        10.*|127.*|169.254.*|192.168.*|0.*) return 1 ;;
+        172.1[6-9].*|172.2[0-9].*|172.3[01].*) return 1 ;;
+        100.6[4-9].*|100.[7-9][0-9].*|100.1[01][0-9].*|100.12[0-7].*) return 1 ;;
+    esac
+    return 0
+}
+
+# Refus « de réputation » des 24 dernières heures dans le journal du MTA (+ son prédécesseur
+# rotaté) : « count|relais|motif » du dernier. Dates au format syslog (« Nov 14 10:35:32 », mois
+# anglais de rsyslog) OU ISO (« 2026-11-14T10:35:32 ») ; une ligne d'un autre format est ignorée.
+# Bornes calculées en LC_ALL=C (la locale du serveur ne doit pas traduire les mois).
+dnsbl_mta_rejects() {
+    local f now cut_iso cut_sys now_sys
+    now=$(date +%s)
+    cut_iso=$(LC_ALL=C date -d "@$((now - 86400))" '+%Y-%m-%dT%H:%M:%S' 2>/dev/null)
+    cut_sys=$(LC_ALL=C date -d "@$((now - 86400))" '+%m%d%H%M%S' 2>/dev/null)
+    now_sys=$(LC_ALL=C date -d "@$now" '+%m%d%H%M%S' 2>/dev/null)
+    for f in "$RANGE_SMTP_LOG.1" "$RANGE_SMTP_LOG"; do [ -r "$f" ] && cat "$f"; done 2>/dev/null \
+    | awk -v ci="$cut_iso" -v cs="$cut_sys" -v ns="$now_sys" '
+        BEGIN { split("Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec", m, " "); for (i = 1; i <= 12; i++) mo[m[i]] = sprintf("%02d", i) }
+        /postfix\/smtp\[/ && /status=(bounced|deferred)/ {
+            low = tolower($0)
+            if (low !~ /(blocked|block ?list|blacklist|listed|spamhaus|abusix|barracuda|spamcop|uceprotect|reputation|dnsbl|rbl)/) next
+            if ($1 ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T/) { if (substr($1, 1, 19) < ci) next }
+            else if ($1 in mo) { k = mo[$1] sprintf("%02d", $2) substr($3, 1, 2) substr($3, 4, 2) substr($3, 7, 2); if (k < cs || k > ns) next }
+            else next
+            n++; last = $0
+        }
+        END {
+            if (!n) { print "0||"; exit }
+            r = "?"; if (match(last, /relay=[^ ,]+/)) r = substr(last, RSTART + 6, RLENGTH - 6)
+            why = ""; if (match(last, /status=[a-z]+ \(.*\)/)) { why = substr(last, RSTART, RLENGTH); sub(/^status=[a-z]+ \(/, "", why); sub(/\)$/, "", why) }
+            gsub(/[|\r]/, " ", why); if (length(why) > 140) why = substr(why, 1, 140) "…"
+            print n "|" r "|" why
+        }'
+}
+
+health_dnsbl_check() {
+    diag_is_on "${HEALTH_DNSBL:-true}" || return 0
+    # Sans objet sur un serveur qui n'envoie pas de mail (ni MTA, ni journal du MTA)
+    command -v postfix >/dev/null 2>&1 || [ -x /usr/sbin/postfix ] || [ -r "$RANGE_SMTP_LOG" ] || return 0
+    local ips ip rev l ans listed lst na=" " n_ip=0 n_lists=0 nrej relay why
+    ips=${DNSBL_IPS:-${SELF_IPS//|/ }}
+    for l in $HEALTH_DNSBL_LISTS; do n_lists=$((n_lists + 1)); done
+    for ip in $ips; do
+        dnsbl_public_ip "$ip" || continue
+        n_ip=$((n_ip + 1)); listed=""
+        rev=$(printf '%s' "$ip" | awk -F. '{print $4 "." $3 "." $2 "." $1}')
+        for l in $HEALTH_DNSBL_LISTS; do
+            ans=$(timeout "$DNSBL_TIMEOUT" $DNSBL_LOOKUP_CMD "$rev.$l" 2>/dev/null | awk 'NR == 1 {print $1}')
+            case "$ans" in
+                '') ;;
+                127.255.255.*) case "$na" in *" $l "*) ;; *) na="$na$l " ;; esac ;;
+                127.*) listed="${listed:+$listed, }$l ($ans)" ;;
+                *) case "$na" in *" $l "*) ;; *) na="$na$l " ;; esac ;;
+            esac
+        done
+        [ -n "$listed" ] && health_line warn "$(t diag.health_dnsbl_listed "$ip" "$listed" "$ip")"
+        lst="$lst$listed"
+    done
+    if [ "$n_ip" -gt 0 ] && [ -z "$lst" ]; then health_line ok "$(t diag.health_dnsbl_ok "$n_ip" "$n_lists")"; fi
+    na=$(printf '%s' "$na" | awk '{$1 = $1; gsub(/ /, ", "); print}')
+    [ -n "$na" ] && [ "$n_ip" -gt 0 ] && health_line ok "$(t diag.health_dnsbl_na "$na")"
+    IFS='|' read -r nrej relay why <<< "$(dnsbl_mta_rejects)"
+    case "$nrej" in ''|*[!0-9]*) nrej=0 ;; esac
+    [ "$nrej" -gt 0 ] && health_line warn "$(t diag.health_mta_rejects "$nrej" "$relay" "$why")"
+    return 0
+}
+
 # Débit octets/s => forme humaine (kB/MB), pour la ligne réseau. Borné à 0 (wrap de compteur).
 health_rate() { awk -v b="${1:-0}" 'BEGIN{ if (b < 0) b = 0; if (b >= 1048576) printf "%.1f MB", b/1048576; else printf "%.0f kB", b/1024 }'; }
 
@@ -4751,6 +4859,9 @@ run_health_checks() {
     else
         health_line ok "$(t diag.health_mta_none)"
     fi
+
+    # d2. Listes noires (DNSBL) et refus de réputation au journal du MTA (muet sans MTA)
+    health_dnsbl_check
 
     # e. Pression IO (PSI, noyau >= 4.20) — instantané, sans échantillonnage
     if [ -r /proc/pressure/io ]; then

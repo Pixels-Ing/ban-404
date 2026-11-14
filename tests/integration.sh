@@ -827,3 +827,48 @@ OUT=$(bash "$ENGINE" health 2>&1 || true)
 printf '%s\n' "$OUT" | grep -q 'RAID' && { printf '%s\n' "$OUT"; fail "18 : sans grappe, aucune ligne RAID"; }
 ok "sans RAID logiciel : muet"
 sed -i '/^MDSTAT_FILE=/d; /^BAN404_LANG=fr$/d' /etc/ban_404.conf; rm -f "$MD18"
+
+echo "== Test 19 : listes noires (DNSBL) et refus de réputation au journal du MTA =="
+# Incident de nov. 2026 : IP d'un serveur inscrite chez Abusix, mails d'une boutique refusés par
+# Orange pendant 2 jours sans que rien ne le signale.
+DNS19=$FIX/dnsbl-lookup.sh; ML19=$FIX/mail.log
+cat > "$DNS19" <<'DNS'
+#!/bin/bash
+# Fausse résolution A : zen => inscrite ; barracuda => résolveur refusé ; le reste => absente.
+case "$1" in
+  5.113.0.203.zen.spamhaus.org)       echo "127.0.0.2       STREAM 5.113.0.203.zen.spamhaus.org" ;;
+  5.113.0.203.b.barracudacentral.org) echo "127.255.255.254 STREAM x" ;;
+esac
+exit 0
+DNS
+chmod +x "$DNS19"
+maint=$(LC_ALL=C date '+%b %e %H:%M:%S'); vieux=$(LC_ALL=C date -d '-2 days' '+%b %e %H:%M:%S')
+cat > "$ML19" <<ML
+$vieux srv postfix/smtp[11]: AAA1: to=<a@orange.fr>, relay=smtp-in.orange.fr[80.12.26.32]:25, delay=1, status=deferred (host smtp-in.orange.fr[80.12.26.32] refused to talk to me: 550 IP blocked by Abusix)
+$maint srv postfix/smtp[12]: AAA2: to=<b@orange.fr>, relay=smtp-in.orange.fr[80.12.26.32]:25, delay=1, status=deferred (host smtp-in.orange.fr[80.12.26.32] refused to talk to me: 550 Adresse IP source bloquee par Abusix)
+$maint srv postfix/smtp[13]: AAA3: to=<c@exemple.com>, relay=none, delay=30, status=deferred (connect to exemple.com[192.0.2.1]:25: Connection timed out)
+ML
+printf 'DNSBL_LOOKUP_CMD=%s\nDNSBL_IPS="203.0.113.5 10.0.0.5"\nRANGE_SMTP_LOG=%s\nBAN404_LANG=fr\n' "$DNS19" "$ML19" >> /etc/ban_404.conf
+OUT=$(bash "$ENGINE" health 2>&1 || true)
+printf '%s\n' "$OUT" | grep -q '\[WARN\].*Liste noire : 203.0.113.5 INSCRITE sur zen.spamhaus.org (127.0.0.2)' || { printf '%s\n' "$OUT"; fail "19 : inscription sur zen doit sortir en [WARN]"; }
+ok "IP inscrite : [WARN] avec la liste et le code"
+printf '%s\n' "$OUT" | grep -q 'blacklist%3a203.0.113.5' || { printf '%s\n' "$OUT"; fail "19 : lien de vérification attendu"; }
+ok "lien de vérification présent"
+printf '%s\n' "$OUT" | grep -q '\[ OK \].*Listes noires non vérifiables.*b.barracudacentral.org' || { printf '%s\n' "$OUT"; fail "19 : réponse 127.255.255.x = non vérifiable, pas inscrite"; }
+printf '%s\n' "$OUT" | grep -q 'INSCRITE sur.*barracuda' && { printf '%s\n' "$OUT"; fail "19 : barracuda (résolveur refusé) ne doit pas compter comme inscription"; }
+ok "résolveur refusé : non vérifiable, jamais « inscrite »"
+printf '%s\n' "$OUT" | grep -q '10.0.0.5' && { printf '%s\n' "$OUT"; fail "19 : une adresse privée ne doit pas être vérifiée"; }
+ok "adresse privée ignorée"
+printf '%s\n' "$OUT" | grep -q '\[WARN\].*Mails refusés pour réputation : 1 tentative(s) en 24 h (dernière : smtp-in.orange.fr' || { printf '%s\n' "$OUT"; fail "19 : un seul refus de réputation dans les 24 h"; }
+ok "refus de réputation : 1 en 24 h (ancien et hors réputation ignorés)"
+printf 'HEALTH_DNSBL_LISTS="bl.spamcop.net psbl.surriel.com"\n' >> /etc/ban_404.conf
+: > "$ML19"
+OUT=$(bash "$ENGINE" health 2>&1 || true)
+printf '%s\n' "$OUT" | grep -q '\[ OK \].*Listes noires : 1 adresse(s) absente(s) des 2 listes consultées' || { printf '%s\n' "$OUT"; fail "19 : adresse absente des listes => OK"; }
+printf '%s\n' "$OUT" | grep -q 'refusés pour réputation' && { printf '%s\n' "$OUT"; fail "19 : journal vide => aucun refus"; }
+ok "aucune inscription ni refus : une ligne OK"
+printf 'HEALTH_DNSBL=false\n' >> /etc/ban_404.conf
+OUT=$(bash "$ENGINE" health 2>&1 || true)
+printf '%s\n' "$OUT" | grep -q 'Listes noires' && { printf '%s\n' "$OUT"; fail "19 : HEALTH_DNSBL=false => muet"; }
+ok "HEALTH_DNSBL=false : muet"
+sed -i '/^DNSBL_LOOKUP_CMD=/d; /^DNSBL_IPS=/d; /^RANGE_SMTP_LOG=/d; /^HEALTH_DNSBL/d; /^BAN404_LANG=fr$/d' /etc/ban_404.conf; rm -f "$DNS19" "$ML19"

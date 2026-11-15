@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="2.3.24"
+BAN404_VERSION="2.3.25"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -4719,6 +4719,9 @@ dnsbl_public_ip() {  # $1 = IPv4 ; 0 si publique (hors privées, CGNAT, lien loc
 # rotaté) : « count|relais|motif » du dernier. Dates au format syslog (« Nov 14 10:35:32 », mois
 # anglais de rsyslog) OU ISO (« 2026-11-14T10:35:32 ») ; une ligne d'un autre format est ignorée.
 # Bornes calculées en LC_ALL=C (la locale du serveur ne doit pas traduire les mois).
+# Les mots-clés ne sont cherchés que dans la RÉPONSE du serveur distant, jamais dans le nom du
+# relais (depuis 2.3.25) : une passerelle « …barracudanetworks.com » qui répond « 451 domain not
+# found » (domaine du destinataire mal configuré chez lui) n'est pas un refus de réputation.
 dnsbl_mta_rejects() {
     local f now cut_iso cut_sys now_sys
     now=$(date +%s)
@@ -4730,7 +4733,9 @@ dnsbl_mta_rejects() {
         BEGIN { split("Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec", m, " "); for (i = 1; i <= 12; i++) mo[m[i]] = sprintf("%02d", i) }
         /postfix\/smtp\[/ && /status=(bounced|deferred)/ {
             low = tolower($0)
-            if (low !~ /(blocked|block ?list|blacklist|listed|spamhaus|abusix|barracuda|spamcop|uceprotect|reputation|dnsbl|rbl)/) next
+            if (!match(low, /status=(bounced|deferred) \(/)) next
+            rep = substr(low, RSTART + RLENGTH); sub(/^host [^ ]+ /, "", rep)
+            if (rep !~ /(blocked|block ?list|blacklist|listed|spamhaus|abusix|barracuda|spamcop|uceprotect|reputation|dnsbl|rbl)/) next
             if ($1 ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T/) { if (substr($1, 1, 19) < ci) next }
             else if ($1 in mo) { k = mo[$1] sprintf("%02d", $2) substr($3, 1, 2) substr($3, 4, 2) substr($3, 7, 2); if (k < cs || k > ns) next }
             else next

@@ -847,6 +847,7 @@ cat > "$ML19" <<ML
 $vieux srv postfix/smtp[11]: AAA1: to=<a@orange.fr>, relay=smtp-in.orange.fr[80.12.26.32]:25, delay=1, status=deferred (host smtp-in.orange.fr[80.12.26.32] refused to talk to me: 550 IP blocked by Abusix)
 $maint srv postfix/smtp[12]: AAA2: to=<b@orange.fr>, relay=smtp-in.orange.fr[80.12.26.32]:25, delay=1, status=deferred (host smtp-in.orange.fr[80.12.26.32] refused to talk to me: 550 Adresse IP source bloquee par Abusix)
 $maint srv postfix/smtp[13]: AAA3: to=<c@exemple.com>, relay=none, delay=30, status=deferred (connect to exemple.com[192.0.2.1]:25: Connection timed out)
+$maint srv postfix/smtp[14]: AAA4: to=<d@client.test>, relay=d1.a.ess.de.barracudanetworks.com[18.185.115.252]:25, delay=1, status=deferred (host d1.a.ess.de.barracudanetworks.com[18.185.115.252] said: 451 domain not found (not relaying for 203.0.113.5) (in reply to RCPT TO command))
 ML
 printf 'DNSBL_LOOKUP_CMD=%s\nDNSBL_IPS="203.0.113.5 10.0.0.5"\nRANGE_SMTP_LOG=%s\nBAN404_LANG=fr\n' "$DNS19" "$ML19" >> /etc/ban_404.conf
 OUT=$(bash "$ENGINE" health 2>&1 || true)
@@ -860,7 +861,7 @@ ok "résolveur refusé : non vérifiable, jamais « inscrite »"
 printf '%s\n' "$OUT" | grep -q '10.0.0.5' && { printf '%s\n' "$OUT"; fail "19 : une adresse privée ne doit pas être vérifiée"; }
 ok "adresse privée ignorée"
 printf '%s\n' "$OUT" | grep -q '\[WARN\].*Mails refusés pour réputation : 1 tentative(s) en 24 h (dernière : smtp-in.orange.fr' || { printf '%s\n' "$OUT"; fail "19 : un seul refus de réputation dans les 24 h"; }
-ok "refus de réputation : 1 en 24 h (ancien et hors réputation ignorés)"
+ok "refus de réputation : 1 en 24 h (ancien, hors réputation et nom de relais « barracuda » ignorés)"
 printf 'HEALTH_DNSBL_LISTS="bl.spamcop.net psbl.surriel.com"\n' >> /etc/ban_404.conf
 : > "$ML19"
 OUT=$(bash "$ENGINE" health 2>&1 || true)

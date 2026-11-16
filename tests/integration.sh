@@ -564,6 +564,12 @@ v=$(spf_verdict "\"v=spf1 mx a include:_spf.google.com ~all\"")
 [ "$v" = "OK" ] || fail "13d : un SPF qui délègue ne doit PAS produire de [WARN] (obtenu : ${v:-<aucune ligne>})"
 ok "SPF délégué (include/a/mx) : signalé non vérifiable, sans faux positif"
 
+# 2.3.26. Un TXT > 255 car. arrive en plusieurs chaînes, recollées SANS espace (RFC 7208 §3.3).
+# Coupée au milieu de notre IP, elle donnait un faux [WARN] (PE MAG, 16 nov. 2026).
+v=$(spf_verdict "\"v=spf1 ip4:203.0.113.1 ip4:${MYIP%.*}.\" \"${MYIP##*.} ~all\"")
+[ "$v" = "OK" ] || fail "13e : une IP coupée entre deux chaînes TXT doit donner [ OK ] (obtenu : ${v:-<aucune ligne>})"
+ok "SPF en plusieurs chaînes, IP coupée en deux : recollée, [ OK ]"
+
 sed -i '/^# test13-debut$/,/^# test13-fin$/d' /etc/ban_404.conf
 rm -rf "$SPFD"
 

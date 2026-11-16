@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="2.3.25"
+BAN404_VERSION="2.3.26"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -4313,7 +4313,11 @@ diag_check_spf_from() {
     dom="${env##*@}"
     case "$dom" in ""|"$env") return 0 ;; esac      # NOTIFY_FROM sans @ : rien à vérifier
     if ! spf=$(dns_txt "$dom"); then diag_line ok "$(t diag.spf_nocheck "$dom")"; return 0; fi
-    spf=$(printf '%s' "$spf" | tr -d '"' | grep -m1 'v=spf1')
+    # Un TXT de plus de 255 caractères est publié en PLUSIEURS chaînes (`"…" "…"`) que le
+    # destinataire recolle SANS espace (RFC 7208 §3.3). Supprimer les seuls guillemets laissait un
+    # espace là où le DNS avait coupé : coupée au milieu d'une IP (`ip4:51.91." "80.105`), elle
+    # devenait deux jetons faux et le diag accusait le SPF à tort (PE MAG, 16 nov. 2026).
+    spf=$(printf '%s' "$spf" | sed 's/"[[:space:]]*"//g; s/"//g' | grep -m1 'v=spf1')
     if [ -z "$spf" ]; then diag_line warn "$(t diag.spf_none "$dom")"; return 0; fi
     ip=$(local_source_ip)
     if [ -z "$ip" ]; then diag_line ok "$(t diag.spf_nocheck "$dom")"; return 0; fi

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BAN404_VERSION="2.3.26"
+BAN404_VERSION="2.3.27"
 
 # Configuration (valeurs par défaut ; surchargées par /etc/ban_404.conf)
 BASE_DIR="/var/www"
@@ -222,7 +222,6 @@ DNSBL_IPS=""
 # sourcing) ; promotion en réglages documentés = suivi trivial si besoin.
 TREND_FLAT_PCT=2        # |Δ 24 h| < N %  => AUCUN triangle (calme), nombre en neutre
 TREND_STRONG_PCT=10     # |Δ 24 h| >= N % => triangle DOUBLE (fort)
-TREND_RECENT_WINDOW=10800  # fenêtre « tendance récente » (s) = 3 h (pente des dernières heures)
 TREND_RECENT_FLAT_PCT=1    # seuils plus serrés que 24 h (fenêtre courte => petits mouvements)
 TREND_RECENT_STRONG_PCT=5
 TREND_SPARK_MAX=8          # longueur max de la sparkline (graphe COURT ; sous-échantillonnage régulier au-delà)
@@ -3708,7 +3707,7 @@ build_stats_text() {
         fi
         if [ -n "$tophp" ]; then
             printf '\n── %s ──\n' "$(t stats.top_hp_header)"
-            while read -r kind sc ip; do
+            while read -r _ sc ip; do
                 [ -z "$ip" ] && continue
                 rdns=""; if resolve_ptr_on; then rdns=$(reverse_dns "$ip"); fi
                 if [ "${sc:-0}" -gt 0 ] 2>/dev/null; then
@@ -4089,6 +4088,7 @@ fmt_duration() {  # $1 = secondes
 # plus récent *access.log en écartant yesterday-access.log (symlink ISPConfig périmé, jamais le bon).
 # Vide si aucun. Factorisé : utilisé par discover_valid_logs ET la découverte du diag (anti-divergence ;
 # futur point d'entrée des profils de layout, Phase 2 de l'universalisation).
+# shellcheck disable=SC2010  # tri par date (ls -t) voulu ; noms de journaux ISPConfig, sans blanc
 candidate_log_for_dir() {  # $1 = dossier terminé par /log/
     if [ -f "${1}access.log" ]; then printf '%s' "${1}access.log"
     else ls -1t "${1}"*access.log 2>/dev/null | grep -v '/yesterday-access\.log$' | head -n 1; fi
@@ -4798,7 +4798,7 @@ run_health_checks() {
     diag_is_on "${HEALTH_CHECKS:-true}" || return 0
     HEALTH_DONE=true
     local l1 l5 l15 cores up mem_total mem_avail mem_pct swap_pct
-    local root_dev var_dev q_raw queue running io iface rx1 tx1 rx2 tx2 failed n_failed
+    local root_dev var_dev q_raw queue io iface rx1 tx1 rx2 tx2 failed n_failed
 
     # a. Charge (load average) + uptime — WARN si load 15 min > HEALTH_LOAD_WARN x cœurs
     if [ -r /proc/loadavg ]; then
@@ -5117,7 +5117,7 @@ is_legit_crawler() {
     case "$rdns" in
         *.googlebot.com|*.google.com|*.search.msn.com|*.bing.com|\
         *.yandex.com|*.yandex.net|*.yandex.ru|\
-        *.apple.com|*.applebot.apple.com|*.baidu.com) ;;
+        *.apple.com|*.baidu.com) ;;   # *.applebot.apple.com inclus dans *.apple.com
         *) return 1 ;;
     esac
 

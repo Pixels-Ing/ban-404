@@ -1,0 +1,8 @@
+# Réglages shellcheck du dépôt (lus par check.sh et la CI).
+# Guillemets typographiques des traductions (« » „ “) : voulus.
+disable=SC1111,SC1112
+# Configuration sourcée depuis un chemin variable (/etc/ban_404.conf) : voulu.
+disable=SC1090
+# Tables de traduction T_xx et variables de configuration C_* lues par leur nom
+# (références indirectes) : shellcheck les croit inutilisées.
+disable=SC2034

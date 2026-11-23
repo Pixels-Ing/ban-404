@@ -6,7 +6,7 @@
 # à la conf si elle est absente (langue héritée du shell/système, sinon en).
 set -u
 
-UPDATER_VERSION="1.4.10"
+UPDATER_VERSION="1.4.11"
 CONF_FILE="/etc/ban_404.conf"
 TARGET="/usr/local/sbin/ban_404.sh"
 SELF="/usr/local/sbin/update_ban_404.sh"
@@ -402,7 +402,9 @@ reconcile_conf() {  # $1 = chemin de la conf
         if [[ "$t" =~ ^([A-Za-z_][A-Za-z0-9_]*)= ]]; then ACTIVE["${BASH_REMATCH[1]}"]="$t"; fi
     done < "$f"
     # 2) Réécriture canonique.
-    tmp=$(mktemp) || return 1
+    # Temporaire dans le MEME dossier que la conf : le mv final est alors un simple
+    # renommage, atomique (cf. plus bas).
+    tmp=$(mktemp "$f.tmp.XXXXXX") || return 1
     {
         printf '%s\n' "${C_FHDR[@]}"
         printf '\n'; printf '%s\n' "${C_REPO[@]}"
@@ -427,8 +429,17 @@ reconcile_conf() {  # $1 = chemin de la conf
             printf '%s\n' "${ACTIVE[$k]}"
         done
     } > "$tmp"
-    cat "$tmp" > "$f"
-    rm -f "$tmp"
+    # Bascule ATOMIQUE, et seulement si le contenu change. Un « cat tmp > conf » vidait la
+    # conf un instant à CHAQUE passage : le tick CRON_STEP de 06:25 (même minute que
+    # cron.daily) a ainsi lu une conf vide, cru CRON_STEP et DAILY_SUMMARY désactivés et
+    # retiré leurs deux crons (incident du 23/11/2026, un serveur sans résumé ce jour-là).
+    if cmp -s "$tmp" "$f"; then
+        rm -f "$tmp"
+    else
+        chmod --reference="$f" "$tmp" 2>/dev/null || chmod 600 "$tmp"
+        chown --reference="$f" "$tmp" 2>/dev/null
+        mv -f "$tmp" "$f" || { cat "$tmp" > "$f"; rm -f "$tmp"; }
+    fi
 }
 
 if [ -f "$CONF_FILE" ]; then
